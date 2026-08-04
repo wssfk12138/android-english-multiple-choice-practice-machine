@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { BookMarked, BookOpenText, Brain, Download, FileUp, Home, Library, MessageCircle, Moon, Settings, Sun } from 'lucide-vue-next'
-import { onMounted, ref } from 'vue'
+import { BookMarked, BookOpenText, Brain, Download, FileUp, Home, Library, MessageCircle, Moon, PackageCheck, Settings, Sun, Trash2 } from 'lucide-vue-next'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { platformRuntime } from './platform/runtime'
+import {
+  pendingInstallerCleanup,
+  resolveInstallerCleanup,
+  type PendingInstallerCleanup,
+} from './platform/android/app-update'
 
 const route = useRoute()
 const dark = ref(false)
+const installerCleanup = ref<PendingInstallerCleanup | null>(null)
+const installerCleanupBusy = ref(false)
+const installerCleanupError = ref('')
+const retainInstallerButton = ref<HTMLButtonElement | null>(null)
 function applyTheme() {
   document.documentElement.classList.toggle('dark', dark.value)
   localStorage.setItem('linjian-theme', dark.value ? 'dark' : 'light')
@@ -16,11 +25,68 @@ function toggleTheme() {
   applyTheme()
 }
 
-onMounted(() => {
+function installerSize(size: number) {
+  if (!Number.isFinite(size) || size < 1) return ''
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function finishInstallerCleanup(shouldDelete: boolean) {
+  if (installerCleanupBusy.value) return
+  installerCleanupBusy.value = true
+  installerCleanupError.value = ''
+  try {
+    await resolveInstallerCleanup(shouldDelete)
+    installerCleanup.value = null
+  } catch (cause) {
+    installerCleanupError.value = String(cause)
+  } finally {
+    installerCleanupBusy.value = false
+  }
+}
+
+function handleInstallerCleanupKeydown(event: KeyboardEvent) {
+  if (!installerCleanup.value) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    void finishInstallerCleanup(false)
+    return
+  }
+  if (event.key !== 'Tab') return
+  const buttons = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('.installer-cleanup-dialog button:not(:disabled)'),
+  )
+  if (!buttons.length) return
+  const first = buttons[0]
+  const last = buttons[buttons.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+onMounted(async () => {
   dark.value = localStorage.getItem('linjian-theme') === 'dark'
     || (!localStorage.getItem('linjian-theme') && matchMedia('(prefers-color-scheme: dark)').matches)
   applyTheme()
+  if (platformRuntime.isAndroid) {
+    try {
+      const pending = await pendingInstallerCleanup()
+      if (pending.pending) {
+        installerCleanup.value = pending
+        await nextTick()
+        retainInstallerButton.value?.focus()
+      }
+    } catch (cause) {
+      console.warn('Unable to inspect downloaded update package:', String(cause))
+    }
+  }
+  window.addEventListener('keydown', handleInstallerCleanupKeydown)
 })
+
+onBeforeUnmount(() => window.removeEventListener('keydown', handleInstallerCleanupKeydown))
 </script>
 
 <template>
@@ -28,6 +94,36 @@ onMounted(() => {
     class="app-shell"
     :class="{ 'practice-shell': route.path.startsWith('/practice') }"
   >
+    <section
+      v-if="installerCleanup"
+      class="installer-cleanup-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="installer-cleanup-title"
+      aria-describedby="installer-cleanup-description"
+    >
+      <div class="installer-cleanup-dialog card">
+        <span class="installer-cleanup-icon"><PackageCheck :size="28" /></span>
+        <div>
+          <span class="eyebrow">UPDATE COMPLETE</span>
+          <h2 id="installer-cleanup-title">是否删除安装包？</h2>
+          <p class="lead">
+            {{ installerCleanup.versionName ? `${installerCleanup.versionName} 已完成更新。` : '应用已完成更新。' }}
+            删除缓存中的安装包可以释放{{ installerSize(installerCleanup.size) || '存储' }}空间，不影响当前应用和学习数据。
+          </p>
+          <small id="installer-cleanup-description">{{ installerCleanup.fileName }}</small>
+        </div>
+        <div v-if="installerCleanupError" class="warning" role="alert">{{ installerCleanupError }}</div>
+        <div class="installer-cleanup-actions">
+          <button ref="retainInstallerButton" class="button secondary" type="button" :disabled="installerCleanupBusy" @click="finishInstallerCleanup(false)">
+            暂时保留
+          </button>
+          <button class="button" type="button" :disabled="installerCleanupBusy" @click="finishInstallerCleanup(true)">
+            <Trash2 :size="16" />{{ installerCleanupBusy ? '正在处理…' : '删除安装包' }}
+          </button>
+        </div>
+      </div>
+    </section>
     <aside class="sidebar" v-if="!route.path.startsWith('/practice')">
       <RouterLink class="brand" to="/">
         <span class="brand-mark"><img src="/assets/icons/brand-mark.png" alt="" /></span>

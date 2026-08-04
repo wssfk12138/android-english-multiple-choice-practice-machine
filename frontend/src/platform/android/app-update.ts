@@ -19,7 +19,21 @@ interface AppUpdaterPlugin {
     url: string
     sha256: string
     fileName: string
+    targetVersionCode: number
+    targetVersionName: string
   }): Promise<{ launched: boolean }>
+  getPendingInstallerCleanup(): Promise<PendingInstallerCleanup>
+  resolveInstallerCleanup(options: { delete: boolean }): Promise<{
+    deleted: boolean
+    retained: boolean
+  }>
+}
+
+export interface PendingInstallerCleanup {
+  pending: boolean
+  fileName: string
+  versionName: string
+  size: number
 }
 
 const NativeAppUpdater = registerPlugin<AppUpdaterPlugin>('AppUpdater')
@@ -73,14 +87,31 @@ export async function checkAppUpdate(): Promise<JsonRecord> {
 
 export async function installAppUpdate(body: JsonRecord): Promise<JsonRecord> {
   const manifest = body.manifest
-  if (!manifest?.apkUrl || !manifest?.apkSha256 || !manifest?.versionName) {
+  if (!manifest?.apkUrl
+    || !manifest?.apkSha256
+    || !manifest?.versionName
+    || !Number.isInteger(manifest?.versionCode)
+    || manifest.versionCode < 1) {
     throw new LocalApiError(400, '更新信息不完整，请重新检查更新')
   }
   return NativeAppUpdater.downloadAndInstall({
     url: manifest.apkUrl,
     sha256: manifest.apkSha256,
     fileName: `english-practice-machine-${manifest.versionName}.apk`,
+    targetVersionCode: manifest.versionCode,
+    targetVersionName: manifest.versionName,
   })
+}
+
+export async function pendingInstallerCleanup(): Promise<PendingInstallerCleanup> {
+  return NativeAppUpdater.getPendingInstallerCleanup()
+}
+
+export async function resolveInstallerCleanup(shouldDelete: boolean): Promise<{
+  deleted: boolean
+  retained: boolean
+}> {
+  return NativeAppUpdater.resolveInstallerCleanup({ delete: shouldDelete })
 }
 
 export async function checkQuestionBankCatalog(): Promise<JsonRecord> {

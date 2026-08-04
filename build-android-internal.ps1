@@ -1,6 +1,6 @@
 param(
-    [int]$VersionCode = 4,
-    [string]$VersionName = '0.1.0-alpha.4',
+    [int]$VersionCode = 5,
+    [string]$VersionName = '0.1.0-alpha.5',
     [string]$AppUpdateManifestUrl = '',
     [string]$QuestionBankCatalogUrl = '',
     [string]$DiagnosticReceiverUrl = ''
