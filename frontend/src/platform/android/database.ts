@@ -3,6 +3,7 @@ import {
   SQLiteConnection,
   type SQLiteDBConnection,
 } from '@capacitor-community/sqlite'
+import { createSerialQueue } from './serial-queue'
 
 const DB_NAME = 'english_practice_machine'
 const DB_VERSION = 1
@@ -281,22 +282,34 @@ export async function run(
   statement: string,
   values: unknown[] = [],
 ): Promise<{ changes: number; lastId?: number }> {
-  const result = await (await androidDatabase()).run(statement, values)
+  // 单条语句交给 SQLite 自动提交即可；显式事务由 transaction() 统一管理。
+  // 插件默认会在每次 run 内自行开启事务，事务内再调用会报 “Already in transaction”。
+  const result = await (await androidDatabase()).run(statement, values, false)
   return {
     changes: Number(result.changes?.changes || 0),
     lastId: result.changes?.lastId,
   }
 }
 
+const runTransactionSerially = createSerialQueue()
+
 export async function transaction<T>(operation: (db: SQLiteDBConnection) => Promise<T>): Promise<T> {
-  const db = await androidDatabase()
-  await db.beginTransaction()
-  try {
-    const result = await operation(db)
-    await db.commitTransaction()
-    return result
-  } catch (error) {
-    await db.rollbackTransaction()
-    throw error
-  }
+  return runTransactionSerially(async () => {
+    const db = await androidDatabase()
+    const active = await db.isTransactionActive()
+    if (active.result) await db.rollbackTransaction()
+    await db.beginTransaction()
+    try {
+      const result = await operation(db)
+      await db.commitTransaction()
+      return result
+    } catch (error) {
+      try {
+        if ((await db.isTransactionActive()).result) await db.rollbackTransaction()
+      } catch {
+        // Preserve the original operation error.
+      }
+      throw error
+    }
+  })
 }

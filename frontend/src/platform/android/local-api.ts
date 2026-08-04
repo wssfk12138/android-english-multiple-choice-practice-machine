@@ -163,6 +163,12 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (pathname === '/android/updates/question-banks/download' && method === 'POST') {
     return await downloadQuestionBankPackage(body || {}) as T
   }
+  if (pathname === '/android/diagnostics/settings' && method === 'GET') {
+    return await readUpdateSettings() as T
+  }
+  if (pathname === '/android/diagnostics/settings' && method === 'PUT') {
+    return await updateSettings(body || {}) as T
+  }
 
   throw new LocalApiError(501, `Android 本地接口尚未实现：${method} ${pathname}`)
 }

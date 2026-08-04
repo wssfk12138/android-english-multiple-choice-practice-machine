@@ -26,8 +26,10 @@ if ($existing) {
 }
 
 $python = @($pythonCandidates)[0]
+$env:INTERNAL_CHANNEL_PORT = [string]$Port
 $process = Start-Process -FilePath $python `
-    -ArgumentList @('-m', 'http.server', "$Port", '--bind', $BindAddress, '--directory', $channelRoot) `
+    -ArgumentList @((Join-Path $projectRoot 'diagnostic_receiver.py')) `
+    -WorkingDirectory $projectRoot `
     -WindowStyle Hidden `
     -PassThru
 [System.IO.File]::WriteAllText(
@@ -35,4 +37,4 @@ $process = Start-Process -FilePath $python `
     [string]$process.Id,
     (New-Object System.Text.UTF8Encoding($false))
 )
-Write-Host "Internal update server started. PID: $($process.Id), port: $Port"
+Write-Host "Internal update and diagnostic server started. PID: $($process.Id), port: $Port"

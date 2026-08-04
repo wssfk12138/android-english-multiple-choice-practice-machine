@@ -1,6 +1,8 @@
 import { App } from '@capacitor/app'
-import { Capacitor, registerPlugin } from '@capacitor/core'
+import { Capacitor, CapacitorHttp, registerPlugin } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
+import { row } from './database'
+import { LocalApiError } from './errors'
 
 export type DiagnosticCategory =
   | 'question_bank_import'
@@ -34,6 +36,14 @@ type DiagnosticContext = {
   schemaVersion?: string
 }
 
+type DiagnosticSendResult = {
+  sent: boolean
+  endpoint: string
+  count: number
+  status?: number
+  receiverMessage?: string
+}
+
 interface DiagnosticNativePlugin {
   getDeviceInfo(): Promise<{ androidVersion?: string, deviceModel?: string }>
   shareText(options: { text: string, fileName: string, title: string }): Promise<{ launched: boolean }>
@@ -62,6 +72,22 @@ function sanitizeUrl(raw: string): string {
   } catch {
     return raw
   }
+}
+
+function validateReceiverUrl(raw: string): string {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new LocalApiError(422, '日志接收端地址无效')
+  }
+  if (!['https:', 'http:'].includes(url.protocol)) {
+    throw new LocalApiError(422, '日志接收端只允许使用 HTTP 或 HTTPS')
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new LocalApiError(422, '日志接收端地址不能包含账号、密码、查询参数或片段')
+  }
+  return url.toString().replace(/\/$/, '')
 }
 
 export function sanitizeDiagnosticValue(value: unknown, limit = MAX_TECHNICAL_LENGTH): string {
@@ -199,6 +225,67 @@ function exportPayload(entries: DiagnosticLogEntry[]): string {
     privacyNotice: '日志已过滤密钥、请求参数、题库正文、答案正文、个人学习记录和本机完整路径。',
     entries,
   }, null, 2)
+}
+
+export function diagnosticPayload(entries: DiagnosticLogEntry[]): JsonRecord {
+  return {
+    format: 'english-practice-machine-diagnostics',
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    privacyNotice: '日志已过滤密钥、请求参数、题库正文、答案正文、个人学习记录和本机完整路径。',
+    entries,
+  }
+}
+
+type JsonRecord = Record<string, unknown>
+
+export async function sendDiagnosticLogs(receiverUrl?: string): Promise<DiagnosticSendResult> {
+  const entries = await readEntries()
+  if (!entries.length) return { sent: false, endpoint: '', count: 0 }
+  let raw = String(receiverUrl || '').trim()
+  if (!raw) {
+    const setting = await row<{ value: string }>(
+      'SELECT value FROM app_settings WHERE key = ?',
+      ['diagnostic_receiver_url'],
+    )
+    raw = String(setting?.value || '').trim()
+  }
+  const endpoint = validateReceiverUrl(raw)
+  if (JSON.stringify(entries).length > 1024 * 1024) {
+    throw new LocalApiError(413, '诊断日志超过 1 MiB，无法发送')
+  }
+  let response: { status: number, data: unknown }
+  try {
+    response = await CapacitorHttp.post({
+      url: endpoint,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-English-Practice-Diagnostics': '1',
+      },
+      data: diagnosticPayload(entries),
+      connectTimeout: 10000,
+      readTimeout: 30000,
+    })
+  } catch (cause) {
+    throw new LocalApiError(502, `日志接收端连接失败：${sanitizeDiagnosticValue(cause, 300)}`)
+  }
+  if (response.status < 200 || response.status >= 300) {
+    const detail = sanitizeDiagnosticValue(response.data, 300)
+    throw new LocalApiError(400, `日志接收端返回 ${response.status}${detail ? `：${detail}` : ''}`)
+  }
+  const receiverMessage = typeof response.data === 'object' && response.data !== null
+    ? sanitizeDiagnosticValue((response.data as JsonRecord).message || (response.data as JsonRecord).status || '', 300)
+    : ''
+  return { sent: true, endpoint: sanitizeUrl(endpoint), count: entries.length, status: response.status, receiverMessage }
+}
+
+export async function readDiagnosticReceiverUrl(): Promise<string> {
+  const setting = await row<{ value: string }>(
+    'SELECT value FROM app_settings WHERE key = ?',
+    ['diagnostic_receiver_url'],
+  )
+  return setting?.value || ''
 }
 
 export async function copyDiagnosticLogs(): Promise<number> {

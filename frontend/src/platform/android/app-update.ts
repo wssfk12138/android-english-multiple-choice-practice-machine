@@ -11,6 +11,7 @@ type JsonRecord = Record<string, any>
 const BUILD_DEFAULTS: Record<string, string> = {
   app_update_manifest_url: String(import.meta.env.VITE_APP_UPDATE_MANIFEST_URL || '').trim(),
   question_bank_catalog_url: String(import.meta.env.VITE_QUESTION_BANK_CATALOG_URL || '').trim(),
+  diagnostic_receiver_url: String(import.meta.env.VITE_DIAGNOSTIC_RECEIVER_URL || '').trim(),
 }
 
 interface AppUpdaterPlugin {
@@ -37,7 +38,7 @@ async function setting(key: string): Promise<string> {
 }
 
 export async function updateSettings(body: JsonRecord): Promise<JsonRecord> {
-  for (const key of ['app_update_manifest_url', 'question_bank_catalog_url']) {
+  for (const key of ['app_update_manifest_url', 'question_bank_catalog_url', 'diagnostic_receiver_url']) {
     if (!(key in body)) continue
     await run(
       `INSERT INTO app_settings(key, value) VALUES (?, ?)
@@ -52,6 +53,7 @@ export async function readUpdateSettings(): Promise<JsonRecord> {
   return {
     app_update_manifest_url: await setting('app_update_manifest_url'),
     question_bank_catalog_url: await setting('question_bank_catalog_url'),
+    diagnostic_receiver_url: await setting('diagnostic_receiver_url'),
   }
 }
 

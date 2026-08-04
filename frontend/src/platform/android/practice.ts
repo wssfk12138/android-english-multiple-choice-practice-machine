@@ -413,7 +413,7 @@ async function transactionRun(
   values: unknown[] = [],
 ): Promise<void> {
   if (db) {
-    await db.run(statement, values)
+    await db.run(statement, values, false)
     return
   }
   await run(statement, values)
@@ -524,6 +524,7 @@ export async function submitUnit(sessionId: number, unitId: number): Promise<Jso
       `INSERT INTO practice_unit_submissions
         (session_id, unit_id, score, max_score) VALUES (?, ?, ?, ?)`,
       [sessionId, unitId, graded.score, graded.maxScore],
+      false,
     )
   })
   return getSession(sessionId)
@@ -568,6 +569,7 @@ export async function submitSession(sessionId: number): Promise<JsonRecord> {
          ON CONFLICT(session_id, unit_id) DO UPDATE SET
            score = excluded.score, max_score = excluded.max_score`,
         [sessionId, unitId, graded.score, graded.maxScore],
+        false,
       )
     }
     await db.run(
@@ -576,6 +578,7 @@ export async function submitSession(sessionId: number): Promise<JsonRecord> {
          score = ?, max_score = ?
        WHERE id = ?`,
       [score, maxScore, sessionId],
+      false,
     )
   })
   return getSession(sessionId)

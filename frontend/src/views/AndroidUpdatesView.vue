@@ -17,6 +17,8 @@ import {
   clearDiagnosticLogs,
   copyDiagnosticLogs,
   listDiagnosticLogs,
+  readDiagnosticReceiverUrl,
+  sendDiagnosticLogs,
   shareDiagnosticLogs,
   type DiagnosticLogEntry,
 } from '../platform/android/diagnostics'
@@ -25,6 +27,7 @@ const router = useRouter()
 const settings = reactive({
   app_update_manifest_url: '',
   question_bank_catalog_url: '',
+  diagnostic_receiver_url: '',
 })
 const appUpdate = ref<any>(null)
 const questionBankCatalog = ref<any>(null)
@@ -51,6 +54,9 @@ async function load() {
     error.value = String(cause)
   }
   await refreshLogs()
+  if (!settings.diagnostic_receiver_url) {
+    settings.diagnostic_receiver_url = await readDiagnosticReceiverUrl()
+  }
 }
 
 async function save() {
@@ -151,6 +157,25 @@ async function shareLogs() {
   }
 }
 
+async function sendLogs() {
+  error.value = ''
+  busy.value = 'send-logs'
+  try {
+    await put('/android/diagnostics/settings', {
+      diagnostic_receiver_url: settings.diagnostic_receiver_url,
+    })
+    const result = await sendDiagnosticLogs(settings.diagnostic_receiver_url)
+    notice.value = result.sent
+      ? `已直接发送 ${result.count} 条日志到接收端${result.receiverMessage ? `：${result.receiverMessage}` : ''}`
+      : '暂无可发送的诊断日志'
+  } catch (cause) {
+    error.value = `直接发送失败：${String(cause)}`
+    await refreshLogs()
+  } finally {
+    busy.value = ''
+  }
+}
+
 async function clearLogs() {
   if (!diagnosticLogs.value.length || !confirm('确认清空全部本地诊断日志吗？')) return
   await clearDiagnosticLogs()
@@ -185,6 +210,11 @@ onMounted(load)
       <div class="field">
         <label for="bank-update-url">远程题库目录 URL（可留空）</label>
         <input id="bank-update-url" v-model.trim="settings.question_bank_catalog_url" inputmode="url" placeholder="https://.../catalog.json">
+      </div>
+      <div class="field">
+        <label for="diagnostic-receiver-url">诊断日志接收端 URL（可留空）</label>
+        <input id="diagnostic-receiver-url" v-model.trim="settings.diagnostic_receiver_url" inputmode="url" placeholder="http://电脑IP:8877/diagnostics">
+        <small class="lead">填写开发端提供的接收地址后，可直接 POST 脱敏 JSON；不填写时仍可使用系统分享。</small>
       </div>
       <button class="button" type="button" :disabled="busy === 'save'" @click="save"><Save :size="16" />保存更新源</button>
     </section>
@@ -240,13 +270,18 @@ onMounted(load)
           <ClipboardCopy :size="16" />复制日志
         </button>
         <button class="button" type="button" :disabled="!diagnosticLogs.length" @click="shareLogs">
-          <Send :size="16" />导出并发送
+          <Send :size="16" />导出并系统分享
         </button>
         <button class="button ghost diagnostic-clear" type="button" :disabled="!diagnosticLogs.length" @click="clearLogs">
           <Trash2 :size="16" />清空
         </button>
       </div>
-      <p class="diagnostic-privacy">日志不会自动上传。只有点击“导出并发送”后，Android 才会打开系统分享界面，由你决定发送给谁。</p>
+      <p class="diagnostic-privacy">日志不会自动上传。填写接收端后，点击“直接发送”才会 POST 脱敏 JSON；“导出并分享”仍会打开 Android 系统分享界面作为备用方式。</p>
+      <div class="diagnostic-actions">
+        <button class="button" type="button" :disabled="!diagnosticLogs.length || !settings.diagnostic_receiver_url || busy === 'send-logs'" @click="sendLogs">
+          <Send :size="16" />{{ busy === 'send-logs' ? '发送中…' : '导出并发送到接收端' }}
+        </button>
+      </div>
       <div v-if="diagnosticLogs.length" class="diagnostic-list">
         <details v-for="item in diagnosticLogs" :key="item.id">
           <summary>

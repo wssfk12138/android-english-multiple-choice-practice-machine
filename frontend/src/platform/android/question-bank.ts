@@ -276,6 +276,7 @@ async function upsertPaper(
         paper.title || `${paper.year} 年英语试卷`,
         paperId,
       ],
+      false,
     )
   } else {
     const inserted = await db.run(
@@ -290,6 +291,7 @@ async function upsertPaper(
         paper.subject || manifest.subject || '英语一',
         paper.title || `${paper.year} 年英语试卷`,
       ],
+      false,
     )
     paperId = Number(inserted.changes?.lastId)
   }
@@ -329,6 +331,7 @@ async function upsertPaper(
            sequence = ?, passage = ?, shared_data = ?
          WHERE id = ?`,
         [...unitValues, unitId],
+        false,
       )
     } else {
       const insertedUnit = await db.run(
@@ -336,6 +339,7 @@ async function upsertPaper(
           (paper_id, external_key, unit_type, subtype, title, sequence, passage, shared_data)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [paperId, ...unitValues],
+        false,
       )
       unitId = Number(insertedUnit.changes?.lastId)
     }
@@ -371,7 +375,7 @@ async function upsertPaper(
       ]
       if (questionId) {
         if (oldQuestion?.content_hash && oldQuestion.content_hash !== contentHash) {
-          await db.run('DELETE FROM question_ai_labels WHERE question_id = ?', [questionId])
+          await db.run('DELETE FROM question_ai_labels WHERE question_id = ?', [questionId], false)
         }
         await db.run(
           `UPDATE questions SET
@@ -379,6 +383,7 @@ async function upsertPaper(
              answer = ?, score = ?, sequence = ?, metadata = ?, content_hash = ?
            WHERE id = ?`,
           [...questionValues, questionId],
+          false,
         )
       } else {
         const insertedQuestion = await db.run(
@@ -387,6 +392,7 @@ async function upsertPaper(
              score, sequence, metadata, content_hash)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [unitId, ...questionValues],
+          false,
         )
         questionId = Number(insertedQuestion.changes?.lastId)
       }
@@ -415,6 +421,7 @@ async function upsertPaper(
                 : {},
             ),
           ],
+          false,
         )
       }
       if (importedOptionKeys.length) {
@@ -423,6 +430,7 @@ async function upsertPaper(
            WHERE question_id = ?
              AND stable_key NOT IN (${importedOptionKeys.map(() => '?').join(',')})`,
           [questionId, ...importedOptionKeys],
+          false,
         )
       }
       const label = item.labels?.labels?.[question.questionKey]
@@ -445,6 +453,7 @@ async function upsertPaper(
             Number(label.confidence || 0),
             label.source || 'esq',
           ],
+          false,
         )
       }
     }
@@ -486,6 +495,7 @@ export async function publishEsqImport(
         job.package.manifest.publisher || '',
         JSON.stringify(job.package.manifest),
       ],
+      false,
     )
   })
   job.status = 'published'
