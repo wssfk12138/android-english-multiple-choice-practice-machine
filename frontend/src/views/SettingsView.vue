@@ -573,6 +573,8 @@ onMounted(() => {
             <div class="field"><label>Temperature</label><input v-model.number="profile.temperature" type="number" min="0" max="2" step=".1"></div>
             <div class="field"><label>最大输出 Token</label><input v-model.number="profile.max_tokens" type="number" min="100" step="100"></div>
           </div>
+          <p class="field-hint">Temperature 控制回答的随机性与创造性：值越低越稳定、越适合判分和事实类任务（错题分析、题库导入、单词翻译建议 0.2–0.5）；越高越发散，适合头脑风暴。</p>
+          <p class="field-hint">最大输出 Token 限制单次回复的最长输出：错题分析、批量标注等长文本任务若报“模型没有返回可显示的正文”或输出被截断，请调高该值（如 4000–8000）；日常对话保持默认即可。</p>
           <div class="field"><label>附加系统提示词</label><textarea v-model="profile.system_prompt" rows="3" placeholder="对该 API 下的模型统一生效"></textarea></div>
           <label class="default-profile-check">
             <input v-model="profile.is_default" type="checkbox" :disabled="profile.is_default">
