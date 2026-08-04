@@ -115,6 +115,24 @@ CREATE TABLE IF NOT EXISTS wrong_stats (
   last_wrong_at TEXT,
   last_attempt_at TEXT
 );
+CREATE TABLE IF NOT EXISTS wrong_analysis_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope_key TEXT NOT NULL DEFAULT '',
+  unit_ids TEXT NOT NULL DEFAULT '[]',
+  input_snapshot TEXT NOT NULL DEFAULT '{}',
+  scope_title TEXT NOT NULL DEFAULT '',
+  question_count INTEGER NOT NULL DEFAULT 0,
+  aggregate_data TEXT NOT NULL DEFAULT '{}',
+  report TEXT NOT NULL DEFAULT '',
+  model_name TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS wrong_analysis_states (
+  unit_id INTEGER PRIMARY KEY,
+  report_id INTEGER NOT NULL,
+  analyzed_session_id INTEGER NOT NULL DEFAULT 0,
+  analyzed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS vocabulary_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   term TEXT NOT NULL,
@@ -256,6 +274,10 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       const questionColumns = await db.query('PRAGMA table_info(questions)')
       if (!(questionColumns.values || []).some(column => column.name === 'content_hash')) {
         await db.execute("ALTER TABLE questions ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''")
+      }
+      const stateColumns = await db.query('PRAGMA table_info(wrong_analysis_states)')
+      if ((stateColumns.values || []).length && !(stateColumns.values || []).some(column => column.name === 'analyzed_session_id')) {
+        await db.execute('ALTER TABLE wrong_analysis_states ADD COLUMN analyzed_session_id INTEGER NOT NULL DEFAULT 0')
       }
       return db
     })()

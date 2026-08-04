@@ -56,6 +56,17 @@ type AnalysisAggregate = {
   uncertain_count: number
 }
 
+type AnalysisStatus = {
+  unit_id: number
+  report_id: number
+  scope_title: string
+  scope_key: string
+  locked: boolean
+  can_reanalyze: boolean
+  report: string
+  aggregate: AnalysisAggregate | null
+}
+
 const router = useRouter()
 const rows = ref<WrongRow[]>([])
 const frequentOnly = ref(false)
@@ -63,10 +74,12 @@ const error = ref('')
 const analysis = ref('')
 const analysisTitle = ref('')
 const analysisAggregate = ref<AnalysisAggregate | null>(null)
+const analysisNote = ref('')
 const analyzingKey = ref('')
 const startingKey = ref('')
 const openYears = ref(new Set<number>())
 const analysisReport = ref<HTMLElement | null>(null)
+const analysisStatuses = ref<Record<number, AnalysisStatus>>({})
 
 const visible = computed(() =>
   frequentOnly.value ? rows.value.filter(row => row.is_frequent) : rows.value,
@@ -128,6 +141,16 @@ watch(grouped, ensureDefaultOpen)
 async function load() {
   try {
     rows.value = await get<WrongRow[]>('/wrong')
+    try {
+      const statusResult: any = await get('/ai/wrong-analysis-status')
+      const map: Record<number, AnalysisStatus> = {}
+      for (const item of statusResult?.units || []) {
+        map[item.unit_id] = item
+      }
+      analysisStatuses.value = map
+    } catch {
+      // 状态接口不可用时仍可正常分析，后端会自行判断缓存与锁定。
+    }
     ensureDefaultOpen()
   } catch (e) {
     error.value = String(e)
@@ -170,11 +193,27 @@ async function analyzeScope(
   key: string,
   questionIds: number[],
   title: string,
+  unitIds: number[] = [],
 ) {
+  const scopeStatuses = unitIds
+    .map(unitId => analysisStatuses.value[unitId])
+    .filter(Boolean)
+  const lockedStatus = scopeStatuses.find(status => status?.locked)
+  if (lockedStatus) {
+    analysisTitle.value = title
+    analysis.value = lockedStatus.report
+    analysisAggregate.value = lockedStatus.aggregate || null
+    analysisNote.value = '以上是上次分析结果的本地缓存。完成这篇错题的下一次练习后，才能重新分析。'
+    await nextTick()
+    analysisReport.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    analysisReport.value?.focus({ preventScroll: true })
+    return
+  }
   analyzingKey.value = key
   error.value = ''
   analysis.value = ''
   analysisAggregate.value = null
+  analysisNote.value = ''
   analysisTitle.value = title
   try {
     const result: any = await post('/ai/analyze-wrong', {
@@ -188,6 +227,26 @@ async function analyzeScope(
     if (!content) throw new Error('模型没有返回可显示的分析内容')
     analysis.value = content
     analysisAggregate.value = result.aggregate || null
+    if (result?.cached) {
+      analysisNote.value = '以上是上次分析结果的本地缓存。完成这篇错题的下一次练习后，才能重新分析。'
+    } else {
+      analysisNote.value = '分析结果已缓存到本地；完成这篇错题的下一次练习后，可再次分析并对比两次作答。'
+    }
+    for (const unitId of unitIds) {
+      analysisStatuses.value = {
+        ...analysisStatuses.value,
+        [unitId]: {
+          unit_id: unitId,
+          report_id: Number(result?.report_id || 0),
+          scope_title: title,
+          scope_key: '',
+          locked: true,
+          can_reanalyze: false,
+          report: content,
+          aggregate: result?.aggregate || null,
+        },
+      }
+    }
     await nextTick()
     analysisReport.value?.scrollIntoView({
       behavior: 'smooth',
@@ -199,6 +258,15 @@ async function analyzeScope(
   } finally {
     analyzingKey.value = ''
   }
+}
+
+function analysisLabel(unitIds: number[]): string {
+  const statuses = unitIds
+    .map(unitId => analysisStatuses.value[unitId])
+    .filter(Boolean)
+  if (statuses.some(status => status.locked)) return '查看分析'
+  if (statuses.length) return '重新分析'
+  return '分析错题'
 }
 </script>
 
@@ -227,7 +295,7 @@ async function analyzeScope(
           <span class="eyebrow">AI REVIEW</span>
           <h3>{{ analysisTitle }}分析</h3>
         </div>
-        <button class="button ghost" @click="analysis='';analysisAggregate=null">收起</button>
+        <button class="button ghost" @click="analysis='';analysisAggregate=null;analysisNote=''">收起</button>
       </div>
       <div v-if="analysisAggregate" class="wrong-analysis-summary">
         <div class="wrong-analysis-total">
@@ -254,6 +322,7 @@ async function analyzeScope(
         </p>
       </div>
       <div>{{ analysis }}</div>
+      <p v-if="analysisNote" class="wrong-analysis-cache-note">{{ analysisNote }}</p>
     </div>
 
     <section v-if="visible.length" class="wrong-overview" aria-label="错题概览">
@@ -303,10 +372,10 @@ async function analyzeScope(
               class="button secondary compact"
               type="button"
               :disabled="Boolean(analyzingKey)"
-              @click="analyzeScope(`year-${yearGroup.year}`, yearGroup.questionIds, `${yearGroup.year} 年`)"
+              @click="analyzeScope(`year-${yearGroup.year}`, yearGroup.questionIds, `${yearGroup.year} 年`, yearGroup.units.map(unit => unit.unitId))"
             >
               <Sparkles :size="15" />
-              {{ analyzingKey === `year-${yearGroup.year}` ? '分析中…' : '分析错题' }}
+              {{ analyzingKey === `year-${yearGroup.year}` ? '分析中…' : analysisLabel(yearGroup.units.map(unit => unit.unitId)) }}
             </button>
             <button
               class="button compact"
@@ -344,10 +413,10 @@ async function analyzeScope(
                 class="button secondary compact"
                 type="button"
                 :disabled="Boolean(analyzingKey)"
-                @click="analyzeScope(`unit-${unit.unitId}`, unit.questionIds, `${yearGroup.year} 年${unit.title}`)"
+                @click="analyzeScope(`unit-${unit.unitId}`, unit.questionIds, `${yearGroup.year} 年${unit.title}`, [unit.unitId])"
               >
                 <Sparkles :size="15" />
-                {{ analyzingKey === `unit-${unit.unitId}` ? '分析中…' : '分析错题' }}
+                {{ analyzingKey === `unit-${unit.unitId}` ? '分析中…' : analysisLabel([unit.unitId]) }}
               </button>
               <button
                 class="button compact"

@@ -1,5 +1,5 @@
 import { secureStore } from '../secure-store'
-import { row, rows, run } from './database'
+import { row, rows, run, transaction } from './database'
 import { LocalApiError } from './errors'
 import { nativeJson } from './native-http'
 
@@ -419,30 +419,189 @@ export async function translateVocabularyEntries(entryIds: number[]): Promise<nu
   return translated
 }
 
+function scopeKeyOf(unitIds: number[]): string {
+  return [...new Set(unitIds)].sort((left, right) => left - right).join(',')
+}
+
+async function latestWrongSnapshot(
+  unitIds: number[],
+  questionIds: number[],
+): Promise<JsonRecord> {
+  const placeholders = questionIds.map(() => '?').join(',')
+  const snapshot: JsonRecord = {}
+  for (const unitId of unitIds) {
+    const questionRows = await rows<JsonRecord>(
+      `SELECT q.id, q.number,
+         (SELECT pa.user_answer
+          FROM practice_answers pa
+          JOIN practice_sessions ps ON ps.id = pa.session_id
+          WHERE pa.question_id = q.id AND pa.is_correct IS NOT NULL
+            AND TRIM(pa.user_answer) <> ''
+          ORDER BY COALESCE(ps.submitted_at, pa.answered_at) DESC, pa.id DESC
+          LIMIT 1) AS user_answer
+       FROM questions q
+       WHERE q.unit_id = ? AND q.id IN (${placeholders})
+       ORDER BY q.sequence`,
+      [unitId, ...questionIds],
+    )
+    snapshot[String(unitId)] = {
+      errors: questionRows
+        .filter(item => item.user_answer)
+        .map(item => ({
+          question_id: Number(item.id),
+          number: Number(item.number),
+          selected: String(item.user_answer),
+        })),
+    }
+  }
+  return snapshot
+}
+
+function parseJsonObject(value: unknown): JsonRecord {
+  try {
+    const parsed = JSON.parse(String(value || '{}'))
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+export async function analyzeWrongStatus(): Promise<JsonRecord> {
+  const states = await rows<JsonRecord>(
+    `SELECT s.unit_id, s.report_id, s.analyzed_session_id,
+       r.scope_key, r.scope_title, r.report, r.aggregate_data
+     FROM wrong_analysis_states s
+     JOIN wrong_analysis_reports r ON r.id = s.report_id
+     ORDER BY s.unit_id`,
+  )
+  const units = []
+  for (const state of states) {
+    const completed = await row(
+      `SELECT 1 AS found FROM practice_unit_submissions
+       WHERE unit_id = ? AND session_id > ? LIMIT 1`,
+      [state.unit_id, state.analyzed_session_id],
+    )
+    units.push({
+      unit_id: Number(state.unit_id),
+      report_id: Number(state.report_id),
+      scope_title: state.scope_title,
+      scope_key: state.scope_key,
+      locked: !completed,
+      can_reanalyze: Boolean(completed),
+      report: state.report,
+      aggregate: parseJsonObject(state.aggregate_data),
+    })
+  }
+  return { units }
+}
+
 export async function analyzeWrongQuestions(
   questionIds: number[],
   scopeTitle: string,
 ): Promise<JsonRecord> {
   if (!questionIds.length) throw new LocalApiError(400, '没有可分析的错题')
+  const normalized = [...new Set(questionIds.map(Number).filter(Boolean))]
+  const placeholders = normalized.map(() => '?').join(',')
+  const unitRows = await rows<{ unit_id: number }>(
+    `SELECT DISTINCT unit_id FROM questions WHERE id IN (${placeholders})`,
+    normalized,
+  )
+  const unitIds = unitRows.map(item => Number(item.unit_id))
+  if (!unitIds.length) throw new LocalApiError(400, '没有可分析的篇目')
+  const scopeKey = scopeKeyOf(unitIds)
+
+  const report = await row<JsonRecord>(
+    `SELECT * FROM wrong_analysis_reports
+     WHERE scope_key = ? ORDER BY id DESC LIMIT 1`,
+    [scopeKey],
+  )
+  const states = await rows<JsonRecord>(
+    `SELECT unit_id, report_id, analyzed_session_id, analyzed_at
+     FROM wrong_analysis_states
+     WHERE unit_id IN (${unitIds.map(() => '?').join(',')})`,
+    unitIds,
+  )
+  const statesByUnit = new Map<number, JsonRecord>()
+  for (const state of states) statesByUnit.set(Number(state.unit_id), state)
+
+  let allRetried = true
+  const lockedReportIds: number[] = []
+  for (const unitId of unitIds) {
+    const state = statesByUnit.get(unitId)
+    if (!state) continue
+    const completed = await row(
+      `SELECT 1 AS found FROM practice_unit_submissions
+       WHERE unit_id = ? AND session_id > ? LIMIT 1`,
+      [unitId, state.analyzed_session_id],
+    )
+    if (!completed) {
+      allRetried = false
+      lockedReportIds.push(Number(state.report_id))
+    }
+  }
+
+  let cachedReport: JsonRecord | null = report && !allRetried ? report : null
+  if (!cachedReport && lockedReportIds.length) {
+    cachedReport = await row<JsonRecord>(
+      `SELECT * FROM wrong_analysis_reports
+       WHERE id = ? ORDER BY id DESC LIMIT 1`,
+      [lockedReportIds[0]],
+    )
+  }
+  if (cachedReport) {
+    return {
+      analysis: cachedReport.report,
+      aggregate: parseJsonObject(cachedReport.aggregate_data),
+      report_id: Number(cachedReport.id),
+      scope_title: cachedReport.scope_title,
+      cached: true,
+      locked: true,
+      reanalyze_after_retry: true,
+    }
+  }
+
+  let previousSnapshot: JsonRecord = report
+    ? parseJsonObject(report.input_snapshot)
+    : {}
+  if (!Object.keys(previousSnapshot).length) {
+    for (const unitId of unitIds) {
+      const state = statesByUnit.get(unitId)
+      if (!state) continue
+      const previous = await row<JsonRecord>(
+        `SELECT input_snapshot FROM wrong_analysis_reports WHERE id = ?`,
+        [state.report_id],
+      )
+      if (!previous) continue
+      const parsed = parseJsonObject(previous.input_snapshot)
+      if (parsed[String(unitId)] != null) {
+        previousSnapshot[String(unitId)] = parsed[String(unitId)]
+      }
+    }
+  }
+
   const profile = await row<JsonRecord>(
     `SELECT * FROM ai_profiles
      WHERE enabled = 1 AND TRIM(default_model) <> ''
      ORDER BY is_default DESC, id LIMIT 1`,
   )
   if (!profile) throw new LocalApiError(400, '请先配置并启用一个模型')
-  const placeholders = questionIds.map(() => '?').join(',')
   const questions = await rows<JsonRecord>(
-    `SELECT q.id, q.number, q.stem, q.answer, u.title AS unit_title,
+    `SELECT q.id, q.number, q.stem, q.answer, q.unit_id, u.title AS unit_title,
        l.primary_skill, l.secondary_skills, l.trap_types,
        l.attention_points, l.vocabulary_demand, l.context_dependency,
        l.grammar_dependency,
-       (SELECT user_answer FROM practice_answer_events e
-        WHERE e.question_id = q.id ORDER BY e.id DESC LIMIT 1) AS latest_wrong_answer
+       (SELECT pa.user_answer
+        FROM practice_answers pa
+        JOIN practice_sessions ps ON ps.id = pa.session_id
+        WHERE pa.question_id = q.id AND pa.is_correct IS NOT NULL
+          AND TRIM(pa.user_answer) <> ''
+        ORDER BY COALESCE(ps.submitted_at, pa.answered_at) DESC, pa.id DESC
+        LIMIT 1) AS latest_wrong_answer
      FROM questions q
      JOIN units u ON u.id = q.unit_id
      LEFT JOIN question_ai_labels l ON l.question_id = q.id
      WHERE q.id IN (${placeholders})`,
-    questionIds,
+    normalized,
   )
   const content = await chatCompletion(
     profile.id,
@@ -453,7 +612,9 @@ export async function analyzeWrongQuestions(
         content: `你负责分析英语选择题错因，但不能翻译或复述整篇文章、题干和选项，
 也不能显示题号、正确选项字母或错误选项字母。根据匿名化的题目特征、用户错误选择、
 正确答案和已有考点标签，判断可能是词汇、上下文、逻辑、定位、语法或干扰项识别问题。
-允许表达不确定性。只输出：
+如果提供了 previous_errors（上一次分析时的错误选项），可以对比两次作答，判断用户
+是否仍然选择同一错误选项或薄弱环节是否变化；对比结果只能用于归因和复习建议，
+绝不能复述选项内容或暴露选项文字。允许表达不确定性。只输出：
 1. 错误类型数量和比例；
 2. 近期薄弱点；
 3. 不泄露原题答案的训练与复习建议。`,
@@ -466,6 +627,7 @@ export async function analyzeWrongQuestions(
             stem: item.stem,
             wrongAnswer: item.latest_wrong_answer,
             correctAnswer: item.answer,
+            previousErrors: previousSnapshot[String(item.unit_id)]?.errors || [],
             labels: {
               primarySkill: item.primary_skill,
               secondarySkills: JSON.parse(item.secondary_skills || '[]'),
@@ -481,14 +643,54 @@ export async function analyzeWrongQuestions(
     ],
     { maxTokens: Math.max(1600, Number(profile.max_tokens || 1600)) },
   )
+  const aggregate = {
+    question_count: questions.length,
+    categories: [],
+    recommended_actions: [],
+    uncertain_count: 0,
+  }
+  const inputSnapshot = await latestWrongSnapshot(unitIds, normalized)
+  let reportId = 0
+  await transaction(async db => {
+    const created = await db.run(
+      `INSERT INTO wrong_analysis_reports
+        (scope_key, unit_ids, input_snapshot, scope_title,
+         question_count, aggregate_data, report, model_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        scopeKey,
+        JSON.stringify(unitIds),
+        JSON.stringify(inputSnapshot),
+        scopeTitle,
+        questions.length,
+        JSON.stringify(aggregate),
+        content,
+        String(profile.default_model || ''),
+      ],
+      false,
+    )
+    reportId = Number(created.changes?.lastId)
+    const maxSession = await row<{ max_id: number }>(
+      'SELECT COALESCE(MAX(id), 0) AS max_id FROM practice_sessions',
+    )
+    for (const unitId of unitIds) {
+      await db.run(
+        `INSERT OR REPLACE INTO wrong_analysis_states
+          (unit_id, report_id, analyzed_session_id, analyzed_at)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+        [unitId, reportId, Number(maxSession?.max_id || 0)],
+        false,
+      )
+    }
+  })
   return {
     analysis: content,
-    aggregate: {
-      question_count: questions.length,
-      categories: [],
-      recommended_actions: [],
-      uncertain_count: 0,
-    },
+    aggregate,
+    report_id: reportId,
+    scope_title: scopeTitle,
+    cached: false,
+    locked: true,
+    reanalyze_after_retry: true,
   }
 }
 

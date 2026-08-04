@@ -1,4 +1,4 @@
-import { analyzeWrongQuestions, createProfile, createConversation, deleteConversation, deleteProfile, listConversations, listProfiles, selectorModels, sendChat, setAllModelVisibility, setModelVisibility, syncModels, testProfile, translateVocabularyEntries, updateProfile } from './ai'
+import { analyzeWrongQuestions, analyzeWrongStatus, createProfile, createConversation, deleteConversation, deleteProfile, listConversations, listProfiles, selectorModels, sendChat, setAllModelVisibility, setModelVisibility, syncModels, testProfile, translateVocabularyEntries, updateProfile } from './ai'
 import { LocalApiError } from './errors'
 import { createSession, dashboard, getSession, listWrong, saveAnswer, submitSession, submitUnit } from './practice'
 import { createEsqImport, listEsqImports, listPapers, publishEsqImport, readEsqImport } from './question-bank'
@@ -130,6 +130,9 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   }
   if (params && method === 'DELETE') return await deleteConversation(Number(params[1])) as T
   if (pathname === '/ai/chat' && method === 'POST') return await sendChat(body!) as T
+  if (pathname === '/ai/wrong-analysis-status' && method === 'GET') {
+    return await analyzeWrongStatus() as T
+  }
   if (pathname === '/ai/analyze-wrong' && method === 'POST') {
     return await analyzeWrongQuestions(
       (body?.question_ids || []).map(Number).filter(Boolean),
