@@ -3,7 +3,7 @@ import { LocalApiError } from './errors'
 import { createSession, dashboard, getSession, listWrong, saveAnswer, submitSession, submitUnit } from './practice'
 import { createEsqImport, listEsqImports, listPapers, publishEsqImport, readEsqImport } from './question-bank'
 import { addVocabulary, deleteVocabulary, homeVocabulary, listVocabulary, queueTranslations, reviewVocabulary, retryVocabulary, serializeEntry, updateVocabulary } from './vocabulary'
-import { checkAppUpdate, checkQuestionBankCatalog, installAppUpdate, readUpdateSettings, updateSettings } from './app-update'
+import { checkAppUpdate, checkQuestionBankCatalog, downloadQuestionBankPackage, installAppUpdate, readUpdateSettings, updateSettings } from './app-update'
 
 type JsonRecord = Record<string, any>
 
@@ -159,6 +159,9 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   }
   if (pathname === '/android/updates/question-banks/check' && method === 'POST') {
     return await checkQuestionBankCatalog() as T
+  }
+  if (pathname === '/android/updates/question-banks/download' && method === 'POST') {
+    return await downloadQuestionBankPackage(body || {}) as T
   }
 
   throw new LocalApiError(501, `Android 本地接口尚未实现：${method} ${pathname}`)

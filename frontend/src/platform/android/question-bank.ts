@@ -92,9 +92,9 @@ function validateManifest(manifest: JsonRecord) {
   }
 }
 
-export async function parseEsqFile(file: File): Promise<ImportedPackage> {
-  if (file.size > 100 * 1024 * 1024) throw new LocalApiError(422, 'ESQ 文件不能超过 100 MiB')
-  const zip = await JSZip.loadAsync(await file.arrayBuffer(), {
+export async function parseEsqBytes(data: ArrayBuffer | Uint8Array): Promise<ImportedPackage> {
+  if (data.byteLength > 100 * 1024 * 1024) throw new LocalApiError(422, 'ESQ 文件不能超过 100 MiB')
+  const zip = await JSZip.loadAsync(data, {
     checkCRC32: true,
     createFolders: false,
   })
@@ -132,6 +132,10 @@ export async function parseEsqFile(file: File): Promise<ImportedPackage> {
   return { manifest, papers }
 }
 
+export async function parseEsqFile(file: File): Promise<ImportedPackage> {
+  return parseEsqBytes(await file.arrayBuffer())
+}
+
 async function buildPreview(pkg: ImportedPackage): Promise<JsonRecord> {
   const conflicts = []
   let units = 0
@@ -162,20 +166,60 @@ async function buildPreview(pkg: ImportedPackage): Promise<JsonRecord> {
   }
 }
 
-export async function createEsqImport(file: File): Promise<JsonRecord> {
-  const pkg = await parseEsqFile(file)
+async function createParsedEsqImport(filename: string, pkg: ImportedPackage): Promise<JsonRecord> {
   const preview = await buildPreview(pkg)
   const id = nextImportId++
   const job: PendingImport = {
     id,
-    filename: file.name,
+    filename,
     package: pkg,
     preview,
     created_at: new Date().toISOString(),
     status: 'draft',
   }
   pendingImports.set(id, job)
-  return { id, filename: file.name, format: 'esq-1.0', preview, warnings: [] }
+  return { id, filename, format: 'esq-1.0', preview, warnings: [] }
+}
+
+export async function createEsqImport(file: File): Promise<JsonRecord> {
+  return createParsedEsqImport(file.name, await parseEsqFile(file))
+}
+
+export async function createEsqImportFromBytes(
+  filename: string,
+  data: Uint8Array,
+): Promise<JsonRecord> {
+  return createParsedEsqImport(filename, await parseEsqBytes(data))
+}
+
+export async function installBundledQuestionBank(): Promise<JsonRecord> {
+  const response = await fetch('/internal-question-bank.esq', { cache: 'no-store' })
+  if (response.status === 404) return { available: false, installed: false }
+  if (!response.ok) throw new LocalApiError(400, `内置题库读取失败：${response.status}`)
+  const data = new Uint8Array(await response.arrayBuffer())
+  const pkg = await parseEsqBytes(data)
+  const packageId = String(pkg.manifest.packageId || '')
+  const contentVersion = String(pkg.manifest.contentVersion || '')
+  const installed = await row<{ id: number }>(
+    `SELECT id FROM question_bank_packages
+     WHERE package_id = ? AND content_version = ? AND status = 'published'
+     LIMIT 1`,
+    [packageId, contentVersion],
+  )
+  if (installed) return { available: true, installed: false, alreadyInstalled: true }
+  const preview = await buildPreview(pkg)
+  if (preview.conflicts.some((item: JsonRecord) => item.existing)) {
+    return { available: true, installed: false, conflicts: true }
+  }
+  const created = await createParsedEsqImport('internal-question-bank.esq', pkg)
+  await publishEsqImport(created.id, { resolutions: [] })
+  return {
+    available: true,
+    installed: true,
+    packageId,
+    contentVersion,
+    totals: preview.totals,
+  }
 }
 
 export function listEsqImports(): JsonRecord[] {

@@ -1,10 +1,17 @@
 import { App } from '@capacitor/app'
-import { registerPlugin } from '@capacitor/core'
+import { CapacitorHttp, registerPlugin } from '@capacitor/core'
 import { row, run } from './database'
 import { LocalApiError } from './errors'
 import { fetchQuestionBankCatalog, fetchUpdateManifest } from '../updates'
+import type { QuestionBankRemotePackage } from '../types'
+import { createEsqImportFromBytes } from './question-bank'
 
 type JsonRecord = Record<string, any>
+
+const BUILD_DEFAULTS: Record<string, string> = {
+  app_update_manifest_url: String(import.meta.env.VITE_APP_UPDATE_MANIFEST_URL || '').trim(),
+  question_bank_catalog_url: String(import.meta.env.VITE_QUESTION_BANK_CATALOG_URL || '').trim(),
+}
 
 interface AppUpdaterPlugin {
   downloadAndInstall(options: {
@@ -17,10 +24,16 @@ interface AppUpdaterPlugin {
 const NativeAppUpdater = registerPlugin<AppUpdaterPlugin>('AppUpdater')
 
 async function setting(key: string): Promise<string> {
-  return (await row<{ value: string }>(
+  const existing = await row<{ value: string }>(
     'SELECT value FROM app_settings WHERE key = ?',
     [key],
-  ))?.value || ''
+  )
+  if (existing) return existing.value || ''
+  const defaultValue = BUILD_DEFAULTS[key] || ''
+  if (defaultValue) {
+    await run('INSERT OR IGNORE INTO app_settings(key, value) VALUES (?, ?)', [key, defaultValue])
+  }
+  return defaultValue
 }
 
 export async function updateSettings(body: JsonRecord): Promise<JsonRecord> {
@@ -73,4 +86,87 @@ export async function checkQuestionBankCatalog(): Promise<JsonRecord> {
   if (!url) return { configured: false, packages: [] }
   const catalog = await fetchQuestionBankCatalog(url)
   return { configured: true, ...catalog }
+}
+
+function assertDownloadUrl(raw: string): string {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new LocalApiError(422, '题库下载地址无效')
+  }
+  if (!['https:', 'http:'].includes(url.protocol)) {
+    throw new LocalApiError(422, '题库下载地址只允许使用 HTTP 或 HTTPS')
+  }
+  return url.toString()
+}
+
+function decodeBase64(value: unknown): Uint8Array {
+  if (typeof value !== 'string' || !value) {
+    throw new LocalApiError(422, '题库下载结果不是有效的二进制数据')
+  }
+  const binary = atob(value.replace(/\s/g, ''))
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
+  return bytes
+}
+
+async function sha256(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes).buffer)
+  return [...new Uint8Array(digest)]
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+function validateRemotePackage(value: unknown): QuestionBankRemotePackage {
+  const item = value as Partial<QuestionBankRemotePackage> | null
+  if (!item
+    || typeof item.packageId !== 'string'
+    || typeof item.title !== 'string'
+    || typeof item.contentVersion !== 'string'
+    || typeof item.fileName !== 'string'
+    || typeof item.downloadUrl !== 'string'
+    || typeof item.sha256 !== 'string'
+    || !/^[a-f0-9]{64}$/i.test(item.sha256)) {
+    throw new LocalApiError(422, '题库目录条目不完整')
+  }
+  if (item.size != null && (!Number.isFinite(item.size) || item.size < 1 || item.size > 100 * 1024 * 1024)) {
+    throw new LocalApiError(422, '题库目录声明的文件大小无效')
+  }
+  return item as QuestionBankRemotePackage
+}
+
+export async function downloadQuestionBankPackage(body: JsonRecord): Promise<JsonRecord> {
+  const item = validateRemotePackage(body.package)
+  const response = await CapacitorHttp.get({
+    url: assertDownloadUrl(item.downloadUrl),
+    headers: { Accept: 'application/vnd.english-study-question-bank, application/zip' },
+    responseType: 'arraybuffer',
+    connectTimeout: 15000,
+    readTimeout: 120000,
+  })
+  if (response.status < 200 || response.status >= 300) {
+    throw new LocalApiError(400, `题库下载失败：${response.status}`)
+  }
+  const bytes = decodeBase64(response.data)
+  if (bytes.byteLength > 100 * 1024 * 1024) {
+    throw new LocalApiError(422, '下载的 ESQ 文件超过 100 MiB')
+  }
+  if (item.size != null && bytes.byteLength !== item.size) {
+    throw new LocalApiError(422, '题库文件大小与目录声明不一致')
+  }
+  if ((await sha256(bytes)).toLowerCase() !== item.sha256.toLowerCase()) {
+    throw new LocalApiError(422, '题库 SHA-256 校验失败，文件可能不完整或已被替换')
+  }
+  const safeName = item.fileName.replace(/[^A-Za-z0-9._-]/g, '_')
+  const filename = safeName.toLowerCase().endsWith('.esq') ? safeName : `${safeName}.esq`
+  const created = await createEsqImportFromBytes(filename, bytes)
+  return {
+    ...created,
+    remote: {
+      packageId: item.packageId,
+      contentVersion: item.contentVersion,
+      title: item.title,
+    },
+  }
 }

@@ -35,3 +35,27 @@
 - 正式渠道使用 HTTPS；局域网 HTTP 只用于调试构建。
 
 应用校验哈希成功后只会打开系统安装器，不能绕过 Android 的安装确认。
+
+## 固定签名
+
+内测版和正式版使用同一份长期签名配置。真实 `signing.properties`、JKS
+私钥和密码只能保存在本机 Git 忽略目录，仓库只提供
+`frontend/android/signing.properties.example`。
+
+首次从 Capacitor 默认调试签名切换到固定签名时，Android 会将其视为不同发行者。
+需要先卸载旧调试 APK；此后，只要 `applicationId` 与签名证书保持不变并递增
+`versionCode`，即可通过应用内检查更新覆盖安装。
+
+## 内测题库目录
+
+内测构建可以在编译时设置默认题库目录：
+
+```powershell
+.\build-android-internal.ps1 `
+  -VersionCode 2 `
+  -VersionName 0.1.0-alpha.2 `
+  -QuestionBankCatalogUrl https://example.com/catalog.json
+```
+
+用户仍可以在“更新与远程题库”中修改地址。远程 ESQ 下载后会校验目录声明的
+文件大小和 SHA-256，再进入冲突预览；程序不会未经确认自动覆盖本地年份。

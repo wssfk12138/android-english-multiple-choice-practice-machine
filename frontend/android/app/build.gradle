@@ -1,5 +1,12 @@
 apply plugin: 'com.android.application'
 
+def signingProperties = new Properties()
+def signingPropertiesFile = rootProject.file('signing.properties')
+def hasReleaseSigning = signingPropertiesFile.isFile()
+if (hasReleaseSigning) {
+    signingPropertiesFile.withInputStream { signingProperties.load(it) }
+}
+
 android {
     namespace = "com.wssfk.englishpracticemachine"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +14,8 @@ android {
         applicationId "com.wssfk.englishpracticemachine"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.1.0-alpha"
+        versionCode providers.gradleProperty("appVersionCode").getOrElse("1").toInteger()
+        versionName providers.gradleProperty("appVersionName").getOrElse("0.1.0-alpha")
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,11 +23,45 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(signingProperties.getProperty('storeFile'))
+                storePassword signingProperties.getProperty('storePassword')
+                keyAlias signingProperties.getProperty('keyAlias')
+                keyPassword signingProperties.getProperty('keyPassword')
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
+            if (hasReleaseSigning) signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+        internal {
+            initWith release
+            matchingFallbacks = ['release']
+            minifyEnabled false
+            if (hasReleaseSigning) signingConfig signingConfigs.release
+        }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def requiresReleaseSigning = graph.allTasks.any {
+        it.path.endsWith('assembleInternal') ||
+            it.path.endsWith('bundleInternal') ||
+            it.path.endsWith('assembleRelease') ||
+            it.path.endsWith('bundleRelease')
+    }
+    if (requiresReleaseSigning && !hasReleaseSigning) {
+        throw new GradleException(
+            'Fixed Android signing is not configured. Create frontend/android/signing.properties first.'
+        )
     }
 }
 

@@ -33,7 +33,8 @@ The primary test device is the Honor Pad 9 with a 12.1-inch 2560×1600 display a
 - Multiple API profiles, automatic model discovery, model visibility controls, and an AI assistant.
 - API keys protected through Android Keystore and AES/GCM.
 - APK update checks, download, SHA-256 verification, and system-installer handoff.
-- A reserved remote question-bank catalog protocol.
+- Remote question-bank catalog checks, ESQ download, size and SHA-256 verification, conflict preview, and confirmed import.
+- Internal builds may carry one validated first-launch question bank; it installs only when no local-year conflict exists and never silently replaces existing years during upgrades.
 - Tablet two-pane layouts, medium-width navigation rails, and compact single-pane layouts.
 
 ## Not included on Android
@@ -76,6 +77,15 @@ Every updatable build must keep the same application ID and signing certificate,
 
 Debug builds may use a local-network HTTP source. Production builds should use HTTPS. Android still requires explicit user confirmation before installation.
 
+Use `start-internal-update-server.ps1` and `stop-internal-update-server.ps1`
+for the LAN question-bank channel. The tablet and PC must share a LAN and
+Windows Firewall must allow inbound TCP 8877. The internal APK still carries
+the first-launch bank when the LAN channel is unavailable.
+
+Run `enable-internal-update-firewall.ps1` once as Administrator before using
+LAN updates. Its rule limits access to the local subnet on TCP 8877 rather
+than exposing the update directory to the public internet.
+
 See [examples/update-manifest.alpha.json](examples/update-manifest.alpha.json).
 
 ## Privacy
@@ -87,7 +97,7 @@ Remote AI providers may receive only the content the user explicitly submits for
 ## Current limitations
 
 - ESQ media assets are not persisted in the first alpha; text-only banks are the primary target.
-- Remote catalogs can be checked, but one-click ESQ download and import is not implemented yet.
+- The first move from the old debug signature to the fixed signing certificate requires uninstalling the old APK; later builds can update in place while preserving app data.
 - Honor Pad 9 device testing is still pending.
 - Public distribution requires a dedicated, securely backed-up signing workflow.
 

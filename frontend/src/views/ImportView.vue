@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Download, FileArchive, FileCheck2, FileUp, RefreshCw, Sparkles } from 'lucide-vue-next'
 import { onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { api, get, post, put } from '../api'
 import { platformRuntime } from '../platform/runtime'
 
@@ -18,10 +19,19 @@ const selectedEsqFile = ref<File | null>(null)
 const esqResolutions = ref<Record<string, 'keep_existing' | 'replace_with_imported'>>({})
 const supportsDocumentImport = !platformRuntime.isAndroid
 const supportsQuestionBankExport = !platformRuntime.isAndroid
+const route = useRoute()
 
 async function loadJobs() { jobs.value = await get('/imports') }
 async function loadEsqJobs() { esqJobs.value = await get('/question-banks/imports') }
-onMounted(() => Promise.all([loadJobs(), loadEsqJobs()]).catch(e => error.value = String(e)))
+onMounted(async () => {
+  try {
+    await Promise.all([loadJobs(), loadEsqJobs()])
+    const remoteImportId = Number(route.query.esqImportId || 0)
+    if (remoteImportId) await openEsqJob(remoteImportId)
+  } catch (e) {
+    error.value = String(e)
+  }
+})
 
 async function upload() {
   if (!selectedFile.value) return

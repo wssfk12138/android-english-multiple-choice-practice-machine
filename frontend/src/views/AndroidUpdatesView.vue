@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { Download, PackageCheck, RefreshCw, Save, Server } from 'lucide-vue-next'
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { get, post, put } from '../api'
 
+const router = useRouter()
 const settings = reactive({
   app_update_manifest_url: '',
   question_bank_catalog_url: '',
@@ -68,6 +70,19 @@ async function checkBanks() {
   }
 }
 
+async function downloadBank(item: any) {
+  busy.value = `bank:${item.packageId}`; error.value = ''
+  try {
+    const result: any = await post('/android/updates/question-banks/download', { package: item })
+    notice.value = '题库下载和 SHA-256 校验已完成，正在打开导入预览'
+    await router.push({ path: '/imports', query: { esqImportId: String(result.id) } })
+  } catch (cause) {
+    error.value = String(cause)
+  } finally {
+    busy.value = ''
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -116,12 +131,19 @@ onMounted(load)
       <section class="card">
         <div class="update-source-heading">
           <span class="api-profile-icon"><PackageCheck :size="20" /></span>
-          <div><h2>远程题库源</h2><p class="lead">当前仅预留目录协议；本地 ESQ 导入仍是第一版的主要方式。</p></div>
+          <div><h2>远程题库源</h2><p class="lead">下载后会校验文件大小和 SHA-256，再进入 ESQ 预览；不会自动覆盖已有年份。</p></div>
         </div>
         <button class="button secondary" type="button" :disabled="busy === 'banks'" @click="checkBanks"><RefreshCw :size="16" />检查远程题库</button>
         <div v-if="questionBankCatalog?.configured" class="update-package-list">
           <div v-for="item in questionBankCatalog.packages" :key="`${item.packageId}:${item.contentVersion}`">
-            <strong>{{ item.title }}</strong><small>{{ item.contentVersion }} · {{ item.fileName }}</small>
+            <strong>{{ item.title }}</strong>
+            <small>{{ item.contentVersion }} · {{ item.fileName }}</small>
+            <button
+              class="button compact"
+              type="button"
+              :disabled="busy === `bank:${item.packageId}`"
+              @click="downloadBank(item)"
+            ><Download :size="15" />{{ busy === `bank:${item.packageId}` ? '下载校验中…' : '下载并导入' }}</button>
           </div>
         </div>
       </section>

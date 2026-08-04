@@ -1,0 +1,6 @@
+# Copy this file to signing.properties and keep the real file private.
+# The store path is resolved relative to frontend/android/app.
+storeFile=../../../work/signing/english-practice-machine-release.jks
+storePassword=replace-with-a-long-random-password
+keyAlias=english-practice-machine
+keyPassword=replace-with-a-long-random-password

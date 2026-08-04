@@ -33,7 +33,8 @@
 - 多套 API 配置、模型自动拉取、模型显示开关和 AI 学习助手。
 - API Key 使用 Android Keystore 与 AES/GCM 加密。
 - APK 更新清单检查、下载、SHA-256 校验和系统安装器更新。
-- 远程题库目录协议预留。
+- 远程题库目录检查、ESQ 下载、文件大小与 SHA-256 校验、冲突预览和确认导入。
+- 内测构建可携带一份经过校验的首次启动题库；只在本地无冲突时自动入库，升级时不会静默覆盖已有年份。
 - 平板大屏双栏布局、中等窗口导航轨道、紧凑窗口单栏布局。
 
 ## Android 版不提供的功能
@@ -94,6 +95,15 @@ corepack.cmd pnpm run android:open
 
 调试构建允许使用局域网 HTTP 更新源；正式构建应使用 HTTPS。Android 系统仍会要求用户确认安装。
 
+内测题库局域网服务可通过 `start-internal-update-server.ps1` 启动，通过
+`stop-internal-update-server.ps1` 停止。平板需要与电脑处于同一局域网，且
+Windows 防火墙允许 TCP 8877 入站；若网络环境不允许，内测 APK 中仍携带首次
+启动题库，不影响第一次使用。
+
+首次使用局域网更新时，以管理员身份运行
+`enable-internal-update-firewall.ps1`。该规则只允许本地子网访问 8877 端口，
+不会对公网开放更新目录。
+
 清单示例位于 [examples/update-manifest.alpha.json](examples/update-manifest.alpha.json)。
 
 ## 数据与隐私
@@ -124,7 +134,7 @@ corepack.cmd pnpm run android:open
 ## 当前限制
 
 - ESQ 多媒体资源尚未真正落盘，第一版优先支持纯文本题库。
-- 远程题库页面目前只检查目录，尚未实现一键下载并导入。
+- 内测版首次从旧调试签名切换到固定签名时，需要卸载旧 APK；之后可以保持数据覆盖更新。
 - 首版尚未完成荣耀平板 9 真机交互验收。
 - 当前仓库只生成调试 APK；公开发布前需要建立独立且安全保存的测试/正式签名流程。
 

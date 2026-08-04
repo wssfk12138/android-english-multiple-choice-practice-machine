@@ -138,6 +138,7 @@ h2, h3 { margin: 0; }
 .update-result .button { justify-self:start; }
 .update-package-list { display:grid; gap:8px; margin-top:15px; }
 .update-package-list>div { display:grid; gap:4px; padding:12px; border:1px solid var(--line); border-radius:12px; }
+.update-package-list .button { justify-self:start; margin-top:6px; }
 .spinning { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .pill { display: inline-flex; padding: 5px 9px; border-radius: 999px; background: var(--primary-soft); color: var(--primary); font-size: 12px; }

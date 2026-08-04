@@ -11,6 +11,7 @@ frontend/android/app/src/main/assets/public/
 frontend/android/app/src/main/assets/capacitor.config.json
 frontend/android/app/src/main/assets/capacitor.plugins.json
 frontend/android/app/src/main/res/xml/config.xml
+frontend/public/internal-question-bank.esq
 
 # Local runtime data and private development artifacts
 work/
@@ -33,6 +34,8 @@ outputs/
 *.jks
 *.keystore
 signing.properties
+work/internal-channel/
+outputs/internal-channel/
 
 # Editors and operating systems
 .idea/
