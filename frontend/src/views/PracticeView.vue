@@ -274,7 +274,7 @@ async function flushVocabularyTranslations(
       window.setTimeout(() => { vocabularyToast.value = '' }, 2600)
     }
   } catch {
-    // 单词已经保存在本地。保留队列，下一次提交、退出或启动时继续尝试。
+    // 单词已经保存在本地。保留队列，下一次退出答题界面时继续尝试。
   }
 }
 
@@ -553,7 +553,6 @@ async function submitCurrentUnit() {
     syncOrdering()
     unansweredNotice.value = ''
     showUnitResult(submittedUnitId)
-    void flushVocabularyTranslations('unit_submit', submittedUnitId)
   } catch (e) {
     if (await handleIncompleteSubmission(e)) return
     error.value = String(e)
@@ -572,7 +571,6 @@ async function submitSession() {
     session.value = await post(`/practice/sessions/${session.value.id}/submit`)
     finishTimer()
     showSessionResult()
-    void flushVocabularyTranslations('session_submit')
   }
   catch (e) {
     if (await handleIncompleteSubmission(e)) return
@@ -678,7 +676,7 @@ async function addSelectedVocabulary() {
     }
     vocabularyToast.value = result.is_frequent
       ? `已记录第 ${result.encounter_count} 次，已标记为 🌟 高频词`
-      : '已加入单词本，提交或退出练习后统一翻译'
+      : '已加入单词本，退出答题界面后统一翻译'
     window.setTimeout(() => { vocabularyToast.value = '' }, 2600)
     window.getSelection()?.removeAllRanges()
   } catch (e) {

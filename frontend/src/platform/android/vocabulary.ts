@@ -159,14 +159,14 @@ export async function addVocabulary(body: JsonRecord): Promise<JsonRecord> {
   if (existing) {
     id = Number(existing.id)
     const status = ['pending', 'failed'].includes(existing.translation_status) && !existing.user_edited
-      ? 'queued'
+      ? 'pending'
       : existing.translation_status
     await run(
       `UPDATE vocabulary_entries SET
         encounter_count = encounter_count + 1,
         study_status = 'learning',
         translation_status = ?,
-        translation_error = CASE WHEN ? = 'queued' THEN '' ELSE translation_error END,
+        translation_error = CASE WHEN ? = 'pending' THEN '' ELSE translation_error END,
         last_seen_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
@@ -175,7 +175,7 @@ export async function addVocabulary(body: JsonRecord): Promise<JsonRecord> {
   } else {
     const created = await run(
       `INSERT INTO vocabulary_entries (term, normalized_term, translation_status)
-       VALUES (?, ?, 'queued')`,
+       VALUES (?, ?, 'pending')`,
       [term, normalized],
     )
     id = Number(created.lastId)

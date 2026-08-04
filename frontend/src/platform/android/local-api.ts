@@ -73,8 +73,17 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
     return await homeVocabulary(Number(url.searchParams.get('limit') || 20)) as T
   }
   if (pathname === '/vocabulary/translation-runs' && method === 'POST') {
-    const queued = await queueTranslations(body?.entry_ids || [])
-    const ids = (body?.entry_ids || []).map(Number).filter(Boolean)
+    let ids = (body?.entry_ids || []).map(Number).filter(Boolean)
+    if (String(body?.trigger || '') === 'practice_exit') {
+      const { rows } = await import('./database')
+      const pending = await rows<{ id: number }>(
+        `SELECT id FROM vocabulary_entries
+         WHERE user_edited = 0 AND translation_status IN ('pending', 'queued')
+         ORDER BY updated_at, id LIMIT 100`,
+      )
+      ids = [...new Set([...ids, ...pending.map(item => Number(item.id))])].slice(0, 100)
+    }
+    const queued = await queueTranslations(ids)
     if (ids.length) {
       void translateVocabularyEntries(ids).catch(async error => {
         const { run } = await import('./database')
