@@ -3,7 +3,21 @@ const API_ROOT = '/api'
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (document.documentElement.dataset.platform === 'android') {
     const { androidLocalApi } = await import('./platform/android/local-api')
-    return androidLocalApi<T>(path, options)
+    try {
+      return await androidLocalApi<T>(path, options)
+    } catch (cause) {
+      const diagnostic = diagnosticContext(path, options)
+      if (diagnostic) {
+        const { recordDiagnosticError } = await import('./platform/android/diagnostics')
+        await recordDiagnosticError(
+          diagnostic.category,
+          diagnostic.stage,
+          cause,
+          diagnostic.context,
+        ).catch(() => undefined)
+      }
+      throw cause
+    }
   }
   const headers = new Headers(options.headers)
   if (!(options.body instanceof FormData)) {
@@ -28,6 +42,52 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     throw error
   }
   return response.json()
+}
+
+function diagnosticContext(path: string, options: RequestInit) {
+  const pathname = new URL(path, 'https://local.english-practice.invalid').pathname
+  const method = String(options.method || 'GET').toUpperCase()
+  if (pathname === '/question-banks/imports' && method === 'POST') {
+    const file = options.body instanceof FormData ? options.body.get('file') : null
+    return {
+      category: 'question_bank_import' as const,
+      stage: 'local_esq_read_and_validate',
+      context: file instanceof File
+        ? { fileName: file.name, fileSize: file.size }
+        : {},
+    }
+  }
+  if (/^\/question-banks\/imports\/\d+\/publish$/.test(pathname)) {
+    return {
+      category: 'question_bank_import' as const,
+      stage: 'database_publish_transaction',
+      context: {},
+    }
+  }
+  if (pathname === '/android/updates/app/check') {
+    return { category: 'app_update' as const, stage: 'manifest_fetch_and_validate', context: {} }
+  }
+  if (pathname === '/android/updates/app/install') {
+    return { category: 'app_update' as const, stage: 'apk_download_verify_and_install', context: {} }
+  }
+  if (pathname === '/android/updates/question-banks/check') {
+    return { category: 'remote_question_bank' as const, stage: 'catalog_fetch_and_validate', context: {} }
+  }
+  if (pathname === '/android/updates/question-banks/download') {
+    let fileName = ''
+    try {
+      const body = typeof options.body === 'string' ? JSON.parse(options.body) : {}
+      fileName = String(body?.package?.fileName || '')
+    } catch {
+      // The invalid request is still logged without retaining request content.
+    }
+    return {
+      category: 'remote_question_bank' as const,
+      stage: 'download_hash_and_import_preview',
+      context: { fileName },
+    }
+  }
+  return null
 }
 
 export const get = <T>(path: string) => api<T>(path)

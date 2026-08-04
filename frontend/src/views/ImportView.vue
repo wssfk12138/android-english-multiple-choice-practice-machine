@@ -155,12 +155,12 @@ async function exportEsq(includeLabels = false) {
           <label class="field"><span>选择 Word 真题</span><input type="file" accept=".doc,.docx" @change="selectedFile=($event.target as HTMLInputElement).files?.[0] || null"></label>
           <button class="button" style="width:100%" :disabled="!selectedFile || busy" @click="upload"><FileUp :size="16" />{{ busy ? '正在分析…' : '上传并解析' }}</button>
         </div>
-        <div v-if="supportsQuestionBankExport" class="card">
+        <div class="card">
           <label class="field"><span>导入 ESQ 共享题库</span><input type="file" accept=".esq,.zip" @change="selectedEsqFile=($event.target as HTMLInputElement).files?.[0] || null"></label>
           <button class="button secondary" style="width:100%" :disabled="!selectedEsqFile || busy" @click="uploadEsq"><FileArchive :size="16" />{{ busy ? '正在校验…' : '上传 ESQ 题库包' }}</button>
           <div class="lead" style="font-size:12px;margin-top:10px">题库包会先进入预览，不会自动覆盖本地题库。</div>
         </div>
-        <div class="card">
+        <div v-if="supportsQuestionBankExport" class="card">
           <div style="display:flex;justify-content:space-between;align-items:center"><h3>题库包导出</h3><Download :size="18" /></div>
           <p class="lead" style="font-size:12px;margin:10px 0 14px">默认导出全部正式题库和标准答案，不包含做题记录、单词本和 API 配置。</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap">

@@ -1,6 +1,6 @@
 param(
-    [int]$VersionCode = 2,
-    [string]$VersionName = '0.1.0-alpha.2',
+    [int]$VersionCode = 3,
+    [string]$VersionName = '0.1.0-alpha.3',
     [string]$AppUpdateManifestUrl = '',
     [string]$QuestionBankCatalogUrl = ''
 )

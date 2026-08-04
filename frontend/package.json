@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
+    "test:diagnostics": "node --experimental-strip-types tests/diagnostics-sanitizer.mjs",
     "preview": "vite preview",
     "cap:sync": "pnpm build && cap sync",
     "cap:copy": "pnpm build && cap copy",

@@ -15,6 +15,11 @@ platformRuntime.ready().then(async () => {
   }
 }).catch(error => {
   console.warn('Android startup preparation failed:', String(error))
+  if (platformRuntime.isAndroid) {
+    void import('./platform/android/diagnostics').then(({ recordDiagnosticError }) =>
+      recordDiagnosticError('startup', 'bundled_question_bank_install', error),
+    ).catch(() => undefined)
+  }
 }).finally(() => {
   createApp(App).use(router).mount('#app')
 })
