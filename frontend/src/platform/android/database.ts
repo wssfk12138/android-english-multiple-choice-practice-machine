@@ -142,6 +142,9 @@ CREATE TABLE IF NOT EXISTS vocabulary_entries (
   part_of_speech TEXT NOT NULL DEFAULT '',
   contextual_meaning TEXT NOT NULL DEFAULT '',
   common_meaning TEXT NOT NULL DEFAULT '',
+  synonyms TEXT NOT NULL DEFAULT '[]',
+  antonyms TEXT NOT NULL DEFAULT '[]',
+  similar_forms TEXT NOT NULL DEFAULT '[]',
   memory_hint TEXT NOT NULL DEFAULT '',
   note TEXT NOT NULL DEFAULT '',
   translation_status TEXT NOT NULL DEFAULT 'queued',
@@ -279,6 +282,11 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       if ((stateColumns.values || []).length && !(stateColumns.values || []).some(column => column.name === 'analyzed_session_id')) {
         await db.execute('ALTER TABLE wrong_analysis_states ADD COLUMN analyzed_session_id INTEGER NOT NULL DEFAULT 0')
       }
+      const vocabColumns = await db.query('PRAGMA table_info(vocabulary_entries)')
+      const vocabNames = new Set((vocabColumns.values || []).map(column => column.name))
+      if (!vocabNames.has('synonyms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN synonyms TEXT NOT NULL DEFAULT '[]'")
+      if (!vocabNames.has('antonyms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN antonyms TEXT NOT NULL DEFAULT '[]'")
+      if (!vocabNames.has('similar_forms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN similar_forms TEXT NOT NULL DEFAULT '[]'")
       return db
     })()
   }

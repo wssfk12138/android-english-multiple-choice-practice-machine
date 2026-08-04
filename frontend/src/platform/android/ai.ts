@@ -355,6 +355,24 @@ function extractJsonObject(content: string): JsonRecord {
   }
 }
 
+function discriminationList(value: unknown, limit = 3): { word: string; note: string }[] {
+  if (!Array.isArray(value)) return []
+  const result: { word: string; note: string }[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue
+    const word = String((item as JsonRecord).word || '').trim()
+    const note = String((item as JsonRecord).note || (item as JsonRecord).reason || '').trim()
+    if (!word || word.length > 60) continue
+    const key = word.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push({ word: word.slice(0, 60), note: note.slice(0, 80) })
+    if (result.length >= limit) break
+  }
+  return result
+}
+
 export async function translateVocabularyEntries(entryIds: number[]): Promise<number> {
   const profile = await row<JsonRecord>(
     `SELECT * FROM ai_profiles
@@ -379,8 +397,10 @@ export async function translateVocabularyEntries(entryIds: number[]): Promise<nu
       {
         role: 'system',
         content: `你是考研英语语境词汇助手。只返回 JSON：
-{"translations":[{"entryId":1,"lemma":"","phonetic":"","partOfSpeech":"","contextualMeaning":"","commonMeaning":"","memoryHint":""}]}
-必须原样返回 entryId。释义只写简洁中文词义，不要加入括号、来源、例句说明或“在本文中”等标注。`,
+{"translations":[{"entryId":1,"lemma":"","phonetic":"","partOfSpeech":"","contextualMeaning":"","commonMeaning":"","memoryHint":"","synonyms":[{"word":"同义词","note":"一句极简辨析"}],"antonyms":[{"word":"反义词","note":"一句极简辨析"}],"similarForms":[{"word":"形近词","note":"一句极简辨析"}]}]}
+必须原样返回 entryId。释义只写简洁中文词义，不要加入括号、来源、例句说明或“在本文中”等标注。
+同义词/反义词/形近词每组 0-3 条，辨析各用一句话（30 字以内）说明差别或易混点；
+如果该词没有自然的同义、反义或形近词，对应数组返回空数组 []，不要强行编造或凑数。`,
       },
       { role: 'user', content: JSON.stringify({ items }) },
     ],
@@ -401,6 +421,7 @@ export async function translateVocabularyEntries(entryIds: number[]): Promise<nu
     await run(
       `UPDATE vocabulary_entries SET lemma = ?, phonetic = ?, part_of_speech = ?,
         contextual_meaning = ?, common_meaning = ?, memory_hint = ?,
+        synonyms = ?, antonyms = ?, similar_forms = ?,
         translation_status = 'ready', translation_error = '',
         updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND user_edited = 0`,
@@ -411,6 +432,9 @@ export async function translateVocabularyEntries(entryIds: number[]): Promise<nu
         clean(item.contextualMeaning),
         clean(item.commonMeaning),
         clean(item.memoryHint),
+        JSON.stringify(discriminationList(item.synonyms)),
+        JSON.stringify(discriminationList(item.antonyms)),
+        JSON.stringify(discriminationList(item.similarForms)),
         id,
       ],
     )

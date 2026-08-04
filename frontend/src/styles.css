@@ -229,6 +229,15 @@ h2, h3 { margin: 0; }
 .vocab-detail-head { display: flex; justify-content: space-between; gap: 15px; }.vocab-detail-head h2 { font: 600 30px Cambria,Georgia,serif; margin: 5px 0; }.vocab-detail-head p { color: var(--muted); margin: 0; }
 .vocab-tools { display: flex; align-items: flex-start; }.danger-text { color: var(--danger)!important; }
 .detail-section { padding: 18px 0; border-bottom: 1px solid var(--line); }.detail-section label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 8px; }.detail-section p { margin: 0; line-height: 1.75; }
+.discrimination-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.discrimination-list li { display: flex; align-items: baseline; gap: 10px; padding: 9px 11px; border-radius: 10px; background: color-mix(in srgb,var(--surface-solid) 70%,transparent); }
+.discrimination-list li strong { font-size: 13px; color: var(--primary); flex: none; }
+.discrimination-list li span { font-size: 12px; color: var(--muted); line-height: 1.6; }
+.discrimination-list .source-tag { margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: var(--lavender); color: var(--ink); font-style: normal; font-size: 10px; }
+.vocab-display-dialog { width: min(520px, 82vw); min-height: 0; text-align: left; }
+.vocab-display-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
+.vocab-display-options label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink); cursor: pointer; }
+.vocab-display-options input { accent-color: var(--primary); }
 .memory-hint { background: color-mix(in srgb,var(--apricot) 30%,transparent); margin: 0 -10px; padding: 16px 10px; border-radius: 12px; }
 .occurrence-context-meaning { display: grid; gap: 5px; padding: 12px 13px; margin-top: 9px; border-left: 3px solid var(--primary); border-radius: 9px; background: var(--primary-soft); }
 .occurrence-context-meaning small { color: var(--muted); font-size: 11px; }
