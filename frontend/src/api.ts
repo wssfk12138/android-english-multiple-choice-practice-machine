@@ -57,6 +57,24 @@ function diagnosticContext(path: string, options: RequestInit) {
         : {},
     }
   }
+  if (pathname === '/imports' && method === 'POST') {
+    const file = options.body instanceof FormData ? options.body.get('file') : null
+    const answer = options.body instanceof FormData ? options.body.get('answer_file') : null
+    return {
+      category: 'question_bank_import' as const,
+      stage: 'android_document_extract_and_parse',
+      context: {
+        ...(file instanceof File ? { fileName: file.name, fileSize: file.size } : {}),
+        ...(answer instanceof File ? { answerFileName: answer.name, answerFileSize: answer.size } : {}),
+      },
+    }
+  }
+  if (/^\/imports\/\d+\/model-assist$/.test(pathname)) {
+    return { category: 'question_bank_import' as const, stage: 'model_assisted_proofreading', context: {} }
+  }
+  if (/^\/imports\/\d+\/publish$/.test(pathname)) {
+    return { category: 'question_bank_import' as const, stage: 'document_database_publish', context: {} }
+  }
   if (/^\/question-banks\/imports\/\d+\/publish$/.test(pathname)) {
     return {
       category: 'question_bank_import' as const,
@@ -95,4 +113,6 @@ export const post = <T>(path: string, body?: unknown) =>
   api<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) })
 export const put = <T>(path: string, body?: unknown) =>
   api<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) })
+export const patch = <T>(path: string, body?: unknown) =>
+  api<T>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body) })
 export const del = <T>(path: string) => api<T>(path, { method: 'DELETE' })

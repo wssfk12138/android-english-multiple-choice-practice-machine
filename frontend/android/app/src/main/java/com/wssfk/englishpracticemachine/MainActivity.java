@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(SecureStorePlugin.class);
         registerPlugin(AppUpdaterPlugin.class);
         registerPlugin(DiagnosticLogPlugin.class);
+        registerPlugin(DocumentExtractorPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

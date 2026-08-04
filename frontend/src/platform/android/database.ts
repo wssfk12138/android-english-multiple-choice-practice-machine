@@ -231,7 +231,29 @@ CREATE TABLE IF NOT EXISTS question_ai_labels (
   grammar_dependency TEXT NOT NULL DEFAULT 'medium',
   confidence REAL NOT NULL DEFAULT 0,
   locked INTEGER NOT NULL DEFAULT 1,
-  model_name TEXT NOT NULL DEFAULT ''
+  user_edited INTEGER NOT NULL DEFAULT 0,
+  model_name TEXT NOT NULL DEFAULT '',
+  label_version INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS question_label_run_items (
+  run_id TEXT NOT NULL,
+  question_id INTEGER NOT NULL,
+  PRIMARY KEY (run_id, question_id)
+);
+CREATE TABLE IF NOT EXISTS document_import_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  filename TEXT NOT NULL,
+  answer_filename TEXT NOT NULL DEFAULT '',
+  detected_year INTEGER,
+  detected_format TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft',
+  draft_data TEXT NOT NULL DEFAULT '{}',
+  warnings TEXT NOT NULL DEFAULT '[]',
+  published_paper_ids TEXT NOT NULL DEFAULT '[]',
+  published_scope_title TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS question_bank_packages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -287,6 +309,14 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       if (!vocabNames.has('synonyms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN synonyms TEXT NOT NULL DEFAULT '[]'")
       if (!vocabNames.has('antonyms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN antonyms TEXT NOT NULL DEFAULT '[]'")
       if (!vocabNames.has('similar_forms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN similar_forms TEXT NOT NULL DEFAULT '[]'")
+      const labelColumns = await db.query('PRAGMA table_info(question_ai_labels)')
+      const labelNames = new Set((labelColumns.values || []).map(column => column.name))
+      if (!labelNames.has('user_edited')) await db.execute("ALTER TABLE question_ai_labels ADD COLUMN user_edited INTEGER NOT NULL DEFAULT 0")
+      if (!labelNames.has('label_version')) await db.execute("ALTER TABLE question_ai_labels ADD COLUMN label_version INTEGER NOT NULL DEFAULT 1")
+      if (!labelNames.has('updated_at')) {
+        await db.execute("ALTER TABLE question_ai_labels ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+        await db.execute("UPDATE question_ai_labels SET updated_at = CURRENT_TIMESTAMP WHERE updated_at = ''")
+      }
       return db
     })()
   }

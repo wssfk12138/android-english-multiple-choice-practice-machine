@@ -1,9 +1,25 @@
-import { analyzeWrongQuestions, analyzeWrongStatus, createProfile, createConversation, deleteConversation, deleteProfile, listConversations, listProfiles, selectorModels, sendChat, setAllModelVisibility, setModelVisibility, syncModels, testProfile, translateVocabularyEntries, updateProfile } from './ai'
+import { analyzeWrongQuestions, analyzeWrongStatus, createProfile, createConversation, deleteConversation, deleteProfile, listConversations, listProfiles, selectorModels, sendChat, setAllModelVisibility, setModelVisibility, syncModels, testProfile, updateProfile } from './ai'
 import { LocalApiError } from './errors'
 import { createSession, dashboard, getSession, listWrong, saveAnswer, submitSession, submitUnit } from './practice'
 import { createEsqImport, listEsqImports, listPapers, publishEsqImport, readEsqImport } from './question-bank'
-import { addVocabulary, deleteVocabulary, homeVocabulary, listVocabulary, queueTranslations, reviewVocabulary, retryVocabulary, serializeEntry, updateVocabulary } from './vocabulary'
+import { addVocabulary, deleteVocabulary, homeVocabulary, listVocabulary, reviewVocabulary, retryVocabulary, serializeEntry, updateVocabulary } from './vocabulary'
 import { checkAppUpdate, checkQuestionBankCatalog, downloadQuestionBankPackage, installAppUpdate, readUpdateSettings, updateSettings } from './app-update'
+import {
+  createDocumentImport,
+  listDocumentImports,
+  publishDocumentImport,
+  readDocumentImport,
+  retryDocumentModelAssist,
+  updateDocumentAnswers,
+  updateDocumentImport,
+} from './document-import'
+import {
+  labelingStatus,
+  labelNextUnit,
+  listQuestionLabels,
+  updateQuestionLabel,
+} from './question-labeling'
+import { queueAndStartVocabularyTranslations } from './vocabulary-translation-runner'
 
 type JsonRecord = Record<string, any>
 
@@ -63,7 +79,20 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (params && method === 'POST') {
     return await publishEsqImport(Number(params[1]), body || {}) as T
   }
-  if (pathname === '/imports' && method === 'GET') return [] as T
+  if (pathname === '/imports' && method === 'GET') return await listDocumentImports() as T
+  if (pathname === '/imports' && method === 'POST') {
+    if (!(options.body instanceof FormData)) throw new LocalApiError(400, '请选择 Word 文件')
+    return await createDocumentImport(options.body) as T
+  }
+  params = match(pathname, /^\/imports\/(\d+)$/)
+  if (params && method === 'GET') return await readDocumentImport(Number(params[1])) as T
+  if (params && method === 'PUT') return await updateDocumentImport(Number(params[1]), body || {}) as T
+  params = match(pathname, /^\/imports\/(\d+)\/model-assist$/)
+  if (params && method === 'POST') return await retryDocumentModelAssist(Number(params[1]), body || {}) as T
+  params = match(pathname, /^\/imports\/(\d+)\/answers$/)
+  if (params && method === 'PATCH') return await updateDocumentAnswers(Number(params[1]), body || {}) as T
+  params = match(pathname, /^\/imports\/(\d+)\/publish$/)
+  if (params && method === 'POST') return await publishDocumentImport(Number(params[1])) as T
 
   if (pathname === '/vocabulary' && method === 'GET') {
     return await listVocabulary(url.searchParams) as T
@@ -83,19 +112,7 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
       )
       ids = [...new Set([...ids, ...pending.map(item => Number(item.id))])].slice(0, 100)
     }
-    const queued = await queueTranslations(ids)
-    if (ids.length) {
-      void translateVocabularyEntries(ids).catch(async error => {
-        const { run } = await import('./database')
-        await run(
-          `UPDATE vocabulary_entries SET translation_status = 'failed',
-            translation_error = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE id IN (${ids.map(() => '?').join(',')})
-             AND translation_status = 'queued'`,
-          [String(error).slice(0, 600), ...ids],
-        )
-      })
-    }
+    const queued = await queueAndStartVocabularyTranslations(ids)
     return queued as T
   }
   params = match(pathname, /^\/vocabulary\/(\d+)$/)
@@ -151,10 +168,16 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
 
   if (pathname.startsWith('/ai/question-labels')) {
     if (pathname === '/ai/question-labels/status' && method === 'GET') {
-      return { year: null, years: [], total: 0, labeled: 0, locked: 0, review_pending: 0, remaining: 0, percentage: 0 } as T
+      return await labelingStatus(url.searchParams) as T
     }
-    if (pathname === '/ai/question-labels' && method === 'GET') return [] as T
-    throw new LocalApiError(501, 'Android 版不提供题库智能标注功能')
+    if (pathname === '/ai/question-labels' && method === 'GET') {
+      return await listQuestionLabels(url.searchParams) as T
+    }
+    if (pathname === '/ai/question-labels/next' && method === 'POST') {
+      return await labelNextUnit(body || {}) as T
+    }
+    params = match(pathname, /^\/ai\/question-labels\/(\d+)$/)
+    if (params && method === 'PUT') return await updateQuestionLabel(Number(params[1]), body || {}) as T
   }
 
   if (pathname === '/android/updates/settings' && method === 'GET') {

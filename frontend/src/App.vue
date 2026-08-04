@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { BookMarked, BookOpenText, Brain, Download, FileUp, Home, Library, MessageCircle, Moon, PackageCheck, Settings, Sun, Trash2 } from 'lucide-vue-next'
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { App as CapacitorApp } from '@capacitor/app'
+import type { PluginListenerHandle } from '@capacitor/core'
 import { useRoute } from 'vue-router'
 import { platformRuntime } from './platform/runtime'
+import { post } from './api'
 import {
   pendingInstallerCleanup,
   resolveInstallerCleanup,
@@ -15,6 +18,7 @@ const installerCleanup = ref<PendingInstallerCleanup | null>(null)
 const installerCleanupBusy = ref(false)
 const installerCleanupError = ref('')
 const retainInstallerButton = ref<HTMLButtonElement | null>(null)
+let appStateListener: PluginListenerHandle | null = null
 function applyTheme() {
   document.documentElement.classList.toggle('dark', dark.value)
   localStorage.setItem('linjian-theme', dark.value ? 'dark' : 'light')
@@ -72,6 +76,18 @@ onMounted(async () => {
     || (!localStorage.getItem('linjian-theme') && matchMedia('(prefers-color-scheme: dark)').matches)
   applyTheme()
   if (platformRuntime.isAndroid) {
+    const { resumeVocabularyTranslations } = await import('./platform/android/vocabulary-translation-runner')
+    resumeVocabularyTranslations()
+    appStateListener = await CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) {
+        resumeVocabularyTranslations()
+      } else if (route.path.startsWith('/practice')) {
+        void post('/vocabulary/translation-runs', {
+          entry_ids: [],
+          trigger: 'practice_exit',
+        }).catch(() => undefined)
+      }
+    })
     try {
       const pending = await pendingInstallerCleanup()
       if (pending.pending) {
@@ -86,7 +102,10 @@ onMounted(async () => {
   window.addEventListener('keydown', handleInstallerCleanupKeydown)
 })
 
-onBeforeUnmount(() => window.removeEventListener('keydown', handleInstallerCleanupKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleInstallerCleanupKeydown)
+  void appStateListener?.remove()
+})
 </script>
 
 <template>

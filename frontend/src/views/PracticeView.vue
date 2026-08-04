@@ -258,7 +258,9 @@ async function flushVocabularyTranslations(
 ) {
   const records = [...translationRecords(unitId)]
   const entryIds = [...new Set(records.map(item => item.entryId))]
-  if (!entryIds.length) return
+  // On Android the database is authoritative. Even when the component-local
+  // queue is empty, an earlier interrupted exit may have left pending rows.
+  if (!entryIds.length && document.documentElement.dataset.platform !== 'android') return
   try {
     const result: any = await post('/vocabulary/translation-runs', {
       entry_ids: entryIds,
@@ -280,7 +282,6 @@ async function flushVocabularyTranslations(
 
 function flushVocabularyOnPageHide() {
   const entryIds = [...new Set(pendingVocabulary.value.map(item => item.entryId))]
-  if (!entryIds.length) return
   if (document.documentElement.dataset.platform === 'android') {
     void post('/vocabulary/translation-runs', {
       entry_ids: entryIds,
@@ -288,6 +289,7 @@ function flushVocabularyOnPageHide() {
     }).catch(() => undefined)
     return
   }
+  if (!entryIds.length) return
   void fetch('/api/vocabulary/translation-runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

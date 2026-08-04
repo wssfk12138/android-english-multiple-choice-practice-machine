@@ -322,16 +322,18 @@ export async function reviewVocabulary(id: number, rating: string): Promise<Json
 
 export async function queueTranslations(entryIds: number[]): Promise<JsonRecord> {
   const ids = [...new Set(entryIds.map(Number).filter(id => id > 0))].slice(0, 100)
+  let queuedCount = 0
   if (ids.length) {
-    await run(
+    const result = await run(
       `UPDATE vocabulary_entries SET translation_status = 'queued',
         translation_error = '', updated_at = CURRENT_TIMESTAMP
        WHERE id IN (${ids.map(() => '?').join(',')})
          AND user_edited = 0 AND translation_status IN ('pending','queued','failed')`,
       ids,
     )
+    queuedCount = result.changes
   }
-  return { accepted: true, queuedCount: ids.length }
+  return { accepted: true, queuedCount }
 }
 
 export { serializeEntry }

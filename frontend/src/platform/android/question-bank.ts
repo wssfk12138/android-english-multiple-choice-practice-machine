@@ -257,7 +257,7 @@ async function upsertPaper(
   pkg: ImportedPackage,
   item: ImportedPackage['papers'][number],
   existingPaperId = 0,
-) {
+): Promise<number> {
   const paper = item.paper
   const manifest = pkg.manifest
   let paperId = existingPaperId
@@ -458,6 +458,7 @@ async function upsertPaper(
       }
     }
   }
+  return paperId
 }
 
 export async function publishEsqImport(
@@ -469,6 +470,7 @@ export async function publishEsqImport(
   const resolutions = new Map(
     (body.resolutions || []).map(item => [item.paper_key, item.action]),
   )
+  const publishedPaperIds: number[] = []
   await transaction(async db => {
     for (const item of job.package.papers) {
       const existing = await db.query(
@@ -479,10 +481,13 @@ export async function publishEsqImport(
       if (existingId) {
         const action = resolutions.get(item.paper.paperKey)
         if (!action) throw new LocalApiError(409, `请先决定 ${item.paper.year} 年题库的处理方式`)
-        if (action === 'keep_existing') continue
+        if (action === 'keep_existing') {
+          publishedPaperIds.push(existingId)
+          continue
+        }
         if (action !== 'replace_with_imported') throw new LocalApiError(422, '未知的题库冲突处理方式')
       }
-      await upsertPaper(db, job.package, item, existingId)
+      publishedPaperIds.push(await upsertPaper(db, job.package, item, existingId))
     }
     await db.run(
       `INSERT OR REPLACE INTO question_bank_packages
@@ -500,7 +505,12 @@ export async function publishEsqImport(
   })
   job.status = 'published'
   job.preview = await buildPreview(job.package)
-  return { published: true, packageId: job.package.manifest.packageId }
+  return {
+    published: true,
+    packageId: job.package.manifest.packageId,
+    paper_ids: publishedPaperIds,
+    scope_title: job.preview.title,
+  }
 }
 
 export async function listPapers(): Promise<JsonRecord[]> {
