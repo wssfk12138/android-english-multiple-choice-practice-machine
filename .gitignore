@@ -1,0 +1,41 @@
+# Frontend dependencies and generated files
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+frontend/android/.gradle/
+frontend/android/**/build/
+frontend/android/local.properties
+frontend/android/app/src/main/assets/public/
+frontend/android/app/src/main/assets/capacitor.config.json
+frontend/android/app/src/main/assets/capacitor.plugins.json
+frontend/android/app/src/main/res/xml/config.xml
+
+# Local runtime data and private development artifacts
+work/
+outputs/
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+*.backup
+*.log
+
+# Secrets and local certificates
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+signing.properties
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,577 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://english-practice-machine.local/schemas/esq-1.0.schema.json",
+  "title": "英语刷题机 ESQ 1.0",
+  "type": "object",
+  "required": [
+    "format",
+    "schemaVersion",
+    "packageId",
+    "contentVersion",
+    "title",
+    "subject",
+    "publisher",
+    "license",
+    "source",
+    "papers"
+  ],
+  "properties": {
+    "format": {
+      "const": "esq"
+    },
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "packageId": {
+      "$ref": "#/$defs/externalKey"
+    },
+    "contentVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "language": {
+      "type": "string",
+      "default": "en"
+    },
+    "locale": {
+      "type": "string",
+      "default": "zh-CN"
+    },
+    "publisher": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "license": {
+      "type": "object",
+      "required": [
+        "notice"
+      ],
+      "properties": {
+        "spdx": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "notice": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "additionalProperties": true
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "type",
+        "description"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "attribution": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      },
+      "additionalProperties": true
+    },
+    "papers": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/paperReference"
+      }
+    },
+    "features": {
+      "type": "object",
+      "properties": {
+        "hasAnswers": {
+          "type": "boolean"
+        },
+        "hasAiLabels": {
+          "type": "boolean"
+        },
+        "hasAssets": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "generator": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 50
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "externalKey": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "safePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/() -]+$"
+    },
+    "paperReference": {
+      "type": "object",
+      "required": [
+        "paperKey",
+        "year",
+        "path",
+        "answerPath"
+      ],
+      "properties": {
+        "paperKey": {
+          "$ref": "#/$defs/externalKey"
+        },
+        "year": {
+          "type": "integer",
+          "minimum": 1900,
+          "maximum": 2200
+        },
+        "path": {
+          "$ref": "#/$defs/safePath"
+        },
+        "answerPath": {
+          "$ref": "#/$defs/safePath"
+        },
+        "labelPath": {
+          "$ref": "#/$defs/safePath"
+        }
+      },
+      "additionalProperties": false
+    },
+    "contentBlock": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/textBlock"
+        },
+        {
+          "$ref": "#/$defs/imageBlock"
+        },
+        {
+          "$ref": "#/$defs/tableBlock"
+        },
+        {
+          "$ref": "#/$defs/audioBlock"
+        },
+        {
+          "$ref": "#/$defs/separatorBlock"
+        }
+      ]
+    },
+    "textBlock": {
+      "type": "object",
+      "required": [
+        "blockKey",
+        "type",
+        "text"
+      ],
+      "properties": {
+        "blockKey": {
+          "$ref": "#/$defs/externalKey"
+        },
+        "type": {
+          "enum": [
+            "paragraph",
+            "quote"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 50000
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "imageBlock": {
+      "type": "object",
+      "required": [
+        "blockKey",
+        "type",
+        "assetId",
+        "alt"
+      ],
+      "properties": {
+        "blockKey": {
+          "$ref": "#/$defs/externalKey"
+        },
+        "type": {
+          "const": "image"
+        },
+        "assetId": {
+          "$ref": "#/$defs/externalKey"
+        },
+        "alt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "caption": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "tableBlock": {
+      "type": "object",
+      "required": [
+        "blockKey",
+        "type",
+        "rows"
+      ],
+      "properties": {
+        "blockKey": {
+          "$ref": "#/$defs/externalKey"
+        },
+        "type": {
+          "const": "table"
+        },
+        "caption": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "maxLength": 5000
+            }
+          }
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "audioBlock": {
+      "type": "object",
+      "required": [
+        "blockKey",
+        "type",
+        "assetId"
+      ],
+      "properties": {
+        "blockKey": {
+          "$ref": "#/$defs/externalKey"
+        },
+        "type": {
+          "const": "audio"
+        },
+        "assetId": {
+          "$ref": "#/$defs/externalKey"
+        },
+        "transcript": {
+          "type": "string",
+          "maxLength": 50000
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "separatorBlock": {
+      "type": "object",
+      "required": [
+        "blockKey",
+        "type"
+      ],
+      "properties": {
+        "blockKey": {
+          "$ref": "#/$defs/externalKey"
+        },
+        "type": {
+          "const": "separator"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "option": {
+      "type": "object",
+      "required": [
+        "key",
+        "content"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[A-Z]$"
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 20000
+        },
+        "contentBlocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/contentBlock"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "question": {
+      "type": "object",
+      "required": [
+        "questionKey",
+        "number",
+        "type",
+        "stem",
+        "score"
+      ],
+      "properties": {
+        "questionKey": {
+          "$ref": "#/$defs/externalKey"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9999
+        },
+        "type": {
+          "enum": [
+            "single_choice"
+          ]
+        },
+        "stem": {
+          "type": "string",
+          "maxLength": 20000
+        },
+        "stemBlocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/contentBlock"
+          }
+        },
+        "options": {
+          "type": "array",
+          "maxItems": 26,
+          "items": {
+            "$ref": "#/$defs/option"
+          }
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "unit": {
+      "type": "object",
+      "required": [
+        "unitKey",
+        "type",
+        "title",
+        "sequence",
+        "passage",
+        "questions"
+      ],
+      "properties": {
+        "unitKey": {
+          "$ref": "#/$defs/externalKey"
+        },
+        "type": {
+          "enum": [
+            "cloze",
+            "reading",
+            "part_b"
+          ]
+        },
+        "subtype": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 999
+        },
+        "instructions": {
+          "type": "string",
+          "maxLength": 20000
+        },
+        "passage": {
+          "type": "object",
+          "required": [
+            "blocks"
+          ],
+          "properties": {
+            "blocks": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "$ref": "#/$defs/contentBlock"
+              }
+            },
+            "blankStyle": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "insertionPoints": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 20
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "candidates": {
+          "type": "array",
+          "maxItems": 26,
+          "items": {
+            "$ref": "#/$defs/option"
+          }
+        },
+        "questions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/question"
+          }
+        },
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "paperFile": {
+      "type": "object",
+      "required": [
+        "paperKey",
+        "year",
+        "title",
+        "subject",
+        "units"
+      ],
+      "properties": {
+        "paperKey": {
+          "$ref": "#/$defs/externalKey"
+        },
+        "year": {
+          "type": "integer",
+          "minimum": 1900,
+          "maximum": 2200
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "units": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/unit"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "answerFile": {
+      "type": "object",
+      "required": [
+        "paperKey",
+        "answers"
+      ],
+      "properties": {
+        "paperKey": {
+          "$ref": "#/$defs/externalKey"
+        },
+        "answers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "correctOption"
+            ],
+            "properties": {
+              "correctOption": {
+                "type": "string",
+                "pattern": "^[A-Z]$"
+              },
+              "score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1000
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

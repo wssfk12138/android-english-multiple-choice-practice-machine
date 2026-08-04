@@ -1,0 +1,61 @@
+{
+  "paperKey": "org.example.english.demo.2026",
+  "year": 2026,
+  "title": "ESQ 1.0 演示试卷",
+  "subject": "英语演示题",
+  "units": [
+    {
+      "unitKey": "org.example.english.demo.2026.reading.text1",
+      "type": "reading",
+      "subtype": "reading_a",
+      "title": "Reading Text 1",
+      "sequence": 1,
+      "passage": {
+        "blocks": [
+          {
+            "blockKey": "p01",
+            "type": "paragraph",
+            "text": "A small library opened beside the park. It gives local students a quiet place to read and study."
+          },
+          {
+            "blockKey": "table01",
+            "type": "table",
+            "caption": "Weekly visitors",
+            "rows": [
+              ["Week", "Visitors"],
+              ["1", "120"],
+              ["2", "168"]
+            ]
+          }
+        ]
+      },
+      "questions": [
+        {
+          "questionKey": "org.example.english.demo.2026.q01",
+          "number": 1,
+          "type": "single_choice",
+          "stem": "What does the library provide for students?",
+          "options": [
+            {
+              "key": "A",
+              "content": "A place to exercise."
+            },
+            {
+              "key": "B",
+              "content": "A quiet place to study."
+            },
+            {
+              "key": "C",
+              "content": "Free meals."
+            },
+            {
+              "key": "D",
+              "content": "A bus service."
+            }
+          ],
+          "score": 2
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">英语刷题机</string>
+    <string name="title_activity_main">英语刷题机</string>
+    <string name="package_name">com.wssfk.englishpracticemachine</string>
+    <string name="custom_url_scheme">com.wssfk.englishpracticemachine</string>
+</resources>
