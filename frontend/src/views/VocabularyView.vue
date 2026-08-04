@@ -55,7 +55,7 @@ function saveDisplayConfig() {
 function translationStatusText(status: string, detail = false) {
   if (status === 'translating') return detail ? '模型正在后台翻译' : '正在后台翻译…'
   if (status === 'failed') return detail ? '翻译暂未完成' : '等待重新翻译'
-  return detail ? '等待练习提交或退出后翻译' : '等待练习结束后翻译'
+  return detail ? '退出答题界面后统一翻译' : '退出答题界面后翻译'
 }
 
 async function load() {
