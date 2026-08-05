@@ -37,12 +37,16 @@ CREATE TABLE IF NOT EXISTS papers (
   year INTEGER NOT NULL,
   subject TEXT NOT NULL DEFAULT '英语一',
   title TEXT NOT NULL,
+  exam_type TEXT NOT NULL DEFAULT '',
+  exam_month INTEGER NOT NULL DEFAULT 0,
+  set_number INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'published',
   deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (profile_id) REFERENCES question_bank_profiles(id)
 );
+UPDATE papers SET exam_type='', exam_month=0, set_number=1 WHERE exam_type IS NULL;
 CREATE TABLE IF NOT EXISTS units (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   paper_id INTEGER NOT NULL,
