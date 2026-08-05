@@ -64,6 +64,7 @@ const progress = computed(() => {
   return { answered, total }
 })
 const isPartB = computed(() => activeUnit.value?.unit_type === 'part_b')
+const isMatchingPartB = computed(() => isPartB.value && activeUnit.value?.subtype !== 'true_false')
 const isOrdering = computed(() => activeUnit.value?.subtype === 'paragraph_reordering')
 const orderingItems = ref<any[]>([])
 const candidateOptions = computed(() => activeUnit.value?.questions?.[0]?.options || [])
@@ -128,7 +129,9 @@ type PassageSegment = {
 const passageSegments = computed<PassageSegment[]>(() => {
   const unit = activeUnit.value
   const passage = unit?.passage || '该题型请在右侧完成候选项匹配。'
-  if (!unit || !['cloze', 'part_b'].includes(unit.unit_type)) {
+  const usesInlineBlanks = unit?.unit_type === 'cloze'
+    || (unit?.unit_type === 'part_b' && unit?.subtype !== 'true_false')
+  if (!unit || !usesInlineBlanks) {
     return [{ type: 'text', text: passage }]
   }
 
@@ -774,7 +777,7 @@ async function copySelectedTerm() {
             </article>
           </VueDraggableNext>
         </div>
-        <div v-else-if="isPartB" class="matching-board">
+        <div v-else-if="isMatchingPartB" class="matching-board">
           <div class="candidate-bank">
             <article v-for="option in candidateOptions" :key="option.stable_key" class="candidate-reference" data-vocab-text @contextmenu="openVocabularyMenu">
               <span class="option-letter">{{ option.label }}</span><ContentBlocks v-if="option.content_blocks?.length" :blocks="option.content_blocks" :package-id="activeContentPackage.packageId" :content-version="activeContentPackage.contentVersion" /><p v-else>{{ option.content }}</p>

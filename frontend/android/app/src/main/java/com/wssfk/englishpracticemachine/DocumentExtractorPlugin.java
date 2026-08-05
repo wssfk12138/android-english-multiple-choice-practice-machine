@@ -46,8 +46,14 @@ public class DocumentExtractorPlugin extends Plugin {
             }
             String lower = fileName.toLowerCase(Locale.ROOT);
             Extracted extracted;
-            if (lower.endsWith(".docx")) extracted = extractDocx(bytes);
-            else if (lower.endsWith(".doc")) extracted = extractDoc(bytes);
+            if (lower.endsWith(".docx") || lower.endsWith(".doc")) {
+                if (isZipContainer(bytes)) extracted = extractDocx(bytes);
+                else if (isOleContainer(bytes)) extracted = extractDoc(bytes);
+                else {
+                    call.reject("Word 文件内容与 DOC/DOCX 格式不符");
+                    return;
+                }
+            }
             else if (lower.endsWith(".pdf")) extracted = extractPdf(bytes);
             else {
                 call.reject("只支持 DOC、DOCX 或 PDF 文件");
@@ -79,6 +85,23 @@ public class DocumentExtractorPlugin extends Plugin {
             }
         }
         return new Extracted("legacy_doc", blocks, !blocks.isEmpty());
+    }
+
+    private boolean isZipContainer(byte[] bytes) {
+        return bytes.length >= 4
+            && bytes[0] == 0x50
+            && bytes[1] == 0x4B
+            && (bytes[2] == 0x03 || bytes[2] == 0x05 || bytes[2] == 0x07)
+            && (bytes[3] == 0x04 || bytes[3] == 0x06 || bytes[3] == 0x08);
+    }
+
+    private boolean isOleContainer(byte[] bytes) {
+        int[] signature = { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 };
+        if (bytes.length < signature.length) return false;
+        for (int index = 0; index < signature.length; index++) {
+            if ((bytes[index] & 0xFF) != signature[index]) return false;
+        }
+        return true;
     }
 
     private Extracted extractDocx(byte[] bytes) throws Exception {

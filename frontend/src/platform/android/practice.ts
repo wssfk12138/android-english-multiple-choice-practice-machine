@@ -29,6 +29,7 @@ async function serializeQuestion(
   shuffleOptions: boolean,
   savedOrder?: string[],
   includeAnswer = false,
+  preserveOptionLabels = false,
 ): Promise<JsonRecord> {
   let options = await rows<JsonRecord>(
     `SELECT stable_key, original_label, content, sequence, metadata
@@ -55,7 +56,9 @@ async function serializeQuestion(
       const optionMetadata = parseJson<JsonRecord>(option.metadata, {})
       return {
         stable_key: option.stable_key,
-        label: String.fromCharCode(65 + index),
+        label: preserveOptionLabels
+          ? option.original_label
+          : String.fromCharCode(65 + index),
         content: option.content,
         metadata: optionMetadata,
         content_blocks: optionMetadata.content_blocks || [],
@@ -109,6 +112,7 @@ async function serializeUnit(
       options.shuffleOptions && !sharedPartBOrder,
       options.answerOrders?.get(question.id) || sharedPartBOrder,
       Boolean(options.includeAnswers),
+      unit.subtype === 'true_false',
     ))
   }
   const sharedData = parseJson<JsonRecord>(unit.shared_data, {})

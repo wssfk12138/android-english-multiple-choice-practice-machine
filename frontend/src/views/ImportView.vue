@@ -412,7 +412,7 @@ async function removeImportJob(job: any, esq = false) {
             <section v-for="question in unit.questions" :key="question.number" class="question-editor">
               <div class="question-editor-head">
                 <label class="compact-field"><span>题号</span><input v-model.number="question.number" type="number"></label>
-                <label class="compact-field"><span>答案</span><select v-model="current.draft.answers[question.number]"><option value="">未填写</option><option v-for="key in ['A','B','C','D','E','F','G','H']" :key="key">{{ key }}</option></select></label>
+                <label class="compact-field"><span>答案</span><select v-model="current.draft.answers[question.number]"><option value="">未填写</option><option v-for="option in question.options" :key="option.key" :value="option.key">{{ option.key }}</option></select></label>
               </div>
               <label class="field"><span>题干</span><textarea v-model="question.stem" rows="2"></textarea></label>
               <div class="option-editor-grid">

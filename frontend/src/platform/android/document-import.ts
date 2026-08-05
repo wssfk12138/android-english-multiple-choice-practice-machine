@@ -44,12 +44,20 @@ function splitOptions(value: string): Array<{ key: string; content: string }> {
 
 function answerMap(text: string): Record<string, string> {
   const result: Record<string, string> = {}
-  for (const match of text.matchAll(/(?<!\d)([1-5]?\d)\s*[.．、:：]\s*([A-H])(?=\s|$|\d|[.,，。])/gi)) {
+  for (const match of text.matchAll(/(?<!\d)([1-5]?\d)\s*[.．、:：]\s*([A-HT])(?=\s|$|\d|[.,，。])/gi)) {
     const number = Number(match[1])
     if (number >= 1 && number <= 45) result[String(number)] = match[2].toUpperCase()
   }
+  const rangePattern = /(?:Text\s*[1-4]\s*|(?<![A-Za-z0-9]))([1-4]?\d)\s*[-~～至–—]\s*([1-4]?\d)\s*[:：]?\s*([\s\S]*?)(?=Text\s*[1-4]\s*[1-4]?\d\s*[-~～至–—]\s*[1-4]?\d|(?<![A-Za-z0-9])[1-4]?\d\s*[-~～至–—]\s*[1-4]?\d|Part\s+[BC]|Section\s+[ⅠⅡⅢIV1234]|$)/gi
+  for (const match of text.matchAll(rangePattern)) {
+    const first = Number(match[1])
+    const last = Number(match[2])
+    const letters = String(match[3]).toUpperCase().match(/[A-HT]/g) || []
+    if (last - first + 1 !== letters.length) continue
+    letters.forEach((letter, index) => { result[String(first + index)] = letter })
+  }
   const compact = text.replace(/\s+/g, '').toUpperCase()
-  for (const match of compact.matchAll(/(?<!\d)([1-4]?\d)[-~～至–—]([1-4]?\d)[:：]?([A-H]{2,20})/g)) {
+  for (const match of compact.matchAll(/(?<!\d)([1-4]?\d)[-~～至–—]([1-4]?\d)[:：]?([A-HT]{2,20})/g)) {
     const first = Number(match[1])
     const last = Number(match[2])
     if (last - first + 1 !== match[3].length) continue
@@ -70,7 +78,7 @@ function answerMap(text: string): Record<string, string> {
       pendingRanges.push({ first: Number(range[1]), last: Number(range[2]) })
       continue
     }
-    const letters = line.replace(/[^A-H]/g, '')
+    const letters = line.replace(/[^A-HT]/g, '')
     const pending = pendingRanges[0]
     if (!pending || letters.length !== pending.last - pending.first + 1) continue
     pendingRanges.shift()
@@ -93,10 +101,94 @@ function ensureBlanks(passage: string, first: number, last: number): string {
   return passage.replace(/(?<=[A-Za-z])\n\n(?=[a-z])/g, ' ')
 }
 
+function parseCompactClozeOptions(text: string): Array<Array<{ key: string; content: string }>> {
+  const normalized = clean(text)
+  const starts = [...normalized.matchAll(/(?<!\d)([1-9]|1\d|20)\s*[.．、]\s*/g)]
+  const byNumber = new Map<number, Array<{ key: string; content: string }>>()
+  starts.forEach((start, index) => {
+    const number = Number(start[1])
+    const end = index + 1 < starts.length ? starts[index + 1].index! : normalized.length
+    const options = splitOptions(normalized.slice(start.index! + start[0].length, end))
+    if (options.length === 4 && options.map(option => option.key).join('') === 'ABCD') {
+      byNumber.set(number, options)
+    }
+  })
+
+  let runStart = 21
+  for (let number = 1; number <= 20; number++) {
+    if (Array.from({ length: 21 - number }, (_, index) => number + index)
+      .every(candidate => byNumber.has(candidate))) {
+      runStart = number
+      break
+    }
+  }
+  if (runStart > 1) {
+    const anchor = starts.find(match => Number(match[1]) === runStart)?.index ?? normalized.length
+    const prefixOptions = splitOptions(normalized.slice(0, anchor))
+    const missingCount = runStart - 1
+    if (prefixOptions.length === missingCount * 4) {
+      const labels = prefixOptions.map(option => option.key)
+      const columnMajor = ['A', 'B', 'C', 'D']
+        .flatMap(key => Array.from({ length: missingCount }, () => key))
+      if (labels.join('') === columnMajor.join('')) {
+        for (let questionIndex = 0; questionIndex < missingCount; questionIndex++) {
+          byNumber.set(questionIndex + 1, Array.from({ length: 4 }, (_, column) => ({
+            key: String.fromCharCode(65 + column),
+            content: prefixOptions[column * missingCount + questionIndex].content,
+          })))
+        }
+      } else {
+        for (let questionIndex = 0; questionIndex < missingCount; questionIndex++) {
+          const chunk = prefixOptions.slice(questionIndex * 4, questionIndex * 4 + 4)
+          if (chunk.map(option => option.key).join('') === 'ABCD') {
+            byNumber.set(questionIndex + 1, chunk)
+          }
+        }
+      }
+    }
+  }
+  if (byNumber.size === 20) {
+    return Array.from({ length: 20 }, (_, index) => byNumber.get(index + 1)!)
+  }
+
+  const flat = splitOptions(normalized)
+  if (flat.length === 80) {
+    const groups = Array.from({ length: 20 }, (_, index) => flat.slice(index * 4, index * 4 + 4))
+    if (groups.every(group => group.map(option => option.key).join('') === 'ABCD')) return groups
+  }
+  return []
+}
+
 function parseCloze(blocks: string[], answers: Record<string, string>): JsonRecord {
   const start = findIndex(blocks, /Section\s*[ⅠI1]\s*Use\s+of\s+English/i)
   const reading = findIndex(blocks, /Section\s*[ⅡI2]\s*Reading\s+Comprehension|Reading\s+Comprehension/i, Math.max(start, 0))
   const section = blocks.slice(Math.max(0, start + 1), reading > start ? reading : blocks.length)
+  const content = section.filter(text =>
+    !/^(Directions:|Part [ABC]|Section )/i.test(text)
+    && !/Choose the best word/i.test(text))
+  const optionBlock = [...content].sort((left, right) =>
+    [...right.matchAll(OPTION_RE)].length - [...left.matchAll(OPTION_RE)].length)[0] || ''
+  const compactGroups = parseCompactClozeOptions(optionBlock)
+  if (compactGroups.length === 20) {
+    return {
+      unit_type: 'cloze',
+      subtype: 'cloze',
+      title: '完型填空',
+      sequence: 1,
+      passage: ensureBlanks(content.filter(text => text !== optionBlock).join('\n\n'), 1, 20),
+      shared_data: {},
+      questions: compactGroups.map((options, index) => {
+        const number = index + 1
+        return {
+          number,
+          stem: '',
+          options,
+          answer: answers[String(number)] || '',
+          score: 0.5,
+        }
+      }),
+    }
+  }
   const optionRows = new Map<number, Array<{ key: string; content: string }>>()
   const optionIndexes = new Set<number>()
   section.forEach((text, index) => {
@@ -134,6 +226,29 @@ function parseCloze(blocks: string[], answers: Record<string, string>): JsonReco
         options: optionRows.get(number) || [],
         answer: answers[String(number)] || '',
         score: 0.5,
+      }
+    }),
+  }
+}
+
+function unlabeledQuestionGroups(
+  segment: string[],
+  firstNumber: number,
+): { passage: string; questions: JsonRecord[] } {
+  const content = segment.filter(text => !/^(Directions:|Part [ABC]|Section )/i.test(text))
+  if (content.length < 25) return { passage: content.join('\n\n'), questions: [] }
+  const tail = content.slice(-25)
+  return {
+    passage: content.slice(0, -25).join('\n\n'),
+    questions: Array.from({ length: 5 }, (_, index) => {
+      const offset = index * 5
+      return {
+        number: firstNumber + index,
+        stem: tail[offset],
+        options: tail.slice(offset + 1, offset + 5).map((option, optionIndex) => ({
+          key: String.fromCharCode(65 + optionIndex),
+          content: option,
+        })),
       }
     }),
   }
@@ -182,7 +297,14 @@ function parseReading(blocks: string[], answers: Record<string, string>): JsonRe
       else if (!started && !/^(Directions:|Part [ABC]|Section )/i.test(text)) passage.push(text)
     }
     if (current) questions.push(current)
-    for (const question of questions) {
+    let finalPassage = passage.join('\n\n')
+    let finalQuestions = questions
+    if (questions.length !== 5 || questions.some(question => question.options.length !== 4)) {
+      const fallback = unlabeledQuestionGroups(segment, firstNumber)
+      finalPassage = fallback.passage
+      finalQuestions = fallback.questions
+    }
+    for (const question of finalQuestions) {
       question.answer = answers[String(question.number)] || ''
       question.score = 2
     }
@@ -191,9 +313,9 @@ function parseReading(blocks: string[], answers: Record<string, string>): JsonRe
       subtype: 'reading_a',
       title: `阅读 Text ${marker.number}`,
       sequence: marker.number + 1,
-      passage: passage.join('\n\n'),
+      passage: finalPassage,
       shared_data: {},
-      questions,
+      questions: finalQuestions,
     }
   })
 }
@@ -203,10 +325,77 @@ function hasObjectivePartB(blocks: string[]): boolean {
   if (index < 0) return false
   const context = blocks.slice(index, index + 6).join(' ').toLowerCase()
   if (/translate\s+the\s+underlined|translation/.test(context)) return false
-  return /questions?.*?41.*?45|list\s+a|extra\s+choices|wrong\s+order|reorganize|subheading/.test(context)
+  return /questions?.*?41.*?45|list\s+a|extra\s+choices|wrong\s+order|reorganize|subheading|true\s+or\s+false|choose\s+t\s+if/.test(context)
+}
+
+function readingPartBBounds(blocks: string[]): { partB: number; sectionEnd: number } {
+  let reading = findIndex(blocks, /Section\s*(?:II|Ⅱ|2)\s*Reading\s+Comprehension/i)
+  if (reading < 0) reading = findIndex(blocks, /Reading\s+Comprehension/i)
+  const partB = findIndex(blocks, /^\s*Part\s*B\s*$/i, Math.max(reading, 0))
+  const sectionEnd = findIndex(
+    blocks,
+    /^\s*Section\s*(?:III|Ⅲ|3)\s*(?:Translation)?\s*$/i,
+    Math.max(partB + 1, 0),
+  )
+  return { partB, sectionEnd }
+}
+
+function parseTrueFalsePartB(
+  blocks: string[],
+  answers: Record<string, string>,
+  partB: number,
+  sectionEnd: number,
+): JsonRecord {
+  const section = blocks.slice(partB + 1, sectionEnd)
+  const directions: string[] = []
+  let contentStart = 0
+  for (let index = 0; index < section.length; index++) {
+    const text = section[index]
+    if (index === 0 && /^\s*Directions:\s*$/i.test(text)) {
+      directions.push(text)
+      contentStart = index + 1
+      continue
+    }
+    if (directions.length && /true\s+or\s+false|choose\s+T|ANSWER\s+SHEET|questions?/i.test(text)) {
+      directions.push(text)
+      contentStart = index + 1
+      continue
+    }
+    break
+  }
+  const content = section.slice(contentStart)
+    .filter(text => !/^(Directions:|Part [ABC]|Section )/i.test(text))
+  const statements = content.length >= 5 ? content.slice(-5) : []
+  const passage = content.length >= 5 ? content.slice(0, -5) : content
+  const options = [{ key: 'T', content: 'True' }, { key: 'F', content: 'False' }]
+  return {
+    unit_type: 'part_b',
+    subtype: 'true_false',
+    title: '阅读 Part B（判断题）',
+    sequence: 6,
+    passage: passage.join('\n\n'),
+    shared_data: { directions: clean(directions.join(' ')), candidates: {} },
+    questions: Array.from({ length: 5 }, (_, index) => {
+      const number = 41 + index
+      return {
+        number,
+        stem: statements[index] || '',
+        options: options.map(option => ({ ...option })),
+        answer: answers[String(number)] || '',
+        score: 2,
+      }
+    }),
+  }
 }
 
 function parsePartB(blocks: string[], answers: Record<string, string>): JsonRecord {
+  const bounds = readingPartBBounds(blocks)
+  if (bounds.partB >= 0 && bounds.sectionEnd > bounds.partB) {
+    const context = blocks.slice(bounds.partB, Math.min(bounds.sectionEnd, bounds.partB + 4)).join(' ')
+    if (/true\s+or\s+false|choose\s+t\s+if/i.test(context)) {
+      return parseTrueFalsePartB(blocks, answers, bounds.partB, bounds.sectionEnd)
+    }
+  }
   const partB = findIndex(blocks, /^\s*Part\s*B\s*$/i)
   const partC = findIndex(blocks, /^\s*Part\s*C(?:\s+Directions:)?\s*$/i, Math.max(0, partB + 1))
   const section = blocks.slice(partB + 1, partC > partB ? partC : blocks.length)
@@ -310,7 +499,7 @@ export function validateDocumentDraft(draft: JsonRecord): string[] {
   if (partB) {
     if (partB.questions.length !== 5) warnings.push('Part B 未识别为5题')
     const candidateCount = Object.keys(partB.shared_data?.candidates || {}).length
-    if (candidateCount < 7 || candidateCount > 8) {
+    if (partB.subtype !== 'true_false' && (candidateCount < 7 || candidateCount > 8)) {
       warnings.push(`Part B 候选项数量异常：${candidateCount}`)
     }
   }
@@ -324,30 +513,36 @@ export function parseExtractedExam(
 ): JsonRecord {
   const year = Number(fileName.match(/20\d{2}/)?.[0]
     || source.blocks.slice(0, 10).join(' ').match(/20\d{2}/)?.[0])
+  const subjectHeader = [fileName, ...source.blocks.slice(0, 12)].join(' ')
+  const subject = /英语\s*[\(（]?\s*二\s*[\)）]?|科目代码\s*[：:]?\s*204\b/.test(subjectHeader)
+    ? '英语二' : '英语一'
   const embeddedAnswers = answerMap(source.text)
   const attachmentAnswers = answerSource?.extracted.hasTextLayer
     ? answerMap(answerSource.extracted.text) : {}
   const answers = { ...embeddedAnswers, ...attachmentAnswers }
+  const embeddedAnswersConfirmed = !answerSource && Object.keys(embeddedAnswers).length > 0
   const units = [parseCloze(source.blocks, answers), ...parseReading(source.blocks, answers)]
   if (hasObjectivePartB(source.blocks)) {
     units.push(parsePartB(source.blocks, answers))
   }
   const draft: JsonRecord = {
     year: Number.isFinite(year) ? year : null,
-    subject: '英语一',
-    title: Number.isFinite(year) ? `${year}年考研英语一真题` : fileName.replace(/\.[^.]+$/, ''),
+    subject,
+    title: Number.isFinite(year) ? `${year}年考研${subject}真题` : fileName.replace(/\.[^.]+$/, ''),
     detected_format: source.format,
     source_file: fileName,
     answer_source: answerSource?.fileName || (Object.keys(embeddedAnswers).length ? '试卷内置答案' : '未提供'),
     answer_status: {
-      status: Object.keys(answers).length ? 'parsed' : 'missing',
+      status: embeddedAnswersConfirmed ? 'confirmed' : Object.keys(answers).length ? 'parsed' : 'missing',
       message: Object.keys(answers).length
-        ? `已识别 ${Object.keys(answers).length} 道答案，请发布前核对`
+        ? embeddedAnswersConfirmed
+          ? `已从试卷 Word 识别 ${Object.keys(answers).length} 道答案`
+          : `已识别 ${Object.keys(answers).length} 道答案，请发布前核对`
         : answerSource && !answerSource.extracted.hasTextLayer
           ? '答案 PDF 未检测到可靠文字层，请人工录入答案'
           : '未识别出标准答案，请人工录入',
     },
-    answers_confirmed: false,
+    answers_confirmed: embeddedAnswersConfirmed,
     answer_sources: Object.fromEntries(
       Object.keys(answers).map(number => [number, answerSource?.fileName || '试卷内置答案']),
     ),
@@ -413,6 +608,7 @@ export async function applyDocumentModelAssist(
   const prompt = `你是考研英语真题导入解析助手。只能依据材料校对，不得编造。
 输出 JSON：{"answer_map":{"1":"A"},"number_map":{},"question_fixes":[],"issues":[],"notes":""}。
 answer_map 必须尽可能覆盖本次全部客观题。若 Part B 是翻译题，不要导入 41-45，也不要报缺失。
+普通选择题答案使用 A-H；判断题答案使用 T/F。
 number_map 只在题号明确错位时填写。${
   options.correct_structure
     ? '允许 question_fixes 修正题干和选项归属，格式为 {"number":21,"stem":"...","options":[{"key":"A","content":"..."}]}。'
@@ -472,7 +668,7 @@ number_map 只在题号明确错位时填写。${
   let appliedAnswers = 0
   for (const [number, answer] of Object.entries(result.answer_map || {})) {
     const letter = String(answer).trim().toUpperCase()
-    if (!validNumbers.has(String(number)) || !/^[A-H]$/.test(letter)) continue
+    if (!validNumbers.has(String(number)) || !/^[A-HT]$/.test(letter)) continue
     draft.answers[String(number)] = letter
     draft.answer_sources[String(number)] = '模型辅助'
     appliedAnswers++
@@ -658,7 +854,7 @@ export async function updateDocumentAnswers(id: number, body: JsonRecord): Promi
   const allowed = new Set(expectedNumbers(draft).map(String))
   for (const [number, value] of Object.entries(body.answers || {})) {
     const answer = String(value || '').trim().toUpperCase()
-    if (!allowed.has(String(number)) || (answer && !/^[A-H]$/.test(answer))) continue
+    if (!allowed.has(String(number)) || (answer && !/^[A-HT]$/.test(answer))) continue
     draft.answers[String(number)] = answer
     draft.answer_sources[String(number)] = '人工录入'
   }
