@@ -33,11 +33,42 @@ assert.ok(
 
 const startupMigration = source.indexOf('await migratePaperExamMetadata(db)')
 const profileMigration = source.indexOf('await migrateQuestionBankProfiles(db)', startupMigration)
+const staleForeignKeyRepair = source.indexOf('await repairStalePaperForeignKey(db)', profileMigration)
 const profileIndexes = source.indexOf('await createQuestionBankProfileIndexes(db)', profileMigration)
 assert.ok(
   startupMigration >= 0 && profileMigration > startupMigration,
   'exam metadata must be migrated before the legacy papers table can be rebuilt',
 )
+assert.ok(
+  staleForeignKeyRepair > profileMigration && profileIndexes > staleForeignKeyRepair,
+  'stale paper foreign keys must be repaired before profile indexes are created',
+)
+
+const profileMigrationStart = source.indexOf('async function migrateQuestionBankProfiles')
+const legacyRenameGuard = source.indexOf('PRAGMA legacy_alter_table = ON', profileMigrationStart)
+const papersRename = source.indexOf('ALTER TABLE papers RENAME TO papers_rebuild_tmp_papers', profileMigrationStart)
+const legacyRenameRestore = source.indexOf('PRAGMA legacy_alter_table = OFF', papersRename)
+assert.ok(
+  legacyRenameGuard > profileMigrationStart
+    && papersRename > legacyRenameGuard
+    && legacyRenameRestore > papersRename,
+  'legacy table rename mode must protect child foreign keys while papers is rebuilt',
+)
+
+const repairStart = source.indexOf('async function repairStalePaperForeignKey')
+const inspectUnitsForeignKey = source.indexOf('PRAGMA foreign_key_list(units)', repairStart)
+const createReplacementUnits = source.indexOf('CREATE TABLE units_fk_repair', repairStart)
+const dropBrokenUnits = source.indexOf('DROP TABLE units;', createReplacementUnits)
+const restoreUnitsName = source.indexOf('ALTER TABLE units_fk_repair RENAME TO units', dropBrokenUnits)
+assert.ok(
+  repairStart >= 0
+    && inspectUnitsForeignKey > repairStart
+    && createReplacementUnits > inspectUnitsForeignKey
+    && dropBrokenUnits > createReplacementUnits
+    && restoreUnitsName > dropBrokenUnits,
+  'the alpha.13 stale units foreign key must be rebuilt without renaming the broken table',
+)
+
 assert.ok(
   profileIndexes > profileMigration,
   'profile indexes must be created only after legacy profile columns are added',

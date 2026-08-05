@@ -370,7 +370,9 @@ async function migrateQuestionBankProfiles(db: SQLiteDBConnection) {
       'practice_unit_submissions', 'wrong_stats',
       'vocabulary_occurrences', 'wrong_analysis_states',
     ]
-    await db.execute('PRAGMA foreign_keys = OFF')
+    await db.execute('PRAGMA foreign_keys = OFF', false)
+    await db.execute('PRAGMA legacy_alter_table = ON', false)
+    try {
     for (const child of childTables) {
       const columns = await db.query(`PRAGMA table_info(${child})`)
       if (columns.values?.length) {
@@ -572,7 +574,10 @@ async function migrateQuestionBankProfiles(db: SQLiteDBConnection) {
       }
       await db.execute(`DROP TABLE papers_rebuild_snapshot_${child}`)
     }
-    await db.execute('PRAGMA foreign_keys = ON')
+    } finally {
+      await db.execute('PRAGMA legacy_alter_table = OFF', false)
+      await db.execute('PRAGMA foreign_keys = ON', false)
+    }
     const violations = await db.query('PRAGMA foreign_key_check')
     if (violations.values?.length) {
       throw new Error(
@@ -586,6 +591,51 @@ async function migrateQuestionBankProfiles(db: SQLiteDBConnection) {
     [String(defaultProfileId)],
     false,
   )
+}
+
+async function repairStalePaperForeignKey(db: SQLiteDBConnection) {
+  const foreignKeys = await db.query('PRAGMA foreign_key_list(units)')
+  const staleReference = (foreignKeys.values || []).some(
+    item => String(item.table || '').toLowerCase() === 'papers_rebuild_tmp_papers',
+  )
+  if (!staleReference) return
+
+  await db.execute('PRAGMA foreign_keys = OFF', false)
+  try {
+    await db.execute(`
+      DROP TABLE IF EXISTS units_fk_repair;
+      CREATE TABLE units_fk_repair (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        paper_id INTEGER NOT NULL,
+        external_key TEXT NOT NULL,
+        unit_type TEXT NOT NULL,
+        subtype TEXT,
+        title TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        passage TEXT NOT NULL DEFAULT '',
+        shared_data TEXT NOT NULL DEFAULT '{}',
+        FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE,
+        UNIQUE (paper_id, external_key)
+      );
+      INSERT INTO units_fk_repair
+        (id, paper_id, external_key, unit_type, subtype, title, sequence, passage, shared_data)
+      SELECT id, paper_id, external_key, unit_type, subtype, title, sequence, passage, shared_data
+      FROM units;
+      DROP TABLE units;
+      ALTER TABLE units_fk_repair RENAME TO units;
+      CREATE INDEX IF NOT EXISTS idx_units_paper ON units(paper_id);
+    `)
+  } finally {
+    await db.execute('PRAGMA foreign_keys = ON', false)
+  }
+
+  const repairedForeignKeys = await db.query('PRAGMA foreign_key_list(units)')
+  const paperReference = (repairedForeignKeys.values || []).some(
+    item => String(item.table || '').toLowerCase() === 'papers',
+  )
+  if (!paperReference) {
+    throw new Error('数据库迁移失败：units 外键未恢复到 papers')
+  }
 }
 
 async function migratePaperExamMetadata(db: SQLiteDBConnection) {
@@ -628,6 +678,7 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       await db.execute(SCHEMA)
       await migratePaperExamMetadata(db)
       await migrateQuestionBankProfiles(db)
+      await repairStalePaperForeignKey(db)
       await createQuestionBankProfileIndexes(db)
       const questionColumns = await db.query('PRAGMA table_info(questions)')
       if (!(questionColumns.values || []).some(column => column.name === 'content_hash')) {
