@@ -281,6 +281,12 @@ h2, h3 { margin: 0; }
 .content-block-table tr:first-child td { font-weight:700; background:var(--primary-faint); }
 .content-block-audio { display:grid; gap:8px; padding:14px; border:1px solid var(--line); border-radius:13px; background:var(--surface-solid); }
 .content-block-audio audio { width:100%; }
+.listening-player { width:100%; margin: 20px 0; border-radius: 14px; }
+.word-bank-board { display:grid; gap:18px; }
+.word-bank-list { display:flex; flex-wrap:wrap; gap:8px; padding:14px; border:1px solid var(--line); border-radius:13px; background:var(--surface-solid); }
+.word-bank-chip { padding:8px 14px; border:1px solid var(--line); border-radius:999px; background:var(--surface); font-size:15px; cursor:pointer; transition: all .16s; }
+.word-bank-chip:hover { border-color:var(--primary); background:var(--primary-soft); }
+.word-bank-chip.used { opacity:.34; cursor:default; text-decoration:line-through; }
 .question-pane { padding: 32px 38px 110px; overflow: auto; background: color-mix(in srgb, var(--surface-solid) 46%, transparent); }
 .question-card { padding: 20px 0 25px; border-bottom: 1px solid var(--line); }
 .question-title { font-family: "Segoe UI", "Microsoft YaHei UI", Arial, sans-serif; font-size: 16.5px; line-height: 1.72; margin-bottom: 14px; }
