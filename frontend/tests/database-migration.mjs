@@ -16,6 +16,11 @@ assert.equal(
   false,
   'the base schema must not update columns that may not exist in an upgraded database',
 )
+assert.equal(
+  /CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+idx_(papers|document_import|esq_import)_profile/i.test(schema),
+  false,
+  'the base schema must not index profile columns that may not exist in an upgraded database',
+)
 
 const migrationStart = source.indexOf('async function migratePaperExamMetadata')
 const ensureExamType = source.indexOf("ensureColumn(db, 'papers', 'exam_type'", migrationStart)
@@ -28,9 +33,14 @@ assert.ok(
 
 const startupMigration = source.indexOf('await migratePaperExamMetadata(db)')
 const profileMigration = source.indexOf('await migrateQuestionBankProfiles(db)', startupMigration)
+const profileIndexes = source.indexOf('await createQuestionBankProfileIndexes(db)', profileMigration)
 assert.ok(
   startupMigration >= 0 && profileMigration > startupMigration,
   'exam metadata must be migrated before the legacy papers table can be rebuilt',
+)
+assert.ok(
+  profileIndexes > profileMigration,
+  'profile indexes must be created only after legacy profile columns are added',
 )
 
 console.log('Android legacy paper-schema migration ordering: OK')

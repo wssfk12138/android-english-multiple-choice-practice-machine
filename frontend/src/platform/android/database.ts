@@ -328,9 +328,6 @@ CREATE INDEX IF NOT EXISTS idx_questions_unit ON questions(unit_id);
 CREATE INDEX IF NOT EXISTS idx_answers_session ON practice_answers(session_id);
 CREATE INDEX IF NOT EXISTS idx_wrong_count ON wrong_stats(wrong_count DESC);
 CREATE INDEX IF NOT EXISTS idx_vocab_priority ON vocabulary_entries(encounter_count DESC, last_seen_at DESC);
-CREATE INDEX IF NOT EXISTS idx_papers_profile ON papers(profile_id, deleted_at, year DESC);
-CREATE INDEX IF NOT EXISTS idx_document_import_profile ON document_import_jobs(profile_id, deleted_at, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_esq_import_profile ON esq_import_jobs(profile_id, deleted_at, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trash_purge ON trash_entries(purge_after, restored_at);
 INSERT OR IGNORE INTO schema_version(version) VALUES (1);
 `
@@ -605,6 +602,17 @@ async function migratePaperExamMetadata(db: SQLiteDBConnection) {
   )
 }
 
+async function createQuestionBankProfileIndexes(db: SQLiteDBConnection) {
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_papers_profile
+      ON papers(profile_id, deleted_at, year DESC);
+    CREATE INDEX IF NOT EXISTS idx_document_import_profile
+      ON document_import_jobs(profile_id, deleted_at, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_esq_import_profile
+      ON esq_import_jobs(profile_id, deleted_at, updated_at DESC);
+  `)
+}
+
 export async function androidDatabase(): Promise<SQLiteDBConnection> {
   if (!connectionPromise) {
     connectionPromise = (async () => {
@@ -620,6 +628,7 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       await db.execute(SCHEMA)
       await migratePaperExamMetadata(db)
       await migrateQuestionBankProfiles(db)
+      await createQuestionBankProfileIndexes(db)
       const questionColumns = await db.query('PRAGMA table_info(questions)')
       if (!(questionColumns.values || []).some(column => column.name === 'content_hash')) {
         await db.execute("ALTER TABLE questions ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''")
