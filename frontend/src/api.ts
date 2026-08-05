@@ -60,12 +60,16 @@ function diagnosticContext(path: string, options: RequestInit) {
   if (pathname === '/imports' && method === 'POST') {
     const file = options.body instanceof FormData ? options.body.get('file') : null
     const answer = options.body instanceof FormData ? options.body.get('answer_file') : null
+    const audio = options.body instanceof FormData
+      ? options.body.getAll('audio_files').filter(item => item instanceof File)
+      : []
     return {
       category: 'question_bank_import' as const,
       stage: 'android_document_extract_and_parse',
       context: {
         ...(file instanceof File ? { fileName: file.name, fileSize: file.size } : {}),
         ...(answer instanceof File ? { answerFileName: answer.name, answerFileSize: answer.size } : {}),
+        audioFileCount: audio.length,
       },
     }
   }

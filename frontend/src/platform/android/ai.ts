@@ -210,7 +210,6 @@ async function chatCompletion(
       model,
       messages,
       temperature: Number(profile.temperature),
-      max_tokens: options.maxTokens || Number(profile.max_tokens),
       ...(options.responseFormat ? { response_format: options.responseFormat } : {}),
     },
   }, '模型请求')

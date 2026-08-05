@@ -107,7 +107,7 @@ function blankProfile(): AiProfile {
     is_default: false,
     default_model: '',
     temperature: 0.2,
-    max_tokens: 1200,
+    max_tokens: 0,
     system_prompt: '',
     models: [],
   }
@@ -571,10 +571,10 @@ onMounted(() => {
           </div>
           <div class="grid grid-2">
             <div class="field"><label>Temperature</label><input v-model.number="profile.temperature" type="number" min="0" max="2" step=".1"></div>
-            <div class="field"><label>最大输出 Token</label><input v-model.number="profile.max_tokens" type="number" min="100" step="100"></div>
+            <div class="field"><label>输出 Token 上限（已停用）</label><input v-model.number="profile.max_tokens" type="number" disabled><small>保留旧配置兼容；当前不会向模型发送输出 Token 上限。</small></div>
           </div>
           <p class="field-hint">Temperature 控制回答的随机性与创造性：值越低越稳定、越适合判分和事实类任务（错题分析、题库导入、单词翻译建议 0.2–0.5）；越高越发散，适合头脑风暴。</p>
-          <p class="field-hint">最大输出 Token 限制单次回复的最长输出：错题分析、批量标注等长文本任务若报“模型没有返回可显示的正文”或输出被截断，请调高该值（如 4000–8000）；日常对话保持默认即可。</p>
+          <p class="field-hint">所有模型场景均由供应商决定最大输出长度；若长任务没有返回正文，程序会提示重试或切换模型/API 配置。</p>
           <div class="field"><label>附加系统提示词</label><textarea v-model="profile.system_prompt" rows="3" placeholder="对该 API 下的模型统一生效"></textarea></div>
           <label class="default-profile-check">
             <input v-model="profile.is_default" type="checkbox" :disabled="profile.is_default">

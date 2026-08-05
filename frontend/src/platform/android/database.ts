@@ -269,6 +269,7 @@ CREATE TABLE IF NOT EXISTS document_import_jobs (
   answer_filename TEXT NOT NULL DEFAULT '',
   source_file_base64 TEXT NOT NULL DEFAULT '',
   answer_file_base64 TEXT NOT NULL DEFAULT '',
+  audio_files_base64 TEXT NOT NULL DEFAULT '[]',
   detected_year INTEGER,
   detected_format TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'draft',
@@ -360,6 +361,7 @@ async function migrateQuestionBankProfiles(db: SQLiteDBConnection) {
   await ensureColumn(db, 'document_import_jobs', 'profile_id', `INTEGER NOT NULL DEFAULT ${defaultProfileId}`)
   await ensureColumn(db, 'document_import_jobs', 'source_file_base64', "TEXT NOT NULL DEFAULT ''")
   await ensureColumn(db, 'document_import_jobs', 'answer_file_base64', "TEXT NOT NULL DEFAULT ''")
+  await ensureColumn(db, 'document_import_jobs', 'audio_files_base64', "TEXT NOT NULL DEFAULT '[]'")
   await ensureColumn(db, 'document_import_jobs', 'deleted_at', 'TEXT')
   await db.run('UPDATE papers SET profile_id = ? WHERE profile_id IS NULL OR profile_id = 0', [defaultProfileId], false)
   await db.run('UPDATE document_import_jobs SET profile_id = ? WHERE profile_id IS NULL OR profile_id = 0', [defaultProfileId], false)

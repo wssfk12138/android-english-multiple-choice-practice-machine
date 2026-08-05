@@ -44,20 +44,20 @@ function splitOptions(value: string): Array<{ key: string; content: string }> {
 
 function answerMap(text: string): Record<string, string> {
   const result: Record<string, string> = {}
-  for (const match of text.matchAll(/(?<!\d)([1-5]?\d)\s*[.．、:：]\s*([A-HT])(?=\s|$|\d|[.,，。])/gi)) {
+  for (const match of text.matchAll(/(?<!\d)([1-5]?\d)\s*[.．、:：]\s*([A-OT])(?=\s|$|\d|[.,，。])/gi)) {
     const number = Number(match[1])
-    if (number >= 1 && number <= 45) result[String(number)] = match[2].toUpperCase()
+    if (number >= 1 && number <= 55) result[String(number)] = match[2].toUpperCase()
   }
-  const rangePattern = /(?:Text\s*[1-4]\s*|(?<![A-Za-z0-9]))([1-4]?\d)\s*[-~～至–—]\s*([1-4]?\d)\s*[:：]?\s*([\s\S]*?)(?=Text\s*[1-4]\s*[1-4]?\d\s*[-~～至–—]\s*[1-4]?\d|(?<![A-Za-z0-9])[1-4]?\d\s*[-~～至–—]\s*[1-4]?\d|Part\s+[BC]|Section\s+[ⅠⅡⅢIV1234]|$)/gi
+  const rangePattern = /(?:Text\s*[1-4]\s*|(?<![A-Za-z0-9]))([1-5]?\d)\s*[-~～至–—]\s*([1-5]?\d)\s*[:：]?\s*([\s\S]*?)(?=Text\s*[1-4]\s*[1-5]?\d\s*[-~～至–—]\s*[1-5]?\d|(?<![A-Za-z0-9])[1-5]?\d\s*[-~～至–—]\s*[1-5]?\d|Part\s+[BC]|Section\s+[ⅠⅡⅢIV1234]|$)/gi
   for (const match of text.matchAll(rangePattern)) {
     const first = Number(match[1])
     const last = Number(match[2])
-    const letters = String(match[3]).toUpperCase().match(/[A-HT]/g) || []
+    const letters = String(match[3]).toUpperCase().match(/[A-OT]/g) || []
     if (last - first + 1 !== letters.length) continue
     letters.forEach((letter, index) => { result[String(first + index)] = letter })
   }
   const compact = text.replace(/\s+/g, '').toUpperCase()
-  for (const match of compact.matchAll(/(?<!\d)([1-4]?\d)[-~～至–—]([1-4]?\d)[:：]?([A-HT]{2,20})/g)) {
+  for (const match of compact.matchAll(/(?<!\d)([1-5]?\d)[-~～至–—]([1-5]?\d)[:：]?([A-OT]{2,20})/g)) {
     const first = Number(match[1])
     const last = Number(match[2])
     if (last - first + 1 !== match[3].length) continue
@@ -78,7 +78,7 @@ function answerMap(text: string): Record<string, string> {
       pendingRanges.push({ first: Number(range[1]), last: Number(range[2]) })
       continue
     }
-    const letters = line.replace(/[^A-HT]/g, '')
+    const letters = line.replace(/[^A-OT]/g, '')
     const pending = pendingRanges[0]
     if (!pending || letters.length !== pending.last - pending.first + 1) continue
     pendingRanges.shift()
@@ -474,6 +474,26 @@ export function validateDocumentDraft(draft: JsonRecord): string[] {
   if (draft.answer_status?.status === 'parsed' && !draft.answers_confirmed) {
     warnings.push('自动识别的标准答案尚未人工确认')
   }
+  if (draft.exam_type === 'cet4' || draft.exam_type === 'cet6') {
+    if (numbers.length !== 55) warnings.push(`四六级客观题应为55题，当前为${numbers.length}题`)
+    for (const unit of draft.units) {
+      for (const question of unit.questions) {
+        if (!Array.isArray(question.options) || question.options.length < 2
+          || question.options.some((option: JsonRecord) => !clean(option.content))) {
+          warnings.push(`第${question.number}题选项不完整`)
+        }
+      }
+    }
+    const wordBank = draft.units.find((unit: JsonRecord) => unit.unit_type === 'word_bank')
+    if (!wordBank || Object.keys(wordBank.shared_data?.candidates || {}).length < 15) {
+      warnings.push('选词填空词库未完整识别')
+    }
+    const matching = draft.units.find((unit: JsonRecord) => unit.unit_type === 'paragraph_matching')
+    if (!matching || Object.keys(matching.shared_data?.paragraphs || {}).length < 10) {
+      warnings.push('长篇段落匹配材料未完整识别')
+    }
+    return [...new Set(warnings)]
+  }
   const cloze = draft.units.find((unit: JsonRecord) => unit.unit_type === 'cloze')
   if (!cloze || cloze.questions.length !== 20) warnings.push('完型填空未识别为20题')
   else {
@@ -506,6 +526,165 @@ export function validateDocumentDraft(draft: JsonRecord): string[] {
   return [...new Set(warnings)]
 }
 
+type PaperSection = {
+  title: string
+  year: number | null
+  month: number | null
+  set_number: number
+  start_block: number
+  end_block: number
+  objective_start_block: number
+  objective_end_block: number
+  has_objective_questions: boolean
+}
+
+function inferDocumentPapers(blocks: string[], fileName: string): PaperSection[] {
+  const writingStarts = blocks
+    .map((block, index) => ({ block, index }))
+    .filter(({ block }) => /^\s*Part\s*I\s*Writing\b|^\s*Part\s*IWriting\b/i.test(block))
+    .map(({ index }) => index)
+  const year = Number(fileName.match(/20\d{2}/)?.[0]) || null
+  const month = Number(fileName.match(/(?:年|[._-])\s*(\d{1,2})\s*月?/)?.[1]) || null
+  const subject = fileName.includes('六级') ? '大学英语六级'
+    : fileName.includes('四级') ? '大学英语四级' : '英语'
+  if (writingStarts.length <= 1) {
+    return [{
+      title: fileName.replace(/\.[^.]+$/, ''),
+      year,
+      month,
+      set_number: 1,
+      start_block: 0,
+      end_block: Math.max(0, blocks.length - 1),
+      objective_start_block: 0,
+      objective_end_block: Math.max(0, blocks.length - 1),
+      has_objective_questions: true,
+    }]
+  }
+  const starts = writingStarts.map(writingStart => {
+    for (let index = writingStart - 1; index >= Math.max(0, writingStart - 35); index--) {
+      if (/20\d{2}.*第\s*[一二三1-9]\s*套/.test(blocks[index])) return index
+    }
+    for (let index = writingStart - 1; index >= Math.max(0, writingStart - 35); index--) {
+      if (/COLLEGE ENGLISH TEST/i.test(blocks[index])) return index
+    }
+    return writingStart
+  })
+  return starts.map((start, offset) => {
+    const end = starts[offset + 1] != null ? starts[offset + 1] - 1 : blocks.length - 1
+    const segment = blocks.slice(start, end + 1)
+    const setMatch = segment.slice(0, 40).join('\n').match(/第\s*([一二三1-9])\s*套/)
+    const setNumber = setMatch
+      ? ({ 一: 1, 二: 2, 三: 3 } as Record<string, number>)[setMatch[1]] || Number(setMatch[1])
+      : offset + 1
+    const objectiveOffset = segment.findIndex(block =>
+      /Part\s*(?:II|Ⅱ|III|Ⅲ)\s*(?:Listening|Reading)/i.test(block))
+    const hasObjective = objectiveOffset >= 0
+    return {
+      title: year && month
+        ? `${year}年${month}月${subject}真题（第${setNumber}套）`
+        : `${fileName.replace(/\.[^.]+$/, '')}（第${setNumber}套）`,
+      year,
+      month,
+      set_number: setNumber,
+      start_block: start,
+      end_block: end,
+      objective_start_block: hasObjective ? start + objectiveOffset : start,
+      objective_end_block: end,
+      has_objective_questions: hasObjective,
+    }
+  })
+}
+
+async function detectDocumentPapers(
+  blocks: string[],
+  fileName: string,
+): Promise<{ papers: PaperSection[]; source: 'model' | 'local'; error?: string }> {
+  const fallback = inferDocumentPapers(blocks, fileName)
+  try {
+    const { profile, selectedModel } = await modelIdentity()
+    const content = await chatCompletion(
+      Number(profile.id),
+      selectedModel,
+      [
+        {
+          role: 'system',
+          content: `你是英语考试 Word 题库拆分器。判断文档包含几套试卷，并按 BLOCK 编号给出每套完整边界和客观题边界。
+只输出 JSON：{"paper_count":3,"papers":[{"title":"...","year":2019,"month":6,"set_number":1,"start_block":0,"end_block":220,"objective_start_block":25,"objective_end_block":220,"has_objective_questions":true}]}。
+若某套只有写作或翻译，has_objective_questions=false。不得混合不同套次。`,
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            source_name: fileName,
+            document_blocks: blocks.map((block, index) => `[BLOCK ${index}] ${block}`).join('\n'),
+            local_candidates: fallback,
+          }),
+        },
+      ],
+      { responseFormat: { type: 'json_object' } },
+    )
+    const result = parseModelJson(content)
+    if (!Array.isArray(result.papers) || !result.papers.length) throw new Error('模型未返回拆分列表')
+    let lastEnd = -1
+    const papers: PaperSection[] = result.papers.map((item: JsonRecord, offset: number) => {
+      const start = Number(item.start_block)
+      const end = Number(item.end_block)
+      if (!Number.isInteger(start) || !Number.isInteger(end)
+        || start <= lastEnd || end < start || end >= blocks.length) {
+        throw new Error('模型返回的拆分边界无效')
+      }
+      lastEnd = end
+      const local = fallback[Math.min(offset, fallback.length - 1)]
+      const objectiveStart = Number(item.objective_start_block)
+      const objectiveEnd = Number(item.objective_end_block)
+      return {
+        title: clean(item.title) || local.title,
+        year: Number(item.year) || local.year,
+        month: Number(item.month) || local.month,
+        set_number: Number(item.set_number) || offset + 1,
+        start_block: start,
+        end_block: end,
+        objective_start_block: objectiveStart >= start && objectiveStart <= end ? objectiveStart : start,
+        objective_end_block: objectiveEnd >= start && objectiveEnd <= end ? objectiveEnd : end,
+        has_objective_questions: item.has_objective_questions !== false,
+      }
+    })
+    if (Number(result.paper_count || papers.length) !== papers.length) throw new Error('模型返回的套数不一致')
+    return { papers, source: 'model' }
+  } catch (cause) {
+    return { papers: fallback, source: 'local', error: String(cause).slice(0, 400) }
+  }
+}
+
+function shellUnit(
+  unitType: string,
+  subtype: string,
+  title: string,
+  sequence: number,
+  first: number,
+  last: number,
+  answers: Record<string, string>,
+): JsonRecord {
+  return {
+    unit_type: unitType,
+    subtype,
+    title,
+    sequence,
+    passage: '',
+    shared_data: {},
+    questions: Array.from({ length: last - first + 1 }, (_, offset) => {
+      const number = first + offset
+      return {
+        number,
+        stem: '',
+        options: ['A', 'B', 'C', 'D'].map(key => ({ key, content: '' })),
+        answer: answers[String(number)] || '',
+        score: 1,
+      }
+    }),
+  }
+}
+
 export function parseExtractedExam(
   fileName: string,
   source: ExtractedDocument,
@@ -514,21 +693,49 @@ export function parseExtractedExam(
   const year = Number(fileName.match(/20\d{2}/)?.[0]
     || source.blocks.slice(0, 10).join(' ').match(/20\d{2}/)?.[0])
   const subjectHeader = [fileName, ...source.blocks.slice(0, 12)].join(' ')
-  const subject = /英语\s*[\(（]?\s*二\s*[\)）]?|科目代码\s*[：:]?\s*204\b/.test(subjectHeader)
-    ? '英语二' : '英语一'
+  const isCet6 = /六级|CET-?6|Band Six/i.test(subjectHeader)
+  const isCet4 = !isCet6 && /四级|CET-?4|Band Four/i.test(subjectHeader)
+  const subject = isCet6 ? '大学英语六级' : isCet4 ? '大学英语四级'
+    : /英语\s*[\(（]?\s*二\s*[\)）]?|科目代码\s*[：:]?\s*204\b/.test(subjectHeader)
+      ? '英语二' : '英语一'
   const embeddedAnswers = answerMap(source.text)
   const attachmentAnswers = answerSource?.extracted.hasTextLayer
     ? answerMap(answerSource.extracted.text) : {}
   const answers = { ...embeddedAnswers, ...attachmentAnswers }
   const embeddedAnswersConfirmed = !answerSource && Object.keys(embeddedAnswers).length > 0
-  const units = [parseCloze(source.blocks, answers), ...parseReading(source.blocks, answers)]
-  if (hasObjectivePartB(source.blocks)) {
-    units.push(parsePartB(source.blocks, answers))
-  }
+  const units = isCet6
+    ? [
+        shellUnit('listening', 'long_conversation', '听力 Section A — 长对话', 1, 1, 8, answers),
+        shellUnit('listening', 'passage', '听力 Section B — 短文', 2, 9, 15, answers),
+        shellUnit('listening', 'lecture', '听力 Section C — 讲座/讲话', 3, 16, 25, answers),
+        shellUnit('word_bank', 'word_bank', '阅读 Section A — 选词填空', 4, 26, 35, answers),
+        shellUnit('paragraph_matching', 'paragraph_matching', '阅读 Section B — 长篇匹配', 5, 36, 45, answers),
+        shellUnit('reading', 'reading_a', '阅读 Section C — Passage One', 6, 46, 50, answers),
+        shellUnit('reading', 'reading_a', '阅读 Section C — Passage Two', 7, 51, 55, answers),
+      ]
+    : isCet4
+      ? [
+          shellUnit('listening', 'news_report', '听力 Section A — 新闻报告', 1, 1, 7, answers),
+          shellUnit('listening', 'long_conversation', '听力 Section B — 长对话', 2, 8, 15, answers),
+          shellUnit('listening', 'passage', '听力 Section C — 短文', 3, 16, 25, answers),
+          shellUnit('word_bank', 'word_bank', '阅读 Section A — 选词填空', 4, 26, 35, answers),
+          shellUnit('paragraph_matching', 'paragraph_matching', '阅读 Section B — 长篇匹配', 5, 36, 45, answers),
+          shellUnit('reading', 'reading_a', '阅读 Section C — Passage One', 6, 46, 50, answers),
+          shellUnit('reading', 'reading_a', '阅读 Section C — Passage Two', 7, 51, 55, answers),
+        ]
+      : [parseCloze(source.blocks, answers), ...parseReading(source.blocks, answers)]
+  if (!isCet4 && !isCet6 && hasObjectivePartB(source.blocks)) units.push(parsePartB(source.blocks, answers))
+  const month = Number(fileName.match(/(?:年|[._-])\s*(\d{1,2})\s*月?/)?.[1]) || 0
+  const setNumber = Number(fileName.match(/第\s*([1-9])\s*套/)?.[1]) || 1
   const draft: JsonRecord = {
     year: Number.isFinite(year) ? year : null,
     subject,
-    title: Number.isFinite(year) ? `${year}年考研${subject}真题` : fileName.replace(/\.[^.]+$/, ''),
+    exam_type: isCet6 ? 'cet6' : isCet4 ? 'cet4' : subject === '英语二' ? 'postgraduate_english2' : 'postgraduate_english1',
+    exam_month: month,
+    set_number: setNumber,
+    title: Number.isFinite(year)
+      ? (isCet4 || isCet6 ? `${year}年${month ? `${month}月` : ''}${subject}真题（第${setNumber}套）` : `${year}年考研${subject}真题`)
+      : fileName.replace(/\.[^.]+$/, ''),
     detected_format: source.format,
     source_file: fileName,
     answer_source: answerSource?.fileName || (Object.keys(embeddedAnswers).length ? '试卷内置答案' : '未提供'),
@@ -548,8 +755,8 @@ export function parseExtractedExam(
     ),
     answers,
     units,
-    source_text: source.text.slice(0, 60000),
-    answer_text: answerSource?.extracted.text.slice(0, 20000) || '',
+    source_text: source.text,
+    answer_text: answerSource?.extracted.text || '',
   }
   draft.warnings = validateDocumentDraft(draft)
   return draft
@@ -600,18 +807,71 @@ function draftSummary(draft: JsonRecord) {
   }
 }
 
+async function reconstructDocumentUnit(
+  draft: JsonRecord,
+  unit: JsonRecord,
+  profileId: number,
+  model: string,
+): Promise<JsonRecord> {
+  const expected = unit.questions
+    .map((question: JsonRecord) => Number(question.number))
+    .filter((number: number) => Number.isInteger(number))
+  const prompt = `你是英语客观题题库的单元重建器。只依据试卷与答案材料，不得编造。
+只重建用户指定的一个单元，并只输出 JSON 对象：
+{"sequence":1,"unit_type":"listening","subtype":"long_conversation","title":"...",
+"passage":"","shared_data":{},"questions":[
+ {"number":1,"stem":"","options":[{"key":"A","content":"..."}],"answer":"B","score":1}
+]}。
+questions 的题号集合必须与 expected_numbers 完全一致。
+CET 听力原文和题干通常不在试卷中：passage 与 stem 留空，准确抄录 A-D 选项。
+选词填空：passage 保留带题号空位的原文，shared_data.candidates 为 A-O 词库，每题 options 也使用同一词库。
+段落匹配：passage 保留完整文章，shared_data.paragraphs 保存 A-K 段落，36-45 的 stem 是十条陈述，options 为 A-K。
+阅读理解：passage 只放本篇文章，完整抄录五道题干与 A-D 选项。
+答案只能从材料的标准答案区获取；没有可靠答案时 answer 留空。`
+  const content = await chatCompletion(
+    profileId,
+    model,
+    [
+      { role: 'system', content: prompt },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          paper: {
+            title: draft.title,
+            exam_type: draft.exam_type,
+            year: draft.year,
+            month: draft.exam_month,
+            set_number: draft.set_number,
+          },
+          target_unit: {
+            sequence: unit.sequence,
+            unit_type: unit.unit_type,
+            subtype: unit.subtype,
+            title: unit.title,
+            expected_numbers: expected,
+          },
+          document_text: String(draft.source_text || ''),
+          answer_text: String(draft.answer_text || ''),
+        }),
+      },
+    ],
+    { responseFormat: { type: 'json_object' } },
+  )
+  return parseModelJson(content)
+}
+
 export async function applyDocumentModelAssist(
   draft: JsonRecord,
   options: { profile_id?: number; model?: string; correct_structure?: boolean } = {},
 ): Promise<JsonRecord> {
   const { profile, selectedModel } = await modelIdentity(options.profile_id, options.model)
-  const prompt = `你是考研英语真题导入解析助手。只能依据材料校对，不得编造。
-输出 JSON：{"answer_map":{"1":"A"},"number_map":{},"question_fixes":[],"issues":[],"notes":""}。
+  const prompt = `你是英语客观题真题导入解析助手。只能依据材料校对，不得编造。
+输出 JSON：{"answer_map":{"1":"A"},"number_map":{},"question_fixes":[],"unit_replacements":[],"issues":[],"notes":""}。
 answer_map 必须尽可能覆盖本次全部客观题。若 Part B 是翻译题，不要导入 41-45，也不要报缺失。
-普通选择题答案使用 A-H；判断题答案使用 T/F。
+普通选择题答案使用 A-O；判断题答案使用 T/F。
 number_map 只在题号明确错位时填写。${
   options.correct_structure
-    ? '允许 question_fixes 修正题干和选项归属，格式为 {"number":21,"stem":"...","options":[{"key":"A","content":"..."}]}。'
+    ? '允许 question_fixes 修正单题；unit_replacements 必须保持空数组，程序会按单元分别请求重建。'
     : 'question_fixes 必须为空数组，不允许修改题干或选项。'
 }
 只输出合法 JSON，不写解析或翻译。`
@@ -623,15 +883,35 @@ number_map 只在题号明确错位时填写。${
       {
         role: 'user',
         content: JSON.stringify({
-          document_text: String(draft.source_text || '').slice(0, 60000),
-          answer_text: String(draft.answer_text || '').slice(0, 20000),
+          document_text: String(draft.source_text || ''),
+          answer_text: String(draft.answer_text || ''),
           draft_summary: draftSummary(draft),
         }),
       },
     ],
-    { maxTokens: Math.max(8000, Number(profile.max_tokens || 0)), responseFormat: { type: 'json_object' } },
+    { responseFormat: { type: 'json_object' } },
   )
   const result = parseModelJson(content)
+  result.unit_replacements = []
+  if (options.correct_structure && ['cet4', 'cet6'].includes(String(draft.exam_type))) {
+    const reconstructionIssues: string[] = []
+    for (const unit of draft.units) {
+      try {
+        result.unit_replacements.push(await reconstructDocumentUnit(
+          draft,
+          unit,
+          Number(profile.id),
+          selectedModel,
+        ))
+      } catch (cause) {
+        reconstructionIssues.push(`${clean(unit.title) || '未知单元'}重建失败：${String(cause).slice(0, 160)}`)
+      }
+    }
+    result.issues = [
+      ...(Array.isArray(result.issues) ? result.issues : []),
+      ...reconstructionIssues,
+    ]
+  }
   const questionRows = draft.units.flatMap((unit: JsonRecord) =>
     unit.questions.map((question: JsonRecord) => ({ unit, question })),
   )
@@ -668,12 +948,63 @@ number_map 只在题号明确错位时填写。${
   let appliedAnswers = 0
   for (const [number, answer] of Object.entries(result.answer_map || {})) {
     const letter = String(answer).trim().toUpperCase()
-    if (!validNumbers.has(String(number)) || !/^[A-HT]$/.test(letter)) continue
+    if (!validNumbers.has(String(number)) || !/^[A-OT]$/.test(letter)) continue
     draft.answers[String(number)] = letter
     draft.answer_sources[String(number)] = '模型辅助'
     appliedAnswers++
   }
   let appliedFixes = 0
+  let appliedUnitReplacements = 0
+  if (options.correct_structure && Array.isArray(result.unit_replacements)) {
+    for (const replacement of result.unit_replacements) {
+      const sequence = Number(replacement?.sequence)
+      const unitIndex = draft.units.findIndex((unit: JsonRecord) => Number(unit.sequence) === sequence)
+      if (unitIndex < 0 || !Array.isArray(replacement?.questions)) continue
+      const target = draft.units[unitIndex]
+      const expected = target.questions.map((question: JsonRecord) => Number(question.number)).sort((a: number, b: number) => a - b)
+      const incoming = replacement.questions.map((question: JsonRecord) => Number(question.number)).sort((a: number, b: number) => a - b)
+      if (expected.length !== incoming.length || expected.some((number: number, index: number) => number !== incoming[index])) continue
+      const cleanedQuestions: JsonRecord[] = []
+      let valid = true
+      for (const question of replacement.questions) {
+        if (!Array.isArray(question.options) || question.options.length < 2) { valid = false; break }
+        const cleanedOptions = question.options.map((option: JsonRecord) => ({
+          key: clean(option.key).toUpperCase(),
+          content: clean(option.content),
+        }))
+        if (cleanedOptions.some((option: JsonRecord) => !option.key || !option.content)
+          || new Set(cleanedOptions.map((option: JsonRecord) => option.key)).size !== cleanedOptions.length) {
+          valid = false
+          break
+        }
+        const number = Number(question.number)
+        const answer = clean(question.answer || draft.answers[String(number)]).toUpperCase()
+        if (answer) {
+          draft.answers[String(number)] = answer
+          draft.answer_sources[String(number)] = '模型辅助'
+        }
+        cleanedQuestions.push({
+          number,
+          stem: clean(question.stem),
+          options: cleanedOptions,
+          answer,
+          score: Number(question.score || target.questions[0]?.score || 1),
+        })
+      }
+      if (!valid) continue
+      draft.units[unitIndex] = {
+        unit_type: clean(replacement.unit_type) || target.unit_type,
+        subtype: clean(replacement.subtype) || target.subtype,
+        title: clean(replacement.title) || target.title,
+        sequence,
+        passage: String(replacement.passage || ''),
+        shared_data: replacement.shared_data && typeof replacement.shared_data === 'object'
+          ? replacement.shared_data : {},
+        questions: cleanedQuestions,
+      }
+      appliedUnitReplacements++
+    }
+  }
   if (options.correct_structure && Array.isArray(result.question_fixes)) {
     for (const fix of result.question_fixes) {
       const target = draft.units
@@ -699,6 +1030,7 @@ number_map 只在题号明确错位时填写。${
     status: 'applied',
     applied_answers: appliedAnswers,
     applied_fixes: appliedFixes,
+    applied_unit_replacements: appliedUnitReplacements,
     applied_number_fixes: appliedNumberFixes,
     answer_total: Object.values(draft.answers).filter(Boolean).length,
     issues,
@@ -758,16 +1090,19 @@ export async function readDocumentImport(id: number): Promise<JsonRecord> {
 export async function createDocumentImport(form: FormData): Promise<JsonRecord> {
   const file = form.get('file')
   const answerFile = form.get('answer_file')
+  const audioFiles = form.getAll('audio_files').filter((item): item is File => item instanceof File)
   if (!(file instanceof File) || !/\.(?:doc|docx)$/i.test(file.name)) {
     throw new LocalApiError(400, '请选择 DOC 或 DOCX 试卷文件')
   }
   if (answerFile && (!(answerFile instanceof File) || !/\.(?:doc|docx|pdf)$/i.test(answerFile.name))) {
     throw new LocalApiError(400, '答案文件仅支持 DOC、DOCX 或 PDF')
   }
+  if (audioFiles.some(audio => !/\.(?:mp3|m4a|wav|ogg)$/i.test(audio.name))) {
+    throw new LocalApiError(400, '听力音频仅支持 MP3、M4A、WAV 或 OGG')
+  }
   const source = await extractDocument(file)
   const answerSource = answerFile instanceof File
     ? { fileName: answerFile.name, extracted: await extractDocument(answerFile) } : undefined
-  let draft = parseExtractedExam(file.name, source, answerSource)
   const profileId = Number(form.get('profile_id') || 0) || await activeQuestionBankProfileId()
   const toBase64 = async (input: File) => {
     const bytes = new Uint8Array(await input.arrayBuffer())
@@ -778,44 +1113,101 @@ export async function createDocumentImport(form: FormData): Promise<JsonRecord> 
     return btoa(binary)
   }
   const requested = String(form.get('use_model_assist') || '') === 'true'
-  if (requested) {
-    try {
-      draft = await applyDocumentModelAssist(draft, {
-        correct_structure: String(form.get('model_assist_correct_structure') || '') === 'true',
-      })
-    } catch (cause) {
-      draft.model_assist = {
-        status: 'failed',
-        error: String(cause).slice(0, 400),
-        fell_back_to_local: true,
+  const split = requested
+    ? await detectDocumentPapers(source.blocks, file.name)
+    : { papers: inferDocumentPapers(source.blocks, file.name), source: 'local' as const }
+  const sourceBase64 = await toBase64(file)
+  const answerBase64 = answerFile instanceof File ? await toBase64(answerFile) : ''
+  const audioPayload = await Promise.all(audioFiles.map(async audio => ({
+    name: audio.name,
+    type: audio.type || 'application/octet-stream',
+    base64: await toBase64(audio),
+  })))
+  const detectedPaperCount = split.papers.length
+  const ignoredPaperCount = Math.max(0, detectedPaperCount - 1)
+  const selectedPapers = split.papers.slice(0, 1)
+  const createdJobs: JsonRecord[] = []
+  for (let index = 0; index < selectedPapers.length; index++) {
+    const section = selectedPapers[index]
+    const sectionBlocks = source.blocks.slice(section.start_block, section.end_block + 1)
+    const sectionSource: ExtractedDocument = {
+      ...source,
+      blocks: sectionBlocks,
+      text: sectionBlocks.join('\n'),
+    }
+    const sectionFileName = detectedPaperCount > 1 ? `${section.title}.docx` : file.name
+    let draft = parseExtractedExam(sectionFileName, sectionSource, answerSource)
+    draft.title = section.title
+    draft.year = section.year || draft.year
+    draft.exam_month = section.month || draft.exam_month
+    draft.set_number = section.set_number
+    draft.document_split = {
+      ...section,
+      paper_index: index + 1,
+      paper_count: 1,
+      detected_paper_count: detectedPaperCount,
+      ignored_paper_count: ignoredPaperCount,
+      source: split.source,
+      error: split.error || '',
+    }
+    if (!section.has_objective_questions) {
+      draft.warnings = ['该套文档未检测到可导入的客观题，可能只包含写作或翻译部分']
+    } else if (requested) {
+      try {
+        draft = await applyDocumentModelAssist(draft, {
+          correct_structure: String(form.get('model_assist_correct_structure') || '') === 'true',
+        })
+      } catch (cause) {
+        draft.model_assist = {
+          status: 'failed',
+          error: String(cause).slice(0, 400),
+          fell_back_to_local: true,
+        }
       }
     }
+    draft.audio_files = audioFiles.map(audio => ({
+      name: audio.name,
+      type: audio.type || 'application/octet-stream',
+    }))
+    const created = await run(
+      `INSERT INTO document_import_jobs
+        (profile_id, filename, answer_filename, source_file_base64,
+         answer_file_base64, audio_files_base64, detected_year, detected_format, status,
+         draft_data, warnings)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
+      [
+        profileId,
+        sectionFileName,
+        answerFile instanceof File ? answerFile.name : '',
+        sourceBase64,
+        answerBase64,
+        JSON.stringify(audioPayload),
+        draft.year,
+        draft.detected_format,
+        JSON.stringify(draft),
+        JSON.stringify(draft.warnings || []),
+      ],
+    )
+    createdJobs.push({
+      id: Number(created.lastId),
+      filename: sectionFileName,
+      draft: Object.fromEntries(Object.entries(draft).filter(([key]) => !['source_text', 'answer_text'].includes(key))),
+      warnings: draft.warnings,
+      model_assist: draft.model_assist,
+      profile_id: profileId,
+      paper_index: index + 1,
+      paper_count: 1,
+      has_objective_questions: section.has_objective_questions,
+    })
   }
-  const created = await run(
-    `INSERT INTO document_import_jobs
-      (profile_id, filename, answer_filename, source_file_base64,
-       answer_file_base64, detected_year, detected_format, status,
-       draft_data, warnings)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
-    [
-      profileId,
-      file.name,
-      answerFile instanceof File ? answerFile.name : '',
-      await toBase64(file),
-      answerFile instanceof File ? await toBase64(answerFile) : '',
-      draft.year,
-      draft.detected_format,
-      JSON.stringify(draft),
-      JSON.stringify(draft.warnings || []),
-    ],
-  )
   return {
-    id: Number(created.lastId),
-    filename: file.name,
-    draft: Object.fromEntries(Object.entries(draft).filter(([key]) => !['source_text', 'answer_text'].includes(key))),
-    warnings: draft.warnings,
-    model_assist: draft.model_assist,
-    profile_id: profileId,
+    ...createdJobs[0],
+    split_jobs: createdJobs,
+    split_count: createdJobs.length,
+    detected_paper_count: detectedPaperCount,
+    ignored_paper_count: ignoredPaperCount,
+    split_source: split.source,
+    split_error: split.error || '',
   }
 }
 
@@ -854,7 +1246,7 @@ export async function updateDocumentAnswers(id: number, body: JsonRecord): Promi
   const allowed = new Set(expectedNumbers(draft).map(String))
   for (const [number, value] of Object.entries(body.answers || {})) {
     const answer = String(value || '').trim().toUpperCase()
-    if (!allowed.has(String(number)) || (answer && !/^[A-HT]$/.test(answer))) continue
+    if (!allowed.has(String(number)) || (answer && !/^[A-OT]$/.test(answer))) continue
     draft.answers[String(number)] = answer
     draft.answer_sources[String(number)] = '人工录入'
   }
@@ -947,6 +1339,9 @@ export async function publishDocumentImport(id: number): Promise<JsonRecord> {
   const job = await row<JsonRecord>('SELECT * FROM document_import_jobs WHERE id = ?', [id])
   if (!job) throw new LocalApiError(404, '题库导入记录不存在')
   const draft = JSON.parse(job.draft_data)
+  if (draft.document_split?.has_objective_questions === false) {
+    throw new LocalApiError(409, '该套文档未检测到客观题，不能发布为空壳题库')
+  }
   const warnings = validateDocumentDraft(draft)
   if (warnings.length) throw new LocalApiError(409, `仍有校验问题：${warnings.join('；')}`)
   const paperId = await publishDraft(draft, Number(job.profile_id))

@@ -30,8 +30,10 @@ const jobs = ref<any[]>([])
 const current = ref<any>(null)
 const selectedFile = ref<File | null>(null)
 const selectedAnswerFile = ref<File | null>(null)
+const selectedAudioFiles = ref<File[]>([])
 const useModelAssist = ref(true)
 const modelAssistRewrite = ref(false)
+const importConfirmOpen = ref(false)
 const busy = ref(false)
 const uploadStage = ref('')
 const error = ref('')
@@ -86,6 +88,11 @@ async function handleProfileChanged() {
 
 async function upload() {
   if (!selectedFile.value) return
+  if (!importConfirmOpen.value) {
+    importConfirmOpen.value = true
+    return
+  }
+  importConfirmOpen.value = false
   busy.value = true
   error.value = ''
   notice.value = ''
@@ -94,13 +101,16 @@ async function upload() {
   form.append('file', selectedFile.value)
   form.append('profile_id', String(targetProfileId.value))
   if (selectedAnswerFile.value) form.append('answer_file', selectedAnswerFile.value)
+  selectedAudioFiles.value.forEach(file => form.append('audio_files', file))
   form.append('use_model_assist', String(useModelAssist.value))
   form.append('model_assist_correct_structure', String(modelAssistRewrite.value))
   try {
     const result: any = await api('/imports', { method: 'POST', body: form })
     await openJob(result.id)
     await loadJobs()
-    notice.value = result.model_assist?.status === 'failed'
+    notice.value = result.ignored_paper_count > 0
+      ? `文档中检测到 ${result.detected_paper_count} 套试卷；按当前规则仅生成第 1 套草稿，其余 ${result.ignored_paper_count} 套已忽略。`
+      : result.model_assist?.status === 'failed'
       ? '本地草稿已生成，但模型辅助不可用；可人工校对或选择其他模型重试。'
       : '结构化草稿已生成，请逐字段核对后批准入库。'
   } catch (cause) { error.value = String(cause) }
@@ -328,6 +338,7 @@ async function removeImportJob(job: any, esq = false) {
         </label>
         <label class="field"><span>试卷文件</span><input type="file" accept=".doc,.docx" @change="selectedFile=($event.target as HTMLInputElement).files?.[0]||null"></label>
         <label class="field"><span>答案文件（可选）</span><input type="file" accept=".doc,.docx,.pdf" @change="selectedAnswerFile=($event.target as HTMLInputElement).files?.[0]||null"></label>
+        <label class="field"><span>听力音频（可多选，支持 MP3 / M4A / WAV / OGG）</span><input type="file" accept=".mp3,.m4a,.wav,.ogg,audio/mpeg,audio/mp4,audio/wav,audio/ogg" multiple @change="selectedAudioFiles=Array.from(($event.target as HTMLInputElement).files || [])"><small v-if="selectedAudioFiles.length">已选择 {{ selectedAudioFiles.length }} 个音频文件</small></label>
         <label class="check-row"><input v-model="useModelAssist" type="checkbox"><span><b>上传时使用模型辅助定位题目与答案</b><small>默认全量核对；失败时保留本地草稿。</small></span></label>
         <label class="check-row"><input v-model="modelAssistRewrite" type="checkbox"><span><b>允许模型修正题干和选项归属</b><small>默认关闭，仅在材料能明确证明错位时修改。</small></span></label>
         <button class="button" type="button" :disabled="busy || !selectedFile" @click="upload">
@@ -482,6 +493,19 @@ async function removeImportJob(job: any, esq = false) {
         </div>
       </div>
     </section>
+
+    <div v-if="importConfirmOpen" class="review-overlay" role="dialog" aria-modal="true" aria-labelledby="single-import-title">
+      <div class="review-card import-assist-dialog">
+        <h3 id="single-import-title" style="margin-bottom:10px">确认开始导入</h3>
+        <p class="lead" style="font-size:13px;line-height:1.7">
+          当前一次只允许导入一套题目。同一个 Word / PDF 文件如果包含多套真题，系统只会默认生成并导入第 1 套，其余套次会被忽略。
+        </p>
+        <div style="display:flex;gap:10px;margin-top:20px;justify-content:center">
+          <button class="button ghost" type="button" @click="importConfirmOpen=false">取消</button>
+          <button class="button" type="button" @click="upload">确认导入第 1 套</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
