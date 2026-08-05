@@ -3,6 +3,7 @@ import { ArrowRight, BookOpen, Sparkles, Star } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { get, post } from '../api'
+import QuestionBankSwitcher from '../components/QuestionBankSwitcher.vue'
 
 const router = useRouter()
 const data = ref<any>(null)
@@ -104,6 +105,7 @@ async function randomPractice(type: string) {
         <RouterLink class="button" to="/library"><BookOpen :size="17" />查看全部题库<ArrowRight :size="16" /></RouterLink>
       </div>
     </div>
+    <QuestionBankSwitcher @changed="loadHome" />
     <div v-if="error" class="warning">{{ error }}</div>
     <section v-if="vocabulary.length" class="vocabulary-ticker card" @mouseenter="tickerPaused=true" @mouseleave="tickerPaused=false">
       <div class="ticker-heading"><div><span class="eyebrow">VOCABULARY REVIEW</span><h3>词汇回顾</h3></div><RouterLink to="/vocabulary">查看单词本 →</RouterLink></div>

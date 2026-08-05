@@ -232,7 +232,9 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
        CASE WHEN encounter_count >= 2 OR manually_frequent = 1 THEN 1 ELSE 0 END AS is_frequent
      FROM vocabulary_entries
      WHERE ${conditions.join(' AND ')}
-     ORDER BY is_frequent DESC, encounter_count DESC, last_seen_at DESC`,
+     ORDER BY
+       CASE WHEN datetime(last_seen_at) >= datetime('now', '-7 days') THEN 0 ELSE 1 END,
+       is_frequent DESC, encounter_count DESC, last_seen_at DESC`,
     values,
   )
   const counts = await row<JsonRecord>(
@@ -256,7 +258,9 @@ export async function homeVocabulary(limit: number): Promise<JsonRecord> {
        CASE WHEN encounter_count >= 2 OR manually_frequent = 1 THEN 1 ELSE 0 END AS is_frequent
      FROM vocabulary_entries
      WHERE translation_status = 'ready'
-     ORDER BY is_frequent DESC,
+     ORDER BY
+       CASE WHEN datetime(created_at) >= datetime('now', '-7 days') THEN 0 ELSE 1 END,
+       is_frequent DESC,
        CASE WHEN next_review_at IS NULL OR next_review_at <= CURRENT_TIMESTAMP THEN 0 ELSE 1 END,
        encounter_count DESC, RANDOM()
      LIMIT ?`,

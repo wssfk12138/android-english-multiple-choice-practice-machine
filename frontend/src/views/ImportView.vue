@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import {
   Check, FileArchive, FileCheck2, FileKey2, FileUp, Lock, Pause,
-  Play, RefreshCw, Save, Search, Settings, Sparkles,
+  Play, RefreshCw, Save, Search, Settings, Sparkles, Trash2,
 } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, get, patch, post, put } from '../api'
+import { api, del, get, patch, post, put } from '../api'
+import QuestionBankSwitcher from '../components/QuestionBankSwitcher.vue'
+import { loadQuestionBankProfiles, questionBankProfilesState } from '../services/questionBankProfiles'
 import {
   type LabelScope,
   loadQuestionLabelingStatus,
@@ -50,6 +52,7 @@ const laterButton = ref<HTMLButtonElement | null>(null)
 const modelSelectorOpen = ref(false)
 const selectorModels = ref<any[]>([])
 const selectedModelKey = ref('')
+const targetProfileId = ref(0)
 
 const questions = computed(() =>
   current.value?.draft?.units?.flatMap((unit: any) => unit.questions || []) || [],
@@ -66,11 +69,20 @@ async function loadEsqJobs() { esqJobs.value = await get('/question-banks/import
 
 onMounted(async () => {
   try {
+    await loadQuestionBankProfiles()
+    targetProfileId.value = questionBankProfilesState.activeId
     await Promise.all([loadJobs(), loadEsqJobs()])
     const remoteId = Number(route.query.esqImportId || 0)
     if (remoteId) await openEsqJob(remoteId)
   } catch (cause) { error.value = String(cause) }
 })
+
+async function handleProfileChanged() {
+  targetProfileId.value = questionBankProfilesState.activeId
+  current.value = null
+  esqCurrent.value = null
+  await Promise.all([loadJobs(), loadEsqJobs()])
+}
 
 async function upload() {
   if (!selectedFile.value) return
@@ -80,6 +92,7 @@ async function upload() {
   uploadStage.value = useModelAssist.value ? '正在提取文档并调用模型校对…' : '正在提取文档并生成本地草稿…'
   const form = new FormData()
   form.append('file', selectedFile.value)
+  form.append('profile_id', String(targetProfileId.value))
   if (selectedAnswerFile.value) form.append('answer_file', selectedAnswerFile.value)
   form.append('use_model_assist', String(useModelAssist.value))
   form.append('model_assist_correct_structure', String(modelAssistRewrite.value))
@@ -241,6 +254,7 @@ async function uploadEsq() {
   busy.value = true
   const form = new FormData()
   form.append('file', selectedEsqFile.value)
+  form.append('profile_id', String(targetProfileId.value))
   try {
     const result: any = await api('/question-banks/imports', { method: 'POST', body: form })
     await openEsqJob(result.id)
@@ -269,6 +283,20 @@ async function publishEsq() {
     await promptLabeling({ kind: 'papers', title: esqCurrent.value.preview.title, year: null, paperIds: result.paper_ids })
   }
 }
+
+async function removeImportJob(job: any, esq = false) {
+  if (!confirm(`将未完成导入“${job.filename}”及原始文件移入回收站？`)) return
+  try {
+    await del(`${esq ? '/question-banks/imports' : '/imports'}/${job.id}`)
+    if (esq) {
+      if (esqCurrent.value?.id === job.id) esqCurrent.value = null
+      await loadEsqJobs()
+    } else {
+      if (current.value?.id === job.id) current.value = null
+      await loadJobs()
+    }
+  } catch (cause) { error.value = String(cause) }
+}
 </script>
 
 <template>
@@ -283,6 +311,7 @@ async function publishEsq() {
         <Sparkles :size="17" />智能标注中心
       </button>
     </div>
+    <QuestionBankSwitcher @changed="handleProfileChanged" />
 
     <div v-if="error" class="warning" role="alert">{{ error }}</div>
     <div v-if="notice" class="success-note" aria-live="polite">{{ notice }}</div>
@@ -291,6 +320,12 @@ async function publishEsq() {
     <section class="import-source-grid">
       <article class="card import-source-card">
         <div class="source-heading"><FileUp :size="22" /><div><h2>Word / PDF 辅助导入</h2><p>试卷支持 DOC、DOCX；答案支持 DOC、DOCX、文本型 PDF。</p></div></div>
+        <label class="field">
+          <span>导入到题库配置</span>
+          <select v-model.number="targetProfileId">
+            <option v-for="profile in questionBankProfilesState.items" :key="profile.id" :value="profile.id">{{ profile.name }}</option>
+          </select>
+        </label>
         <label class="field"><span>试卷文件</span><input type="file" accept=".doc,.docx" @change="selectedFile=($event.target as HTMLInputElement).files?.[0]||null"></label>
         <label class="field"><span>答案文件（可选）</span><input type="file" accept=".doc,.docx,.pdf" @change="selectedAnswerFile=($event.target as HTMLInputElement).files?.[0]||null"></label>
         <label class="check-row"><input v-model="useModelAssist" type="checkbox"><span><b>上传时使用模型辅助定位题目与答案</b><small>默认全量核对；失败时保留本地草稿。</small></span></label>
@@ -306,9 +341,12 @@ async function publishEsq() {
         <label class="field"><span>ESQ 文件</span><input type="file" accept=".esq" @change="selectedEsqFile=($event.target as HTMLInputElement).files?.[0]||null"></label>
         <button class="button secondary" type="button" :disabled="busy || !selectedEsqFile" @click="uploadEsq"><FileArchive :size="17" />校验题库包</button>
         <div class="history-mini">
-          <button v-for="job in esqJobs.slice(0,4)" :key="job.id" type="button" @click="openEsqJob(job.id)">
-            <span>{{ job.filename }}</span><small>{{ job.status }}</small>
-          </button>
+          <div v-for="job in esqJobs.slice(0,4)" :key="job.id" style="display:flex;gap:6px">
+            <button type="button" style="flex:1" @click="openEsqJob(job.id)">
+              <span>{{ job.filename }}</span><small>{{ job.status }}</small>
+            </button>
+            <button v-if="job.status!=='published'" class="button ghost danger compact" type="button" @click="removeImportJob(job,true)"><Trash2 :size="14" /></button>
+          </div>
         </div>
       </article>
     </section>
@@ -325,10 +363,13 @@ async function publishEsq() {
     <section class="workspace-grid">
       <aside class="card history-panel">
         <div class="section-title"><h3>Word 导入记录</h3><RefreshCw :size="16" /></div>
-        <button v-for="job in jobs" :key="job.id" type="button" :class="{active:current?.id===job.id}" @click="openJob(job.id)">
-          <span><b>{{ job.detected_year || '待识别' }} 年</b>{{ job.filename }}</span>
-          <small>{{ job.status === 'published' ? '已入库' : `${job.warnings?.length || 0} 项待处理` }}</small>
-        </button>
+        <div v-for="job in jobs" :key="job.id" style="display:flex;gap:6px">
+          <button type="button" style="flex:1" :class="{active:current?.id===job.id}" @click="openJob(job.id)">
+            <span><b>{{ job.detected_year || '待识别' }} 年</b>{{ job.filename }}</span>
+            <small>{{ job.status === 'published' ? '已入库' : `${job.warnings?.length || 0} 项待处理` }}</small>
+          </button>
+          <button v-if="job.status!=='published'" class="button ghost danger compact" type="button" @click="removeImportJob(job)"><Trash2 :size="14" /></button>
+        </div>
         <p v-if="!jobs.length" class="empty-copy">上传后会在这里保留草稿记录。</p>
       </aside>
 

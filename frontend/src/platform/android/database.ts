@@ -14,17 +14,34 @@ CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER PRIMARY KEY,
   applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS question_bank_profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  is_default INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_question_bank_profiles_name
+  ON question_bank_profiles(name COLLATE NOCASE) WHERE deleted_at IS NULL;
+INSERT INTO question_bank_profiles(name, description, is_default)
+SELECT '考研英语一', '现有题库自动迁移配置', 1
+WHERE NOT EXISTS (SELECT 1 FROM question_bank_profiles);
 CREATE TABLE IF NOT EXISTS papers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  external_key TEXT NOT NULL UNIQUE,
+  profile_id INTEGER NOT NULL DEFAULT 1,
+  external_key TEXT NOT NULL,
   package_id TEXT NOT NULL DEFAULT '',
   content_version TEXT NOT NULL DEFAULT '',
-  year INTEGER NOT NULL UNIQUE,
+  year INTEGER NOT NULL,
   subject TEXT NOT NULL DEFAULT '英语一',
   title TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'published',
+  deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (profile_id) REFERENCES question_bank_profiles(id)
 );
 CREATE TABLE IF NOT EXISTS units (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -243,8 +260,11 @@ CREATE TABLE IF NOT EXISTS question_label_run_items (
 );
 CREATE TABLE IF NOT EXISTS document_import_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL DEFAULT 1,
   filename TEXT NOT NULL,
   answer_filename TEXT NOT NULL DEFAULT '',
+  source_file_base64 TEXT NOT NULL DEFAULT '',
+  answer_file_base64 TEXT NOT NULL DEFAULT '',
   detected_year INTEGER,
   detected_format TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'draft',
@@ -252,6 +272,19 @@ CREATE TABLE IF NOT EXISTS document_import_jobs (
   warnings TEXT NOT NULL DEFAULT '[]',
   published_paper_ids TEXT NOT NULL DEFAULT '[]',
   published_scope_title TEXT NOT NULL DEFAULT '',
+  deleted_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS esq_import_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL DEFAULT 1,
+  filename TEXT NOT NULL,
+  package_data TEXT NOT NULL DEFAULT '{}',
+  raw_file_base64 TEXT NOT NULL DEFAULT '',
+  preview_data TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'draft',
+  deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -272,16 +305,281 @@ CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT ''
 );
+INSERT OR IGNORE INTO app_settings(key, value)
+VALUES ('active_question_bank_profile_id', '1');
+CREATE TABLE IF NOT EXISTS trash_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  deletion_batch_id TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id INTEGER NOT NULL,
+  resource_name TEXT NOT NULL DEFAULT '',
+  profile_id INTEGER,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  deleted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  purge_after TEXT NOT NULL,
+  restored_at TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_units_paper ON units(paper_id);
 CREATE INDEX IF NOT EXISTS idx_questions_unit ON questions(unit_id);
 CREATE INDEX IF NOT EXISTS idx_answers_session ON practice_answers(session_id);
 CREATE INDEX IF NOT EXISTS idx_wrong_count ON wrong_stats(wrong_count DESC);
 CREATE INDEX IF NOT EXISTS idx_vocab_priority ON vocabulary_entries(encounter_count DESC, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_papers_profile ON papers(profile_id, deleted_at, year DESC);
+CREATE INDEX IF NOT EXISTS idx_document_import_profile ON document_import_jobs(profile_id, deleted_at, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_esq_import_profile ON esq_import_jobs(profile_id, deleted_at, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trash_purge ON trash_entries(purge_after, restored_at);
 INSERT OR IGNORE INTO schema_version(version) VALUES (1);
 `
 
 const manager = new SQLiteConnection(CapacitorSQLite)
 let connectionPromise: Promise<SQLiteDBConnection> | null = null
+
+async function ensureColumn(
+  db: SQLiteDBConnection,
+  table: string,
+  column: string,
+  declaration: string,
+) {
+  const result = await db.query(`PRAGMA table_info(${table})`)
+  if (!(result.values || []).some(item => item.name === column)) {
+    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`)
+  }
+}
+
+async function migrateQuestionBankProfiles(db: SQLiteDBConnection) {
+  const defaultProfile = await db.query(
+    'SELECT id FROM question_bank_profiles WHERE deleted_at IS NULL ORDER BY is_default DESC, id LIMIT 1',
+  )
+  const defaultProfileId = Number(defaultProfile.values?.[0]?.id || 1)
+  await ensureColumn(db, 'papers', 'profile_id', `INTEGER NOT NULL DEFAULT ${defaultProfileId}`)
+  await ensureColumn(db, 'papers', 'deleted_at', 'TEXT')
+  await ensureColumn(db, 'document_import_jobs', 'profile_id', `INTEGER NOT NULL DEFAULT ${defaultProfileId}`)
+  await ensureColumn(db, 'document_import_jobs', 'source_file_base64', "TEXT NOT NULL DEFAULT ''")
+  await ensureColumn(db, 'document_import_jobs', 'answer_file_base64', "TEXT NOT NULL DEFAULT ''")
+  await ensureColumn(db, 'document_import_jobs', 'deleted_at', 'TEXT')
+  await db.run('UPDATE papers SET profile_id = ? WHERE profile_id IS NULL OR profile_id = 0', [defaultProfileId], false)
+  await db.run('UPDATE document_import_jobs SET profile_id = ? WHERE profile_id IS NULL OR profile_id = 0', [defaultProfileId], false)
+  const table = await db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'papers'")
+  const sql = String(table.values?.[0]?.sql || '').toUpperCase()
+  if (sql.includes('YEAR INTEGER NOT NULL UNIQUE') || sql.includes('EXTERNAL_KEY TEXT NOT NULL UNIQUE')) {
+    const childTables = [
+      'units', 'questions', 'options', 'practice_sessions',
+      'practice_answers', 'practice_answer_events',
+      'practice_unit_submissions', 'wrong_stats',
+      'vocabulary_occurrences', 'wrong_analysis_states',
+    ]
+    await db.execute('PRAGMA foreign_keys = OFF')
+    for (const child of childTables) {
+      const columns = await db.query(`PRAGMA table_info(${child})`)
+      if (columns.values?.length) {
+        const columnList = columns.values
+          .map(item => `"${String(item.name)}"`)
+          .join(', ')
+        await db.execute(
+          `CREATE TABLE papers_rebuild_snapshot_${child} AS SELECT ${columnList} FROM ${child}`,
+        )
+      }
+    }
+    await db.execute('ALTER TABLE papers RENAME TO papers_rebuild_tmp_papers')
+    await db.execute(`
+      CREATE TABLE papers_rebuild (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        profile_id INTEGER NOT NULL,
+        external_key TEXT NOT NULL,
+        package_id TEXT NOT NULL DEFAULT '',
+        content_version TEXT NOT NULL DEFAULT '',
+        year INTEGER NOT NULL,
+        subject TEXT NOT NULL DEFAULT '英语一',
+        title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'published',
+        deleted_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (profile_id) REFERENCES question_bank_profiles(id)
+      )
+    `)
+    await db.execute(`
+      INSERT INTO papers_rebuild
+        (id, profile_id, external_key, package_id, content_version, year,
+         subject, title, status, deleted_at, created_at, updated_at)
+      SELECT id, profile_id, external_key, package_id, content_version, year,
+             subject, title, status, deleted_at, created_at, updated_at
+      FROM papers_rebuild_tmp_papers
+    `)
+    await db.execute('ALTER TABLE papers_rebuild RENAME TO papers')
+    await db.execute('DROP TABLE papers_rebuild_tmp_papers')
+    await db.execute(`
+      DROP TABLE units;
+      DROP TABLE questions;
+      DROP TABLE options;
+      DROP TABLE practice_sessions;
+      DROP TABLE practice_answers;
+      DROP TABLE practice_answer_events;
+      DROP TABLE practice_unit_submissions;
+      DROP TABLE wrong_stats;
+      DROP TABLE vocabulary_occurrences;
+      DROP TABLE wrong_analysis_states;
+      CREATE TABLE units (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        paper_id INTEGER NOT NULL,
+        external_key TEXT NOT NULL,
+        unit_type TEXT NOT NULL,
+        subtype TEXT,
+        title TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        passage TEXT NOT NULL DEFAULT '',
+        shared_data TEXT NOT NULL DEFAULT '{}',
+        FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE,
+        UNIQUE (paper_id, external_key)
+      );
+      CREATE TABLE questions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        unit_id INTEGER NOT NULL,
+        external_key TEXT NOT NULL,
+        number INTEGER NOT NULL,
+        stem TEXT NOT NULL DEFAULT '',
+        question_type TEXT NOT NULL DEFAULT 'single_choice',
+        answer TEXT NOT NULL,
+        score REAL NOT NULL DEFAULT 1,
+        sequence INTEGER NOT NULL,
+        metadata TEXT NOT NULL DEFAULT '{}',
+        content_hash TEXT NOT NULL DEFAULT '',
+        FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE,
+        UNIQUE (unit_id, external_key)
+      );
+      CREATE TABLE options (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        question_id INTEGER NOT NULL,
+        stable_key TEXT NOT NULL,
+        original_label TEXT NOT NULL,
+        content TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        metadata TEXT NOT NULL DEFAULT '{}',
+        FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE,
+        UNIQUE (question_id, stable_key)
+      );
+      CREATE TABLE practice_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mode TEXT NOT NULL,
+        paper_id INTEGER,
+        unit_ids TEXT NOT NULL,
+        shuffle_options INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'active',
+        started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        submitted_at TEXT,
+        score REAL,
+        max_score REAL
+      );
+      CREATE TABLE practice_answers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        question_id INTEGER NOT NULL,
+        user_answer TEXT NOT NULL DEFAULT '',
+        option_order TEXT NOT NULL DEFAULT '[]',
+        is_correct INTEGER,
+        answered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (session_id) REFERENCES practice_sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE,
+        UNIQUE (session_id, question_id)
+      );
+      CREATE TABLE practice_answer_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        question_id INTEGER NOT NULL,
+        user_answer TEXT NOT NULL,
+        option_order TEXT NOT NULL DEFAULT '[]',
+        changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE practice_unit_submissions (
+        session_id INTEGER NOT NULL,
+        unit_id INTEGER NOT NULL,
+        submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        score REAL NOT NULL DEFAULT 0,
+        max_score REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (session_id, unit_id)
+      );
+      CREATE TABLE wrong_stats (
+        question_id INTEGER PRIMARY KEY,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        wrong_count INTEGER NOT NULL DEFAULT 0,
+        recent_results TEXT NOT NULL DEFAULT '[]',
+        consecutive_correct INTEGER NOT NULL DEFAULT 0,
+        manually_frequent INTEGER NOT NULL DEFAULT 0,
+        last_wrong_at TEXT,
+        last_attempt_at TEXT
+      );
+      CREATE TABLE vocabulary_occurrences (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id INTEGER NOT NULL,
+        surface_form TEXT NOT NULL,
+        context_sentence TEXT NOT NULL DEFAULT '',
+        context_before TEXT NOT NULL DEFAULT '',
+        context_after TEXT NOT NULL DEFAULT '',
+        unit_id INTEGER,
+        question_id INTEGER,
+        year INTEGER,
+        unit_title TEXT NOT NULL DEFAULT '',
+        unit_type TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (entry_id) REFERENCES vocabulary_entries(id) ON DELETE CASCADE
+      );
+      CREATE TABLE wrong_analysis_states (
+        unit_id INTEGER PRIMARY KEY,
+        report_id INTEGER NOT NULL,
+        analyzed_session_id INTEGER NOT NULL DEFAULT 0,
+        analyzed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_units_paper ON units(paper_id);
+      CREATE INDEX IF NOT EXISTS idx_questions_unit ON questions(unit_id);
+      CREATE INDEX IF NOT EXISTS idx_answers_session ON practice_answers(session_id);
+      CREATE INDEX IF NOT EXISTS idx_answer_events_question
+        ON practice_answer_events(question_id, changed_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_unit_submissions_session
+        ON practice_unit_submissions(session_id);
+      CREATE INDEX IF NOT EXISTS idx_wrong_count ON wrong_stats(wrong_count DESC);
+      CREATE INDEX IF NOT EXISTS idx_vocab_priority
+        ON vocabulary_entries(encounter_count DESC, last_seen_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_vocab_occurrences_entry
+        ON vocabulary_occurrences(entry_id, created_at DESC);
+    `)
+    for (const child of childTables) {
+      const snapshot = await db.query(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+        [`papers_rebuild_snapshot_${child}`],
+      )
+      if (!snapshot.values?.length) continue
+      const snapshotColumns = (await db.query(
+        `PRAGMA table_info(papers_rebuild_snapshot_${child})`,
+      )).values || []
+      const oldNames = new Set(snapshotColumns.map(item => String(item.name)))
+      const newColumns = (await db.query(`PRAGMA table_info(${child})`)).values || []
+      const shared = newColumns
+        .map(item => String(item.name))
+        .filter(name => oldNames.has(name))
+      if (shared.length) {
+        const columnList = shared.map(name => `"${name}"`).join(', ')
+        await db.execute(
+          `INSERT INTO ${child} (${columnList})
+           SELECT ${columnList} FROM papers_rebuild_snapshot_${child}`,
+        )
+      }
+      await db.execute(`DROP TABLE papers_rebuild_snapshot_${child}`)
+    }
+    await db.execute('PRAGMA foreign_keys = ON')
+    const violations = await db.query('PRAGMA foreign_key_check')
+    if (violations.values?.length) {
+      throw new Error(
+        `数据库迁移后外键校验失败：${JSON.stringify(violations.values)}`,
+      )
+    }
+  }
+  await db.run(
+    `INSERT OR IGNORE INTO app_settings(key, value)
+     VALUES ('active_question_bank_profile_id', ?)`,
+    [String(defaultProfileId)],
+    false,
+  )
+}
 
 export async function androidDatabase(): Promise<SQLiteDBConnection> {
   if (!connectionPromise) {
@@ -296,6 +594,7 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       }
       if (!(await db.isDBOpen()).result) await db.open()
       await db.execute(SCHEMA)
+      await migrateQuestionBankProfiles(db)
       const questionColumns = await db.query('PRAGMA table_info(questions)')
       if (!(questionColumns.values || []).some(column => column.name === 'content_hash')) {
         await db.execute("ALTER TABLE questions ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''")

@@ -1,6 +1,7 @@
 import type { SQLiteDBConnection } from '@capacitor-community/sqlite'
 import { row, rows, run, transaction } from './database'
 import { incompleteSubmission, LocalApiError } from './errors'
+import { activeQuestionBankProfileId } from './question-bank-profiles'
 
 type JsonRecord = Record<string, any>
 type TransactionDb = Pick<SQLiteDBConnection, 'query' | 'run'>
@@ -129,8 +130,14 @@ async function serializeUnit(
 }
 
 async function selectUnitIds(body: JsonRecord): Promise<{ unitIds: number[]; paperId: number | null }> {
+  const activeProfileId = await activeQuestionBankProfileId()
   if (body.mode === 'paper') {
     if (!body.paper_id) throw new LocalApiError(400, '按年份练习需要选择试卷')
+    const paper = await row<{ id: number }>(
+      'SELECT id FROM papers WHERE id = ? AND profile_id = ? AND deleted_at IS NULL',
+      [body.paper_id, activeProfileId],
+    )
+    if (!paper) throw new LocalApiError(404, '试卷不存在或不属于当前题库配置')
     const unitIds = (await rows<{ id: number }>(
       'SELECT id FROM units WHERE paper_id = ? ORDER BY sequence',
       [body.paper_id],
@@ -140,12 +147,23 @@ async function selectUnitIds(body: JsonRecord): Promise<{ unitIds: number[]; pap
   if (body.mode === 'unit') {
     const unitIds = (body.unit_ids || []).map(Number).filter(Boolean)
     if (!unitIds.length) throw new LocalApiError(400, '请选择练习篇目')
+    const owned = await rows<{ id: number }>(
+      `SELECT u.id FROM units u
+       JOIN papers p ON p.id = u.paper_id
+       WHERE u.id IN (${unitIds.map(() => '?').join(',')})
+         AND p.profile_id = ?
+         AND p.deleted_at IS NULL`,
+      [...unitIds, activeProfileId],
+    )
+    if (owned.length !== unitIds.length) {
+      throw new LocalApiError(404, '部分篇目不存在或不属于当前题库配置')
+    }
     return { unitIds, paperId: body.paper_id ? Number(body.paper_id) : null }
   }
   if (body.mode === 'random') {
     let sql = `SELECT u.id FROM units u JOIN papers p ON p.id = u.paper_id
-      WHERE p.status = 'published'`
-    const values: unknown[] = []
+      WHERE p.status = 'published' AND p.deleted_at IS NULL AND p.profile_id = ?`
+    const values: unknown[] = [activeProfileId]
     if (body.unit_type) {
       sql += ' AND u.unit_type = ?'
       values.push(body.unit_type)
@@ -162,9 +180,12 @@ async function selectUnitIds(body: JsonRecord): Promise<{ unitIds: number[]; pap
   }
   if (body.mode === 'wrong') {
     let sql = `SELECT DISTINCT q.unit_id
-      FROM wrong_stats w JOIN questions q ON q.id = w.question_id
-      WHERE w.wrong_count > 0`
-    const values: unknown[] = []
+      FROM wrong_stats w
+      JOIN questions q ON q.id = w.question_id
+      JOIN units u ON u.id = q.unit_id
+      JOIN papers p ON p.id = u.paper_id
+      WHERE w.wrong_count > 0 AND p.profile_id = ? AND p.deleted_at IS NULL`
+    const values: unknown[] = [activeProfileId]
     if (body.unit_ids?.length) {
       sql += ` AND q.unit_id IN (${body.unit_ids.map(() => '?').join(',')})`
       values.push(...body.unit_ids)
@@ -585,15 +606,23 @@ export async function submitSession(sessionId: number): Promise<JsonRecord> {
 }
 
 export async function dashboard(): Promise<JsonRecord> {
+  const profileId = await activeQuestionBankProfileId()
   const counts = await row<JsonRecord>(
     `SELECT
-      (SELECT COUNT(*) FROM papers WHERE status = 'published') AS paper_count,
-      (SELECT COUNT(*) FROM units) AS unit_count,
-      (SELECT COUNT(*) FROM questions) AS question_count,
-      (SELECT COUNT(*) FROM wrong_stats WHERE wrong_count > 0) AS wrong_count`,
+      (SELECT COUNT(*) FROM papers WHERE status = 'published' AND profile_id = ? AND deleted_at IS NULL) AS paper_count,
+      (SELECT COUNT(*) FROM units u JOIN papers p ON p.id = u.paper_id WHERE p.profile_id = ? AND p.deleted_at IS NULL) AS unit_count,
+      (SELECT COUNT(*) FROM questions q JOIN units u ON u.id = q.unit_id JOIN papers p ON p.id = u.paper_id WHERE p.profile_id = ? AND p.deleted_at IS NULL) AS question_count,
+      (SELECT COUNT(*) FROM wrong_stats w JOIN questions q ON q.id = w.question_id JOIN units u ON u.id = q.unit_id JOIN papers p ON p.id = u.paper_id WHERE w.wrong_count > 0 AND p.profile_id = ? AND p.deleted_at IS NULL) AS wrong_count`,
+    [profileId, profileId, profileId, profileId],
   )
   const frequent = await rows<JsonRecord>(
-    'SELECT wrong_count, recent_results, manually_frequent FROM wrong_stats WHERE wrong_count > 0',
+    `SELECT w.wrong_count, w.recent_results, w.manually_frequent
+     FROM wrong_stats w
+     JOIN questions q ON q.id = w.question_id
+     JOIN units u ON u.id = q.unit_id
+     JOIN papers p ON p.id = u.paper_id
+     WHERE w.wrong_count > 0 AND p.profile_id = ? AND p.deleted_at IS NULL`,
+    [profileId],
   )
   const frequentCount = frequent.filter(item => {
     const recent = parseJson<boolean[]>(item.recent_results, [])
@@ -605,12 +634,15 @@ export async function dashboard(): Promise<JsonRecord> {
     `SELECT s.id, s.mode, s.status, s.started_at, s.submitted_at,
        s.score, s.max_score, p.year
      FROM practice_sessions s LEFT JOIN papers p ON p.id = s.paper_id
+     WHERE p.profile_id = ? OR s.paper_id IS NULL
      ORDER BY s.id DESC LIMIT 5`,
+    [profileId],
   )
   return { ...counts, frequent_count: frequentCount, recent_sessions: recentSessions }
 }
 
 export async function listWrong(): Promise<JsonRecord[]> {
+  const profileId = await activeQuestionBankProfileId()
   const data = await rows<JsonRecord>(
     `SELECT q.id AS question_id, q.number, q.stem,
        u.id AS unit_id, u.title AS unit_title, u.unit_type,
@@ -619,8 +651,9 @@ export async function listWrong(): Promise<JsonRecord[]> {
      JOIN questions q ON q.id = w.question_id
      JOIN units u ON u.id = q.unit_id
      JOIN papers p ON p.id = u.paper_id
-     WHERE w.wrong_count > 0
+     WHERE w.wrong_count > 0 AND p.profile_id = ? AND p.deleted_at IS NULL
      ORDER BY w.manually_frequent DESC, w.wrong_count DESC, w.last_wrong_at DESC`,
+    [profileId],
   )
   return data.map(item => {
     const recent = parseJson<boolean[]>(item.recent_results, [])

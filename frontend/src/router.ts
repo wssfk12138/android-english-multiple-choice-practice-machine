@@ -7,6 +7,7 @@ import PracticeView from './views/PracticeView.vue'
 import SettingsView from './views/SettingsView.vue'
 import WrongView from './views/WrongView.vue'
 import VocabularyView from './views/VocabularyView.vue'
+import TrashView from './views/TrashView.vue'
 import AndroidUpdatesView from './views/AndroidUpdatesView.vue'
 
 export default createRouter({
@@ -20,6 +21,7 @@ export default createRouter({
     { path: '/imports', component: ImportView },
     { path: '/assistant', component: AiAssistant },
     { path: '/settings', component: SettingsView },
+    { path: '/trash', component: TrashView },
     { path: '/android-updates', component: AndroidUpdatesView },
   ],
 })

@@ -9,9 +9,13 @@ document.documentElement.dataset.platform = platformRuntime.kind
 document.documentElement.classList.toggle('native-app', platformRuntime.isNative)
 
 platformRuntime.ready().then(async () => {
-  if (platformRuntime.isAndroid && import.meta.env.VITE_BUNDLED_QUESTION_BANK === '1') {
-    const { installBundledQuestionBank } = await import('./platform/android/question-bank')
-    await installBundledQuestionBank()
+  if (platformRuntime.isAndroid) {
+    const { purgeExpiredTrash } = await import('./platform/android/question-bank-profiles')
+    await purgeExpiredTrash()
+    if (import.meta.env.VITE_BUNDLED_QUESTION_BANK === '1') {
+      const { installBundledQuestionBank } = await import('./platform/android/question-bank')
+      await installBundledQuestionBank()
+    }
   }
 }).catch(error => {
   console.warn('Android startup preparation failed:', String(error))

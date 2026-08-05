@@ -754,3 +754,25 @@ h2, h3 { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+.bank-switcher { position: relative; margin: 0 0 18px; }
+.bank-switcher-main { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.bank-switcher select { min-width:190px; padding:9px 34px 9px 12px; border:1px solid var(--line, #d9dfd7); border-radius:12px; background:var(--surface, #fff); color:inherit; }
+.button.compact { min-height:36px; padding:7px 11px; }
+.button.ghost { background:transparent; color:inherit; border:1px solid var(--line, #d9dfd7); }
+.button.danger { color:#a33c32; border-color:#e6c2bd; }
+.bank-manager { position:absolute; z-index:30; top:46px; left:0; width:min(560px, calc(100vw - 48px)); padding:14px; box-shadow:0 18px 50px rgba(31,47,39,.16); }
+.bank-manager-create,.bank-manager-row,.bank-manager-actions { display:flex; align-items:center; gap:10px; }
+.bank-manager-create input { flex:1; }
+.bank-manager-row { justify-content:space-between; padding:12px 0; border-top:1px solid var(--line, #e5e9e4); }
+.bank-manager-row span:first-child { display:grid; gap:3px; }
+.bank-manager-row small { color:var(--muted, #718078); }
+.paper-card.selectable { cursor:pointer; user-select:none; touch-action:manipulation; }
+.paper-card.selected { outline:3px solid rgba(66,112,88,.28); border-color:#537e67; }
+.batch-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+.trash-list { display:grid; gap:12px; }
+.trash-row { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.trash-meta { display:grid; gap:4px; }
+@media (max-width: 720px) {
+  .bank-manager { position:fixed; left:16px; right:16px; top:90px; width:auto; max-height:70vh; overflow:auto; }
+  .trash-row { align-items:flex-start; flex-direction:column; }
+}

@@ -2,6 +2,7 @@ import { chatCompletion } from './ai'
 import { row, rows, run, transaction } from './database'
 import { extractDocument, type ExtractedDocument } from './document-extractor'
 import { LocalApiError } from './errors'
+import { activeQuestionBankProfileId } from './question-bank-profiles'
 
 type JsonRecord = Record<string, any>
 
@@ -536,10 +537,14 @@ function jobPayload(job: JsonRecord) {
 }
 
 export async function listDocumentImports(): Promise<JsonRecord[]> {
+  const profileId = await activeQuestionBankProfileId()
   const jobs = await rows<JsonRecord>(
-    `SELECT id, filename, detected_year, detected_format, status, warnings,
+    `SELECT id, profile_id, filename, detected_year, detected_format, status, warnings,
        published_paper_ids, published_scope_title, created_at, updated_at
-     FROM document_import_jobs ORDER BY id DESC`,
+     FROM document_import_jobs
+     WHERE profile_id = ? AND deleted_at IS NULL
+     ORDER BY id DESC`,
+    [profileId],
   )
   return jobs.map(job => ({
     ...job,
@@ -549,7 +554,7 @@ export async function listDocumentImports(): Promise<JsonRecord[]> {
 }
 
 export async function readDocumentImport(id: number): Promise<JsonRecord> {
-  const job = await row<JsonRecord>('SELECT * FROM document_import_jobs WHERE id = ?', [id])
+  const job = await row<JsonRecord>('SELECT * FROM document_import_jobs WHERE id = ? AND deleted_at IS NULL', [id])
   if (!job) throw new LocalApiError(404, '题库导入记录不存在')
   return jobPayload(job)
 }
@@ -567,6 +572,15 @@ export async function createDocumentImport(form: FormData): Promise<JsonRecord> 
   const answerSource = answerFile instanceof File
     ? { fileName: answerFile.name, extracted: await extractDocument(answerFile) } : undefined
   let draft = parseExtractedExam(file.name, source, answerSource)
+  const profileId = Number(form.get('profile_id') || 0) || await activeQuestionBankProfileId()
+  const toBase64 = async (input: File) => {
+    const bytes = new Uint8Array(await input.arrayBuffer())
+    let binary = ''
+    for (let index = 0; index < bytes.length; index += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+    }
+    return btoa(binary)
+  }
   const requested = String(form.get('use_model_assist') || '') === 'true'
   if (requested) {
     try {
@@ -583,12 +597,16 @@ export async function createDocumentImport(form: FormData): Promise<JsonRecord> 
   }
   const created = await run(
     `INSERT INTO document_import_jobs
-      (filename, answer_filename, detected_year, detected_format, status,
+      (profile_id, filename, answer_filename, source_file_base64,
+       answer_file_base64, detected_year, detected_format, status,
        draft_data, warnings)
-     VALUES (?, ?, ?, ?, 'draft', ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
     [
+      profileId,
       file.name,
       answerFile instanceof File ? answerFile.name : '',
+      await toBase64(file),
+      answerFile instanceof File ? await toBase64(answerFile) : '',
       draft.year,
       draft.detected_format,
       JSON.stringify(draft),
@@ -601,6 +619,7 @@ export async function createDocumentImport(form: FormData): Promise<JsonRecord> 
     draft: Object.fromEntries(Object.entries(draft).filter(([key]) => !['source_text', 'answer_text'].includes(key))),
     warnings: draft.warnings,
     model_assist: draft.model_assist,
+    profile_id: profileId,
   }
 }
 
@@ -655,19 +674,24 @@ export async function updateDocumentAnswers(id: number, body: JsonRecord): Promi
   return { draft: Object.fromEntries(Object.entries(draft).filter(([key]) => !['source_text', 'answer_text'].includes(key))), warnings: draft.warnings }
 }
 
-async function publishDraft(draft: JsonRecord): Promise<number> {
+async function publishDraft(draft: JsonRecord, profileId: number): Promise<number> {
   let paperId = 0
   await transaction(async db => {
-    const existing = await db.query('SELECT id FROM papers WHERE year = ? LIMIT 1', [draft.year])
+    const externalKey = `document:${draft.year}:${draft.subject || '英语一'}:${draft.title}`
+    const existing = await db.query(
+      `SELECT id FROM papers
+       WHERE profile_id = ? AND external_key = ? AND deleted_at IS NULL LIMIT 1`,
+      [profileId, externalKey],
+    )
     paperId = Number(existing.values?.[0]?.id || 0)
     if (paperId) {
       await db.run('DELETE FROM papers WHERE id = ?', [paperId], false)
       paperId = 0
     }
     const paper = await db.run(
-      `INSERT INTO papers (external_key, year, subject, title, status)
-       VALUES (?, ?, ?, ?, 'published')`,
-      [`local-${draft.year}`, draft.year, draft.subject || '英语一', draft.title],
+      `INSERT INTO papers (profile_id, external_key, year, subject, title, status)
+       VALUES (?, ?, ?, ?, ?, 'published')`,
+      [profileId, externalKey, draft.year, draft.subject || '英语一', draft.title],
       false,
     )
     paperId = Number(paper.changes?.lastId)
@@ -729,7 +753,7 @@ export async function publishDocumentImport(id: number): Promise<JsonRecord> {
   const draft = JSON.parse(job.draft_data)
   const warnings = validateDocumentDraft(draft)
   if (warnings.length) throw new LocalApiError(409, `仍有校验问题：${warnings.join('；')}`)
-  const paperId = await publishDraft(draft)
+  const paperId = await publishDraft(draft, Number(job.profile_id))
   await run(
     `UPDATE document_import_jobs SET status = 'published',
       published_paper_ids = ?, published_scope_title = ?,

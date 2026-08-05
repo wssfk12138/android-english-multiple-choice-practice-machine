@@ -20,6 +20,19 @@ import {
   updateQuestionLabel,
 } from './question-labeling'
 import { queueAndStartVocabularyTranslations } from './vocabulary-translation-runner'
+import {
+  activateQuestionBankProfile,
+  createQuestionBankProfile,
+  deleteImportDraft,
+  deletePaper,
+  deleteQuestionBankProfile,
+  listQuestionBankProfiles,
+  listTrash,
+  movePapers,
+  purgeTrash,
+  restoreTrash,
+  updateQuestionBankProfile,
+} from './question-bank-profiles'
 
 type JsonRecord = Record<string, any>
 
@@ -47,6 +60,25 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (method === 'GET' && pathname === '/startup') return await dashboard() as T
   if (method === 'GET' && pathname === '/papers') return await listPapers() as T
   if (method === 'GET' && pathname === '/wrong') return await listWrong() as T
+  if (method === 'GET' && pathname === '/question-bank-profiles') {
+    return await listQuestionBankProfiles() as T
+  }
+  if (method === 'POST' && pathname === '/question-bank-profiles') {
+    return await createQuestionBankProfile(body || {}) as T
+  }
+  params = match(pathname, /^\/question-bank-profiles\/(\d+)$/)
+  if (params && method === 'PATCH') return await updateQuestionBankProfile(Number(params[1]), body || {}) as T
+  if (params && method === 'DELETE') return await deleteQuestionBankProfile(Number(params[1])) as T
+  params = match(pathname, /^\/question-bank-profiles\/(\d+)\/activate$/)
+  if (params && method === 'POST') return await activateQuestionBankProfile(Number(params[1])) as T
+  if (method === 'POST' && pathname === '/papers/batch-move') return await movePapers(body || {}) as T
+  params = match(pathname, /^\/papers\/(\d+)$/)
+  if (params && method === 'DELETE') return await deletePaper(Number(params[1])) as T
+  if (method === 'GET' && pathname === '/trash') return await listTrash() as T
+  params = match(pathname, /^\/trash\/(\d+)\/restore$/)
+  if (params && method === 'POST') return await restoreTrash(Number(params[1]), body || {}) as T
+  params = match(pathname, /^\/trash\/(\d+)$/)
+  if (params && method === 'DELETE') return await purgeTrash(Number(params[1])) as T
 
   if (method === 'POST' && pathname === '/practice/sessions') {
     return await createSession(body!) as T
@@ -65,16 +97,17 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (params && method === 'POST') return await submitSession(Number(params[1])) as T
 
   if (pathname === '/question-banks/imports' && method === 'GET') {
-    return listEsqImports() as T
+    return await listEsqImports() as T
   }
   if (pathname === '/question-banks/imports' && method === 'POST') {
     if (!(options.body instanceof FormData)) throw new LocalApiError(400, '请选择 ESQ 文件')
     const file = options.body.get('file')
     if (!(file instanceof File)) throw new LocalApiError(400, '请选择 ESQ 文件')
-    return await createEsqImport(file) as T
+    return await createEsqImport(file, Number(options.body.get('profile_id') || 0) || undefined) as T
   }
   params = match(pathname, /^\/question-banks\/imports\/(\d+)$/)
-  if (params && method === 'GET') return readEsqImport(Number(params[1])) as T
+  if (params && method === 'GET') return await readEsqImport(Number(params[1])) as T
+  if (params && method === 'DELETE') return await deleteImportDraft('esq_import', Number(params[1])) as T
   params = match(pathname, /^\/question-banks\/imports\/(\d+)\/publish$/)
   if (params && method === 'POST') {
     return await publishEsqImport(Number(params[1]), body || {}) as T
@@ -87,6 +120,7 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   params = match(pathname, /^\/imports\/(\d+)$/)
   if (params && method === 'GET') return await readDocumentImport(Number(params[1])) as T
   if (params && method === 'PUT') return await updateDocumentImport(Number(params[1]), body || {}) as T
+  if (params && method === 'DELETE') return await deleteImportDraft('document_import', Number(params[1])) as T
   params = match(pathname, /^\/imports\/(\d+)\/model-assist$/)
   if (params && method === 'POST') return await retryDocumentModelAssist(Number(params[1]), body || {}) as T
   params = match(pathname, /^\/imports\/(\d+)\/answers$/)

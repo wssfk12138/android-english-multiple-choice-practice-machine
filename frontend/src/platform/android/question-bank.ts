@@ -1,6 +1,7 @@
 import JSZip from 'jszip'
 import { androidDatabase, row, rows, run, transaction } from './database'
 import { LocalApiError } from './errors'
+import { activeQuestionBankProfileId } from './question-bank-profiles'
 
 type JsonRecord = Record<string, any>
 
@@ -13,18 +14,6 @@ type ImportedPackage = {
     labels: JsonRecord | null
   }>
 }
-
-type PendingImport = {
-  id: number
-  filename: string
-  package: ImportedPackage
-  preview: JsonRecord
-  created_at: string
-  status: 'draft' | 'published'
-}
-
-const pendingImports = new Map<number, PendingImport>()
-let nextImportId = 1
 
 function plainText(blocks: any[]): string {
   return blocks
@@ -136,7 +125,7 @@ export async function parseEsqFile(file: File): Promise<ImportedPackage> {
   return parseEsqBytes(await file.arrayBuffer())
 }
 
-async function buildPreview(pkg: ImportedPackage): Promise<JsonRecord> {
+async function buildPreview(pkg: ImportedPackage, profileId: number): Promise<JsonRecord> {
   const conflicts = []
   let units = 0
   let questions = 0
@@ -147,8 +136,9 @@ async function buildPreview(pkg: ImportedPackage): Promise<JsonRecord> {
       0,
     )
     const existing = await row<any>(
-      'SELECT id, year, title, external_key FROM papers WHERE external_key = ? OR year = ? LIMIT 1',
-      [item.paper.paperKey, item.paper.year],
+      `SELECT id, year, title, external_key FROM papers
+       WHERE profile_id = ? AND external_key = ? AND deleted_at IS NULL LIMIT 1`,
+      [profileId, item.paper.paperKey],
     )
     conflicts.push({
       paperKey: item.paper.paperKey,
@@ -166,30 +156,59 @@ async function buildPreview(pkg: ImportedPackage): Promise<JsonRecord> {
   }
 }
 
-async function createParsedEsqImport(filename: string, pkg: ImportedPackage): Promise<JsonRecord> {
-  const preview = await buildPreview(pkg)
-  const id = nextImportId++
-  const job: PendingImport = {
-    id,
-    filename,
-    package: pkg,
-    preview,
-    created_at: new Date().toISOString(),
-    status: 'draft',
+function bytesToBase64(data: Uint8Array): string {
+  let binary = ''
+  const chunk = 0x8000
+  for (let index = 0; index < data.length; index += chunk) {
+    binary += String.fromCharCode(...data.subarray(index, index + chunk))
   }
-  pendingImports.set(id, job)
-  return { id, filename, format: 'esq-1.0', preview, warnings: [] }
+  return btoa(binary)
 }
 
-export async function createEsqImport(file: File): Promise<JsonRecord> {
-  return createParsedEsqImport(file.name, await parseEsqFile(file))
+async function createParsedEsqImport(
+  filename: string,
+  pkg: ImportedPackage,
+  rawData: Uint8Array,
+  profileId: number,
+): Promise<JsonRecord> {
+  const preview = await buildPreview(pkg, profileId)
+  const created = await run(
+    `INSERT INTO esq_import_jobs
+      (profile_id, filename, package_data, raw_file_base64, preview_data, status)
+     VALUES (?, ?, ?, ?, ?, 'draft')`,
+    [profileId, filename, JSON.stringify(pkg), bytesToBase64(rawData), JSON.stringify(preview)],
+  )
+  return {
+    id: Number(created.lastId),
+    profile_id: profileId,
+    filename,
+    format: 'esq-1.0',
+    preview,
+    warnings: [],
+  }
+}
+
+export async function createEsqImport(file: File, profileId?: number): Promise<JsonRecord> {
+  const data = new Uint8Array(await file.arrayBuffer())
+  return createParsedEsqImport(
+    file.name,
+    await parseEsqBytes(data),
+    data,
+    profileId || await activeQuestionBankProfileId(),
+  )
 }
 
 export async function createEsqImportFromBytes(
   filename: string,
   data: Uint8Array,
+  profileId?: number,
 ): Promise<JsonRecord> {
-  return createParsedEsqImport(filename, await parseEsqBytes(data))
+  return createParsedEsqImport(
+    filename,
+    await parseEsqBytes(data),
+    data,
+    profileId || await activeQuestionBankProfileId(),
+  )
 }
 
 export async function installBundledQuestionBank(): Promise<JsonRecord> {
@@ -207,11 +226,12 @@ export async function installBundledQuestionBank(): Promise<JsonRecord> {
     [packageId, contentVersion],
   )
   if (installed) return { available: true, installed: false, alreadyInstalled: true }
-  const preview = await buildPreview(pkg)
+  const profileId = await activeQuestionBankProfileId()
+  const preview = await buildPreview(pkg, profileId)
   if (preview.conflicts.some((item: JsonRecord) => item.existing)) {
     return { available: true, installed: false, conflicts: true }
   }
-  const created = await createParsedEsqImport('internal-question-bank.esq', pkg)
+  const created = await createParsedEsqImport('internal-question-bank.esq', pkg, data, profileId)
   await publishEsqImport(created.id, { resolutions: [] })
   return {
     available: true,
@@ -222,33 +242,48 @@ export async function installBundledQuestionBank(): Promise<JsonRecord> {
   }
 }
 
-export function listEsqImports(): JsonRecord[] {
-  return [...pendingImports.values()]
-    .sort((a, b) => b.id - a.id)
-    .map(job => ({
+export async function listEsqImports(): Promise<JsonRecord[]> {
+  const profileId = await activeQuestionBankProfileId()
+  const jobs = await rows<JsonRecord>(
+    `SELECT id, profile_id, filename, package_data, status, created_at, updated_at
+     FROM esq_import_jobs
+     WHERE profile_id = ? AND deleted_at IS NULL
+     ORDER BY id DESC`,
+    [profileId],
+  )
+  return jobs.map(job => {
+    const pkg = JSON.parse(job.package_data || '{}') as ImportedPackage
+    return {
       id: job.id,
+      profile_id: job.profile_id,
       filename: job.filename,
-      detected_year: job.package.papers[0]?.paper.year ?? null,
+      detected_year: pkg.papers?.[0]?.paper?.year ?? null,
       detected_format: 'esq-1.0',
       status: job.status,
       warnings: [],
       created_at: job.created_at,
-      updated_at: job.created_at,
-    }))
+      updated_at: job.updated_at,
+    }
+  })
 }
 
-export function readEsqImport(id: number): JsonRecord {
-  const job = pendingImports.get(id)
+export async function readEsqImport(id: number): Promise<JsonRecord> {
+  const job = await row<JsonRecord>(
+    'SELECT * FROM esq_import_jobs WHERE id = ? AND deleted_at IS NULL',
+    [id],
+  )
   if (!job) throw new LocalApiError(404, '题库导入记录不存在')
+  const pkg = JSON.parse(job.package_data || '{}') as ImportedPackage
   return {
     id: job.id,
+    profile_id: job.profile_id,
     filename: job.filename,
-    detected_year: job.package.papers[0]?.paper.year ?? null,
+    detected_year: pkg.papers?.[0]?.paper?.year ?? null,
     detected_format: 'esq-1.0',
     status: job.status,
     warnings: [],
-    draft_data: { manifest: job.package.manifest },
-    preview: job.preview,
+    draft_data: { manifest: pkg.manifest },
+    preview: JSON.parse(job.preview_data || '{}'),
   }
 }
 
@@ -256,6 +291,7 @@ async function upsertPaper(
   db: Awaited<ReturnType<typeof androidDatabase>>,
   pkg: ImportedPackage,
   item: ImportedPackage['papers'][number],
+  profileId: number,
   existingPaperId = 0,
 ): Promise<number> {
   const paper = item.paper
@@ -264,10 +300,11 @@ async function upsertPaper(
   if (paperId) {
     await db.run(
       `UPDATE papers SET
-         external_key = ?, package_id = ?, content_version = ?, year = ?,
+         profile_id = ?, external_key = ?, package_id = ?, content_version = ?, year = ?,
          subject = ?, title = ?, status = 'published', updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
+        profileId,
         paper.paperKey,
         manifest.packageId,
         manifest.contentVersion,
@@ -281,9 +318,10 @@ async function upsertPaper(
   } else {
     const inserted = await db.run(
       `INSERT INTO papers
-        (external_key, package_id, content_version, year, subject, title, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'published')`,
+        (profile_id, external_key, package_id, content_version, year, subject, title, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'published')`,
       [
+        profileId,
         paper.paperKey,
         manifest.packageId,
         manifest.contentVersion,
@@ -465,17 +503,23 @@ export async function publishEsqImport(
   id: number,
   body: { resolutions?: Array<{ paper_key: string; action: string }> },
 ): Promise<JsonRecord> {
-  const job = pendingImports.get(id)
+  const job = await row<JsonRecord>(
+    'SELECT * FROM esq_import_jobs WHERE id = ? AND deleted_at IS NULL',
+    [id],
+  )
   if (!job) throw new LocalApiError(404, '题库导入记录不存在')
+  const pkg = JSON.parse(job.package_data || '{}') as ImportedPackage
+  const profileId = Number(job.profile_id)
   const resolutions = new Map(
     (body.resolutions || []).map(item => [item.paper_key, item.action]),
   )
   const publishedPaperIds: number[] = []
   await transaction(async db => {
-    for (const item of job.package.papers) {
+    for (const item of pkg.papers) {
       const existing = await db.query(
-        'SELECT id FROM papers WHERE external_key = ? OR year = ? LIMIT 1',
-        [item.paper.paperKey, item.paper.year],
+        `SELECT id FROM papers
+         WHERE profile_id = ? AND external_key = ? AND deleted_at IS NULL LIMIT 1`,
+        [profileId, item.paper.paperKey],
       )
       const existingId = Number(existing.values?.[0]?.id || 0)
       if (existingId) {
@@ -487,33 +531,39 @@ export async function publishEsqImport(
         }
         if (action !== 'replace_with_imported') throw new LocalApiError(422, '未知的题库冲突处理方式')
       }
-      publishedPaperIds.push(await upsertPaper(db, job.package, item, existingId))
+      publishedPaperIds.push(await upsertPaper(db, pkg, item, profileId, existingId))
     }
     await db.run(
       `INSERT OR REPLACE INTO question_bank_packages
         (package_id, content_version, title, publisher, manifest_data, status)
        VALUES (?, ?, ?, ?, ?, 'published')`,
       [
-        job.package.manifest.packageId,
-        job.package.manifest.contentVersion,
-        job.package.manifest.title || '',
-        job.package.manifest.publisher || '',
-        JSON.stringify(job.package.manifest),
+        pkg.manifest.packageId,
+        pkg.manifest.contentVersion,
+        pkg.manifest.title || '',
+        pkg.manifest.publisher || '',
+        JSON.stringify(pkg.manifest),
       ],
       false,
     )
   })
-  job.status = 'published'
-  job.preview = await buildPreview(job.package)
+  const preview = await buildPreview(pkg, profileId)
+  await run(
+    `UPDATE esq_import_jobs
+     SET status = 'published', preview_data = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [JSON.stringify(preview), id],
+  )
   return {
     published: true,
-    packageId: job.package.manifest.packageId,
+    packageId: pkg.manifest.packageId,
     paper_ids: publishedPaperIds,
-    scope_title: job.preview.title,
+    scope_title: preview.title,
   }
 }
 
 export async function listPapers(): Promise<JsonRecord[]> {
+  const profileId = await activeQuestionBankProfileId()
   return rows(
     `SELECT p.*,
        COUNT(DISTINCT u.id) AS unit_count,
@@ -521,7 +571,9 @@ export async function listPapers(): Promise<JsonRecord[]> {
      FROM papers p
      LEFT JOIN units u ON u.paper_id = p.id
      LEFT JOIN questions q ON q.unit_id = u.id
+     WHERE p.profile_id = ? AND p.deleted_at IS NULL
      GROUP BY p.id
-     ORDER BY p.year DESC`,
+     ORDER BY p.year DESC, p.title`,
+    [profileId],
   )
 }

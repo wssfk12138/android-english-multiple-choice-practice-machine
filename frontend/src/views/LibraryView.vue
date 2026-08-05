@@ -1,19 +1,29 @@
 <script setup lang="ts">
-import { BookOpen, Play } from 'lucide-vue-next'
+import { BookOpen, CheckSquare, MoveRight, Play, Trash2, X } from 'lucide-vue-next'
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { get, post } from '../api'
+import { del, get, post } from '../api'
 import { platformRuntime } from '../platform/runtime'
+import QuestionBankSwitcher from '../components/QuestionBankSwitcher.vue'
+import { loadQuestionBankProfiles, questionBankProfilesState } from '../services/questionBankProfiles'
 
 const router = useRouter()
 const papers = ref<any[]>([])
 const error = ref('')
+const batchMode = ref(false)
+const selectedIds = ref<Set<number>>(new Set())
+let holdTimer: number | null = null
 const emptyHint = platformRuntime.isAndroid
   ? '请先到“导入题库”选择 ESQ 题库包。'
   : '请先到“导入题库”上传 Word 真题。'
 
-onMounted(async () => {
+async function loadPapers() {
+  selectedIds.value = new Set()
   try { papers.value = await get('/papers') } catch (e) { error.value = String(e) }
+}
+
+onMounted(async () => {
+  await Promise.all([loadPapers(), loadQuestionBankProfiles()])
 })
 
 async function startPaper(id: number) {
@@ -24,18 +34,99 @@ async function startPaper(id: number) {
     router.push(`/practice/${session.id}`)
   } catch (e) { error.value = String(e) }
 }
+
+function togglePaper(id: number) {
+  if (!batchMode.value) return
+  const next = new Set(selectedIds.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  selectedIds.value = next
+}
+
+function beginHold(id: number) {
+  if (holdTimer !== null) window.clearTimeout(holdTimer)
+  holdTimer = window.setTimeout(() => {
+    batchMode.value = true
+    togglePaper(id)
+  }, 520)
+}
+
+function cancelHold() {
+  if (holdTimer !== null) window.clearTimeout(holdTimer)
+  holdTimer = null
+}
+
+function leaveBatch() {
+  batchMode.value = false
+  selectedIds.value = new Set()
+}
+
+async function moveSelected() {
+  const targets = questionBankProfilesState.items.filter(
+    item => Number(item.id) !== questionBankProfilesState.activeId,
+  )
+  if (!targets.length) {
+    error.value = '请先新建另一个题库配置'
+    return
+  }
+  const answer = window.prompt(
+    `输入目标题库配置编号：\n${targets.map(item => `${item.id}：${item.name}`).join('\n')}`,
+    String(targets[0].id),
+  )
+  const targetId = Number(answer)
+  if (!targets.some(item => Number(item.id) === targetId)) return
+  try {
+    await post('/papers/batch-move', {
+      paper_ids: [...selectedIds.value],
+      target_profile_id: targetId,
+    })
+    leaveBatch()
+    await loadPapers()
+  } catch (cause) { error.value = String(cause) }
+}
+
+async function deleteSelected() {
+  if (!selectedIds.value.size) return
+  if (!window.confirm(`将选中的 ${selectedIds.value.size} 套试卷移入回收站？`)) return
+  try {
+    for (const id of selectedIds.value) await del(`/papers/${id}`)
+    leaveBatch()
+    await loadPapers()
+  } catch (cause) { error.value = String(cause) }
+}
 </script>
 
 <template>
   <div class="page">
     <div class="page-head"><div><span class="eyebrow">QUESTION LIBRARY</span><h1>按年份练习</h1><p class="lead">完成整年45道客观题后统一判分，中途自动保存。</p></div></div>
+    <QuestionBankSwitcher @changed="loadPapers" />
+    <div class="batch-toolbar">
+      <span class="lead">{{ batchMode ? `已选择 ${selectedIds.size} 套试卷` : '长按试卷或点击“批量管理”可移动、删除多套试卷。' }}</span>
+      <span style="display:flex;gap:8px;flex-wrap:wrap">
+        <button v-if="!batchMode" class="button secondary compact" type="button" @click="batchMode=true"><CheckSquare :size="16" />批量管理</button>
+        <template v-else>
+          <button class="button secondary compact" type="button" :disabled="!selectedIds.size" @click="moveSelected"><MoveRight :size="16" />移动</button>
+          <button class="button ghost danger compact" type="button" :disabled="!selectedIds.size" @click="deleteSelected"><Trash2 :size="16" />移入回收站</button>
+          <button class="button ghost compact" type="button" @click="leaveBatch"><X :size="16" />取消</button>
+        </template>
+      </span>
+    </div>
     <div v-if="error" class="warning">{{ error }}</div>
     <div v-if="papers.length" class="grid grid-3">
-      <article class="card paper-card" v-for="paper in papers" :key="paper.id">
+      <article
+        class="card paper-card selectable"
+        :class="{ selected: selectedIds.has(paper.id) }"
+        v-for="paper in papers"
+        :key="paper.id"
+        @pointerdown="beginHold(paper.id)"
+        @pointerup="cancelHold"
+        @pointerleave="cancelHold"
+        @click="togglePaper(paper.id)"
+      >
         <div style="display:flex;justify-content:space-between"><span class="pill">{{ paper.status === 'published' ? '已发布' : '草稿' }}</span><BookOpen :size="20" /></div>
         <h2 class="paper-year">{{ paper.year }}</h2>
+        <h3>{{ paper.title }}</h3>
         <p class="lead">{{ paper.subject }} · {{ paper.unit_count }}篇 · {{ paper.question_count }}题</p>
-        <button class="button" style="width:100%;margin-top:22px" :disabled="paper.status !== 'published'" @click="startPaper(paper.id)"><Play :size="16" />开始整卷</button>
+        <button class="button" style="width:100%;margin-top:22px" :disabled="paper.status !== 'published' || batchMode" @click.stop="startPaper(paper.id)"><Play :size="16" />开始整卷</button>
       </article>
     </div>
     <div v-else class="card empty illustrated-empty">
