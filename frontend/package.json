@@ -11,6 +11,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
     "test:diagnostics": "node --experimental-strip-types tests/serial-queue.mjs",
+    "test:database-migration": "node tests/database-migration.mjs",
     "preview": "vite preview",
     "cap:sync": "pnpm build && cap sync",
     "cap:copy": "pnpm build && cap copy",

@@ -46,7 +46,6 @@ CREATE TABLE IF NOT EXISTS papers (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (profile_id) REFERENCES question_bank_profiles(id)
 );
-UPDATE papers SET exam_type='', exam_month=0, set_number=1 WHERE exam_type IS NULL;
 CREATE TABLE IF NOT EXISTS units (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   paper_id INTEGER NOT NULL,
@@ -397,6 +396,9 @@ async function migrateQuestionBankProfiles(db: SQLiteDBConnection) {
         year INTEGER NOT NULL,
         subject TEXT NOT NULL DEFAULT '英语一',
         title TEXT NOT NULL,
+        exam_type TEXT NOT NULL DEFAULT '',
+        exam_month INTEGER NOT NULL DEFAULT 0,
+        set_number INTEGER NOT NULL DEFAULT 1,
         status TEXT NOT NULL DEFAULT 'published',
         deleted_at TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -407,9 +409,11 @@ async function migrateQuestionBankProfiles(db: SQLiteDBConnection) {
     await db.execute(`
       INSERT INTO papers_rebuild
         (id, profile_id, external_key, package_id, content_version, year,
-         subject, title, status, deleted_at, created_at, updated_at)
+         subject, title, exam_type, exam_month, set_number, status,
+         deleted_at, created_at, updated_at)
       SELECT id, profile_id, external_key, package_id, content_version, year,
-             subject, title, status, deleted_at, created_at, updated_at
+             subject, title, exam_type, exam_month, set_number, status,
+             deleted_at, created_at, updated_at
       FROM papers_rebuild_tmp_papers
     `)
     await db.execute('ALTER TABLE papers_rebuild RENAME TO papers')
@@ -587,6 +591,20 @@ async function migrateQuestionBankProfiles(db: SQLiteDBConnection) {
   )
 }
 
+async function migratePaperExamMetadata(db: SQLiteDBConnection) {
+  await ensureColumn(db, 'papers', 'exam_type', "TEXT NOT NULL DEFAULT ''")
+  await ensureColumn(db, 'papers', 'exam_month', 'INTEGER NOT NULL DEFAULT 0')
+  await ensureColumn(db, 'papers', 'set_number', 'INTEGER NOT NULL DEFAULT 1')
+  await db.run(
+    `UPDATE papers
+     SET exam_type = COALESCE(exam_type, ''),
+         exam_month = COALESCE(exam_month, 0),
+         set_number = COALESCE(set_number, 1)`,
+    [],
+    false,
+  )
+}
+
 export async function androidDatabase(): Promise<SQLiteDBConnection> {
   if (!connectionPromise) {
     connectionPromise = (async () => {
@@ -600,6 +618,7 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       }
       if (!(await db.isDBOpen()).result) await db.open()
       await db.execute(SCHEMA)
+      await migratePaperExamMetadata(db)
       await migrateQuestionBankProfiles(db)
       const questionColumns = await db.query('PRAGMA table_info(questions)')
       if (!(questionColumns.values || []).some(column => column.name === 'content_hash')) {
