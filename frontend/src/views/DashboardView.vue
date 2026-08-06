@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowRight, BookOpen, Headphones, Sparkles, Star } from 'lucide-vue-next'
+import { ArrowRight, BookOpen, Sparkles, Star } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { get, post } from '../api'
@@ -26,6 +26,19 @@ const visibleWords = computed(() =>
 const hasListening = computed(() =>
   Number(data.value?.paper_type_counts?.listening || 0) > 0,
 )
+const hasPracticeType = (type: string) =>
+  Number(data.value?.unit_type_counts?.[type] || 0) > 0
+const hasAnyPractice = computed(() =>
+  ['cloze', 'reading', 'part_b', 'listening'].some(hasPracticeType),
+)
+const practiceGridClass = computed(() => {
+  const count = ['cloze', 'reading', 'part_b', 'listening']
+    .filter(hasPracticeType).length
+  if (count >= 4) return 'grid-4'
+  if (count === 3) return 'grid-3'
+  if (count === 2) return 'grid-2'
+  return ''
+})
 
 function wordMeaning(word: any) {
   return word.common_meaning || word.contextual_meaning || '释义整理中'
@@ -89,6 +102,10 @@ onBeforeUnmount(() => {
 })
 
 async function randomPractice(type: string) {
+  if (!hasPracticeType(type)) {
+    error.value = '当前题库配置中没有可练习的该题型，请先切换题库配置或导入题目。'
+    return
+  }
   try {
     const session: any = await post('/practice/sessions', {
       mode: 'random',
@@ -130,27 +147,31 @@ async function randomPractice(type: string) {
         </Transition>
       </div>
     </section>
-    <div class="grid practice-actions" :class="hasListening ? 'grid-4' : 'grid-3'">
-      <button class="card action-card" type="button" @click="randomPractice('cloze')">
+    <div v-if="hasAnyPractice" class="grid practice-actions" :class="practiceGridClass">
+      <button v-if="hasPracticeType('cloze')" class="card action-card" type="button" @click="randomPractice('cloze')">
         <span class="feature-icon orange"><img src="/assets/icons/cloze.png" alt="" /></span>
         <span class="action-copy"><small>20 个空 · 整篇提交</small><h3>完型填空</h3><p>随机抽取一整篇，在完整语境中完成练习。</p></span>
         <ArrowRight class="action-arrow" :size="19" />
       </button>
-      <button class="card action-card" type="button" @click="randomPractice('reading')">
+      <button v-if="hasPracticeType('reading')" class="card action-card" type="button" @click="randomPractice('reading')">
         <span class="feature-icon sage"><img src="/assets/icons/reading.png" alt="" /></span>
         <span class="action-copy"><small>1 篇文章 · 5 道题</small><h3>阅读理解</h3><p>按文章完整练习，专注理解论证与细节。</p></span>
         <ArrowRight class="action-arrow" :size="19" />
       </button>
-      <button class="card action-card" type="button" @click="randomPractice('part_b')">
+      <button v-if="hasPracticeType('part_b')" class="card action-card" type="button" @click="randomPractice('part_b')">
         <span class="feature-icon blue"><img src="/assets/icons/part-b.png" alt="" /></span>
         <span class="action-copy"><small>排序 · 填入 · 匹配</small><h3>阅读 Part B</h3><p>在段落关系中辨认结构、衔接与观点。</p></span>
         <ArrowRight class="action-arrow" :size="19" />
       </button>
       <button v-if="hasListening" class="card action-card" type="button" @click="randomPractice('listening')">
-        <span class="feature-icon purple"><Headphones :size="42" aria-hidden="true" /></span>
+        <span class="feature-icon purple"><img src="/assets/icons/listening.png" alt="" /></span>
         <span class="action-copy"><small>随机一套 · 完整听力</small><h3>听力单刷</h3><p>抽取一套试卷的完整听力部分，音频跨 Section 自动续播。</p></span>
         <ArrowRight class="action-arrow" :size="19" />
       </button>
+    </div>
+    <div v-else-if="data" class="card empty">
+      当前题库配置中还没有可练习的已发布题目，请先切换题库配置或导入题库。
+      <RouterLink class="button ghost compact" to="/library">前往题库</RouterLink>
     </div>
     <div class="section-title"><h2>学习概览</h2></div>
     <div v-if="data" class="grid grid-4">

@@ -9,6 +9,8 @@ import WrongView from './views/WrongView.vue'
 import VocabularyView from './views/VocabularyView.vue'
 import TrashView from './views/TrashView.vue'
 import AndroidUpdatesView from './views/AndroidUpdatesView.vue'
+import NotesHubView from './views/NotesHubView.vue'
+import MobileSettingsView from './views/MobileSettingsView.vue'
 
 export default createRouter({
   history: createWebHistory(),
@@ -23,5 +25,7 @@ export default createRouter({
     { path: '/settings', component: SettingsView },
     { path: '/trash', component: TrashView },
     { path: '/android-updates', component: AndroidUpdatesView },
+    { path: '/notes', component: NotesHubView },
+    { path: '/mobile-settings', component: MobileSettingsView },
   ],
 })

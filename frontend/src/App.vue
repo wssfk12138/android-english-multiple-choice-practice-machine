@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BookMarked, BookOpenText, Brain, Download, FileUp, Home, Library, MessageCircle, Moon, PackageCheck, Settings, Sun, Trash2 } from 'lucide-vue-next'
+import { BookOpenText, Moon, PackageCheck, Sun, Trash2 } from 'lucide-vue-next'
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { App as CapacitorApp } from '@capacitor/app'
 import type { PluginListenerHandle } from '@capacitor/core'
@@ -167,17 +167,21 @@ onBeforeUnmount(() => {
         <span class="brand-mark"><img src="/assets/icons/brand-mark.png" alt="" /></span>
         <span class="brand-copy"><strong>英语刷题机</strong><small>考研英语一 · 本地题库</small></span>
       </RouterLink>
-      <nav aria-label="主要导航">
-        <RouterLink to="/"><Home :size="19" aria-hidden="true" /><span>首页</span></RouterLink>
-        <RouterLink to="/library"><Library :size="19" aria-hidden="true" /><span>题库与练习</span></RouterLink>
-        <RouterLink to="/wrong"><Brain :size="19" aria-hidden="true" /><span>错题本</span></RouterLink>
-        <RouterLink to="/vocabulary"><BookMarked :size="19" aria-hidden="true" /><span>单词本</span></RouterLink>
-        <RouterLink to="/imports"><FileUp :size="19" aria-hidden="true" /><span>导入题库</span></RouterLink>
-        <RouterLink to="/assistant">
-          <MessageCircle :size="19" aria-hidden="true" /><span>AI 学习助手</span>
-        </RouterLink>
-        <RouterLink to="/settings"><Settings :size="19" aria-hidden="true" /><span>模型与设置</span></RouterLink>
-        <RouterLink v-if="platformRuntime.isAndroid" to="/android-updates"><Download :size="19" aria-hidden="true" /><span>更新</span></RouterLink>
+      <nav class="primary-nav" aria-label="主要导航">
+        <RouterLink to="/"><img src="/assets/icons/home.png" alt="" /><span>首页</span></RouterLink>
+        <RouterLink to="/library"><img src="/assets/icons/paper.png" alt="" /><span>题库与练习</span></RouterLink>
+        <RouterLink to="/wrong"><img src="/assets/icons/wrong-book.png" alt="" /><span>错题本</span></RouterLink>
+        <RouterLink to="/vocabulary"><img src="/assets/icons/vocabulary.png" alt="" /><span>单词本</span></RouterLink>
+        <RouterLink to="/imports"><img src="/assets/icons/import.png" alt="" /><span>导入题库</span></RouterLink>
+        <RouterLink to="/assistant"><img src="/assets/icons/ai.png" alt="" /><span>AI 学习助手</span></RouterLink>
+        <RouterLink to="/settings"><img src="/assets/icons/settings.png" alt="" /><span>模型与设置</span></RouterLink>
+        <RouterLink v-if="platformRuntime.isAndroid" to="/android-updates"><img src="/assets/icons/update.png" alt="" /><span>更新</span></RouterLink>
+      </nav>
+      <nav class="mobile-tab-nav" aria-label="手机主要导航">
+        <RouterLink to="/"><img src="/assets/icons/home.png" alt="" /><span>首页</span></RouterLink>
+        <RouterLink to="/notes"><img src="/assets/icons/notes.png" alt="" /><span>笔记</span></RouterLink>
+        <RouterLink to="/assistant"><img src="/assets/icons/ai.png" alt="" /><span>AI</span></RouterLink>
+        <RouterLink to="/mobile-settings"><img src="/assets/icons/settings.png" alt="" /><span>设置</span></RouterLink>
       </nav>
       <div class="sidebar-note">
         <BookOpenText :size="18" />

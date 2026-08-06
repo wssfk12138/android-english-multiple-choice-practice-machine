@@ -91,8 +91,10 @@ html.native-app .app-shell { min-height:calc(100vh - env(safe-area-inset-top) - 
 .brand-copy { min-width: 0; }
 nav { display: grid; gap: 7px; }
 nav a { min-height: 44px; display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 12px; color: var(--muted); font-size: 14px; font-weight: 550; transition: color .18s ease, background-color .18s ease, transform .18s ease; }
+nav a>img { width: 22px; height: 22px; flex: 0 0 22px; object-fit: contain; }
 nav a:hover { color: var(--ink); background: var(--primary-faint); transform: translateX(2px); }
 nav a.router-link-active { color: var(--primary); background: var(--primary-soft); box-shadow: inset 3px 0 var(--primary); }
+.mobile-tab-nav { display: none; }
 .sidebar-note { margin-top: auto; display: flex; gap: 10px; padding: 15px; border-radius: 16px; background: var(--apricot); color: var(--muted); font-size: 12px; line-height: 1.65; }
 .sidebar-note p { margin: 0; }
 .theme-button { min-height: 44px; margin-top: 10px; border: 0; border-radius: 11px; background: transparent; color: var(--muted); padding: 10px 12px; display: flex; gap: 9px; align-items: center; transition: background-color .18s ease, color .18s ease; }
@@ -113,6 +115,7 @@ h2, h3 { margin: 0; }
 .action-card:hover { transform: translateY(-3px); border-color: var(--line-strong); box-shadow: var(--shadow-hover); }
 .feature-icon { width: 76px; height: 76px; display: grid; place-items: center; border-radius: 22px; margin-bottom: 20px; }
 .feature-icon img { width: 72px; height: 72px; object-fit: contain; }
+.dark .feature-icon img, .dark nav a>img, .dark .mobile-hub-item>img, .dark .settings-theme-row>img { filter: brightness(1.13) saturate(.9); }
 .action-copy { display: block; padding-right: 28px; }
 .action-copy small { display: block; color: var(--primary); font-size: 12px; font-weight: 700; margin-bottom: 7px; }
 .action-copy h3 { font-size: 20px; }
@@ -947,6 +950,13 @@ html[data-platform="android"][data-window-mode="compact"] .sidebar nav {
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 4px;
 }
+html[data-platform="android"][data-window-mode="compact"] .primary-nav { display: none; }
+html[data-platform="android"][data-window-mode="compact"] .mobile-tab-nav {
+  display: grid;
+  height: 100%;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
 html[data-platform="android"][data-window-mode="compact"] .sidebar nav a {
   min-height: 52px;
   padding: 6px 2px;
@@ -956,6 +966,11 @@ html[data-platform="android"][data-window-mode="compact"] .sidebar nav a {
   border-radius: 10px;
   font-size: 10px;
   text-align: center;
+}
+html[data-platform="android"][data-window-mode="compact"] .mobile-tab-nav a>img {
+  width: 23px;
+  height: 23px;
+  flex: 0 0 23px;
 }
 html[data-platform="android"][data-window-mode="compact"] .sidebar nav a:nth-child(5),
 html[data-platform="android"][data-window-mode="compact"] .sidebar nav a:nth-child(6),
@@ -1173,7 +1188,7 @@ html[data-platform="android"][data-window-mode="compact"] .practice-submit-actio
     min-height: 0;
     max-height: 56px;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 4px;
     align-items: stretch;
   }
@@ -1192,6 +1207,14 @@ html[data-platform="android"][data-window-mode="compact"] .practice-submit-actio
     text-align: center;
   }
 
+  html[data-platform="android"] .primary-nav {
+    display: none;
+  }
+
+  html[data-platform="android"] .mobile-tab-nav {
+    display: grid;
+  }
+
   html[data-platform="android"] .brand,
   html[data-platform="android"] .sidebar-note,
   html[data-platform="android"] .theme-button,
@@ -1200,6 +1223,106 @@ html[data-platform="android"][data-window-mode="compact"] .practice-submit-actio
   html[data-platform="android"] .sidebar nav a:nth-child(8) {
     display: none;
   }
+}
+
+/* Portrait home and utility hubs. Keep the phone information-dense while
+   leaving tablet/desktop layouts unchanged. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .page:not(.practice-page) {
+    padding: 18px 14px calc(90px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .study-hero {
+    display: none;
+  }
+
+  html[data-platform="android"] .bank-switcher {
+    margin: 0 0 14px;
+  }
+
+  html[data-platform="android"] .bank-switcher-main {
+    align-items: stretch;
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  html[data-platform="android"] .bank-switcher-main>a { display: none; }
+  html[data-platform="android"] .bank-switcher select { min-width: 0; width: 100%; }
+
+  html[data-platform="android"] .vocabulary-ticker {
+    margin: 0 0 14px;
+    padding: 15px;
+    border-radius: 14px;
+  }
+
+  html[data-platform="android"] .ticker-heading .eyebrow { display: none; }
+  html[data-platform="android"] .ticker-heading h3 { font-size: 16px; }
+  html[data-platform="android"] .ticker-group { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  html[data-platform="android"] .ticker-word { min-height: 52px; padding: 8px 9px; }
+  html[data-platform="android"] .ticker-word strong { font-size: 15px; }
+
+  html[data-platform="android"] .practice-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  html[data-platform="android"] .practice-actions.grid-3 .action-card:last-child {
+    grid-column: 1 / -1;
+  }
+
+  html[data-platform="android"] .action-card {
+    min-height: 126px;
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  html[data-platform="android"] .feature-icon,
+  html[data-platform="android"] .feature-icon img {
+    width: 45px;
+    height: 45px;
+    margin: 0 0 10px;
+  }
+
+  html[data-platform="android"] .action-copy { padding-right: 0; }
+  html[data-platform="android"] .action-copy small,
+  html[data-platform="android"] .action-copy p,
+  html[data-platform="android"] .action-arrow { display: none; }
+  html[data-platform="android"] .action-copy h3 { font-size: 16px; }
+  html[data-platform="android"] .section-title,
+  html[data-platform="android"] .gentle-reminder { display: none; }
+  html[data-platform="android"] .grid.grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 16px; }
+  html[data-platform="android"] .grid.grid-4 .card { padding: 14px; border-radius: 13px; }
+  html[data-platform="android"] .stat-value { margin-top: 5px; font-size: 24px; }
+
+  html[data-platform="android"] .mobile-hub .page-head { margin-bottom: 18px; }
+  html[data-platform="android"] .compact-page-head h1 { font-size: 28px; }
+  html[data-platform="android"] .mobile-hub-list { display: grid; gap: 10px; }
+  html[data-platform="android"] .mobile-hub-item,
+  html[data-platform="android"] .settings-theme-row {
+    display: grid;
+    grid-template-columns: 47px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 14px;
+  }
+  html[data-platform="android"] .mobile-hub-item>img,
+  html[data-platform="android"] .settings-theme-row>img { width: 42px; height: 42px; object-fit: contain; }
+  html[data-platform="android"] .mobile-hub-item span,
+  html[data-platform="android"] .settings-theme-row span { min-width: 0; display: grid; gap: 4px; }
+  html[data-platform="android"] .mobile-hub-item strong,
+  html[data-platform="android"] .settings-theme-row strong { font-size: 16px; }
+  html[data-platform="android"] .mobile-hub-item small,
+  html[data-platform="android"] .settings-theme-row small { color: var(--muted); font-size: 12px; line-height: 1.55; }
+  html[data-platform="android"] .mobile-hub-item b { color: var(--primary); font-size: 28px; font-weight: 400; }
+  html[data-platform="android"] .settings-theme-row { margin-bottom: 10px; }
 }
 
 /* Phone portrait practice uses the mobile exam pattern: keep the source
