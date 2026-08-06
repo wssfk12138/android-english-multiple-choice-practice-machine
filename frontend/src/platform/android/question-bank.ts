@@ -1,5 +1,6 @@
 import JSZip from 'jszip'
 import { androidDatabase, row, rows, run, transaction } from './database'
+import { esqFormatName, paperExamMetadata, validateEsqManifest } from './esq-format'
 import { LocalApiError } from './errors'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
 
@@ -70,14 +71,10 @@ async function jsonFile(zip: JSZip, path: string, required = true): Promise<Json
 }
 
 function validateManifest(manifest: JsonRecord) {
-  if (manifest?.format !== 'esq' || manifest?.schemaVersion !== '1.0') {
-    throw new LocalApiError(422, '只支持 ESQ 1.0 题库包')
-  }
-  if (!manifest.packageId || !manifest.contentVersion || !Array.isArray(manifest.papers)) {
-    throw new LocalApiError(422, 'ESQ 清单缺少稳定标识、内容版本或试卷列表')
-  }
-  if (manifest.papers.length < 1 || manifest.papers.length > 100) {
-    throw new LocalApiError(422, 'ESQ 题库包的试卷数量无效')
+  try {
+    validateEsqManifest(manifest)
+  } catch (error) {
+    throw new LocalApiError(422, error instanceof Error ? error.message : 'ESQ 清单无效')
   }
 }
 
@@ -115,6 +112,11 @@ export async function parseEsqBytes(data: ArrayBuffer | Uint8Array): Promise<Imp
     }
     if (!Number.isInteger(paper.year) || !Array.isArray(paper.units)) {
       throw new LocalApiError(422, `${descriptor.paperKey} 的年份或篇目格式无效`)
+    }
+    try {
+      paperExamMetadata(descriptor, paper)
+    } catch (error) {
+      throw new LocalApiError(422, error instanceof Error ? error.message : 'ESQ 试卷元数据无效')
     }
     papers.push({ descriptor, paper, answers, labels })
   }
@@ -182,7 +184,7 @@ async function createParsedEsqImport(
     id: Number(created.lastId),
     profile_id: profileId,
     filename,
-    format: 'esq-1.0',
+    format: esqFormatName(pkg.manifest),
     preview,
     warnings: [],
   }
@@ -258,7 +260,7 @@ export async function listEsqImports(): Promise<JsonRecord[]> {
       profile_id: job.profile_id,
       filename: job.filename,
       detected_year: pkg.papers?.[0]?.paper?.year ?? null,
-      detected_format: 'esq-1.0',
+      detected_format: esqFormatName(pkg.manifest),
       status: job.status,
       warnings: [],
       created_at: job.created_at,
@@ -279,7 +281,7 @@ export async function readEsqImport(id: number): Promise<JsonRecord> {
     profile_id: job.profile_id,
     filename: job.filename,
     detected_year: pkg.papers?.[0]?.paper?.year ?? null,
-    detected_format: 'esq-1.0',
+    detected_format: esqFormatName(pkg.manifest),
     status: job.status,
     warnings: [],
     draft_data: { manifest: pkg.manifest },
@@ -296,12 +298,14 @@ async function upsertPaper(
 ): Promise<number> {
   const paper = item.paper
   const manifest = pkg.manifest
+  const exam = paperExamMetadata(item.descriptor, paper)
   let paperId = existingPaperId
   if (paperId) {
     await db.run(
       `UPDATE papers SET
          profile_id = ?, external_key = ?, package_id = ?, content_version = ?, year = ?,
-         subject = ?, title = ?, status = 'published', updated_at = CURRENT_TIMESTAMP
+         subject = ?, title = ?, exam_type = ?, exam_month = ?, set_number = ?,
+         status = 'published', updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         profileId,
@@ -311,6 +315,9 @@ async function upsertPaper(
         paper.year,
         paper.subject || manifest.subject || '英语一',
         paper.title || `${paper.year} 年英语试卷`,
+        exam.examType,
+        exam.examMonth,
+        exam.setNumber,
         paperId,
       ],
       false,
@@ -318,8 +325,9 @@ async function upsertPaper(
   } else {
     const inserted = await db.run(
       `INSERT INTO papers
-        (profile_id, external_key, package_id, content_version, year, subject, title, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'published')`,
+        (profile_id, external_key, package_id, content_version, year, subject, title,
+         exam_type, exam_month, set_number, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
       [
         profileId,
         paper.paperKey,
@@ -328,6 +336,9 @@ async function upsertPaper(
         paper.year,
         paper.subject || manifest.subject || '英语一',
         paper.title || `${paper.year} 年英语试卷`,
+        exam.examType,
+        exam.examMonth,
+        exam.setNumber,
       ],
       false,
     )

@@ -12,6 +12,7 @@
     "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
     "test:diagnostics": "node --experimental-strip-types tests/serial-queue.mjs",
     "test:database-migration": "node tests/database-migration.mjs",
+    "test:esq-compatibility": "node --experimental-strip-types tests/esq-1.1-import.mjs",
     "preview": "vite preview",
     "cap:sync": "pnpm build && cap sync",
     "cap:copy": "pnpm build && cap copy",
