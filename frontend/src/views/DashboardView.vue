@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowRight, BookOpen, Sparkles, Star } from 'lucide-vue-next'
+import { ArrowRight, BookOpen, Headphones, Sparkles, Star } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { get, post } from '../api'
@@ -22,6 +22,9 @@ const vocabularyPages = computed(() => {
 })
 const visibleWords = computed(() =>
   vocabularyPages.value[vocabularyPage.value] || vocabularyPages.value[0] || [],
+)
+const hasListening = computed(() =>
+  Number(data.value?.paper_type_counts?.listening || 0) > 0,
 )
 
 function wordMeaning(word: any) {
@@ -88,7 +91,11 @@ onBeforeUnmount(() => {
 async function randomPractice(type: string) {
   try {
     const session: any = await post('/practice/sessions', {
-      mode: 'random', unit_type: type, count: 1, shuffle_options: true,
+      mode: 'random',
+      unit_type: type,
+      selection_scope: type === 'listening' ? 'paper_unit_type' : 'unit',
+      count: 1,
+      shuffle_options: true,
     })
     router.push(`/practice/${session.id}`)
   } catch (e) { error.value = String(e) }
@@ -123,7 +130,7 @@ async function randomPractice(type: string) {
         </Transition>
       </div>
     </section>
-    <div class="grid grid-3 practice-actions">
+    <div class="grid practice-actions" :class="hasListening ? 'grid-4' : 'grid-3'">
       <button class="card action-card" type="button" @click="randomPractice('cloze')">
         <span class="feature-icon orange"><img src="/assets/icons/cloze.png" alt="" /></span>
         <span class="action-copy"><small>20 个空 · 整篇提交</small><h3>完型填空</h3><p>随机抽取一整篇，在完整语境中完成练习。</p></span>
@@ -137,6 +144,11 @@ async function randomPractice(type: string) {
       <button class="card action-card" type="button" @click="randomPractice('part_b')">
         <span class="feature-icon blue"><img src="/assets/icons/part-b.png" alt="" /></span>
         <span class="action-copy"><small>排序 · 填入 · 匹配</small><h3>阅读 Part B</h3><p>在段落关系中辨认结构、衔接与观点。</p></span>
+        <ArrowRight class="action-arrow" :size="19" />
+      </button>
+      <button v-if="hasListening" class="card action-card" type="button" @click="randomPractice('listening')">
+        <span class="feature-icon purple"><Headphones :size="42" aria-hidden="true" /></span>
+        <span class="action-copy"><small>随机一套 · 完整听力</small><h3>听力单刷</h3><p>抽取一套试卷的完整听力部分，音频跨 Section 自动续播。</p></span>
         <ArrowRight class="action-arrow" :size="19" />
       </button>
     </div>

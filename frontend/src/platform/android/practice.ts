@@ -197,6 +197,35 @@ async function selectUnitIds(body: JsonRecord): Promise<{ unitIds: number[]; pap
     return { unitIds, paperId: body.paper_id ? Number(body.paper_id) : null }
   }
   if (body.mode === 'random') {
+    if (body.selection_scope === 'paper_unit_type') {
+      if (!body.unit_type) throw new LocalApiError(400, '整套题型练习需要指定题型')
+      let paperSql = `SELECT DISTINCT p.id
+        FROM papers p JOIN units u ON u.paper_id = p.id
+        WHERE p.status = 'published'
+          AND p.deleted_at IS NULL
+          AND p.profile_id = ?
+          AND u.unit_type = ?`
+      const paperValues: unknown[] = [activeProfileId, body.unit_type]
+      if (body.paper_id) {
+        paperSql += ' AND p.id = ?'
+        paperValues.push(body.paper_id)
+      }
+      const paperIds = shuffled(
+        (await rows<{ id: number }>(paperSql, paperValues)).map(item => item.id),
+      )
+      if (!paperIds.length) {
+        throw new LocalApiError(404, '当前题库配置中没有符合条件的完整题型')
+      }
+      const selectedPaperId = Number(paperIds[0])
+      const unitIds = (await rows<{ id: number }>(
+        `SELECT id FROM units
+         WHERE paper_id = ? AND unit_type = ?
+         ORDER BY sequence, id`,
+        [selectedPaperId, body.unit_type],
+      )).map(item => item.id)
+      return { unitIds, paperId: selectedPaperId }
+    }
+
     let sql = `SELECT u.id FROM units u JOIN papers p ON p.id = u.paper_id
       WHERE p.status = 'published' AND p.deleted_at IS NULL AND p.profile_id = ?`
     const values: unknown[] = [activeProfileId]
@@ -245,6 +274,23 @@ async function selectUnitIds(body: JsonRecord): Promise<{ unitIds: number[]; pap
   throw new LocalApiError(400, '不支持的练习模式')
 }
 
+function normalizeListeningAudio(units: JsonRecord[]) {
+  const listeningUnits = units.filter(unit => unit.unit_type === 'listening')
+  if (listeningUnits.length < 2) return
+  const sharedPayloads = listeningUnits.map(unit => unit.shared_data || {})
+  if (sharedPayloads.some(payload => payload.audio_mode)) return
+  const trackLists = sharedPayloads.map(payload =>
+    Array.isArray(payload.audio_tracks) ? payload.audio_tracks : [],
+  )
+  if (!trackLists[0]?.length) return
+  if (trackLists.some(tracks => JSON.stringify(tracks) !== JSON.stringify(trackLists[0]))) return
+  if (trackLists[0].length !== listeningUnits.length) return
+  sharedPayloads.forEach((payload, index) => {
+    payload.audio_tracks = [trackLists[0][index]]
+    payload.audio_mode = 'per_unit'
+  })
+}
+
 export async function createSession(body: JsonRecord): Promise<JsonRecord> {
   const { unitIds, paperId } = await selectUnitIds(body)
   if (!unitIds.length) throw new LocalApiError(400, '没有符合条件的练习篇目')
@@ -288,6 +334,7 @@ export async function createSession(body: JsonRecord): Promise<JsonRecord> {
       )
     }
   }
+  normalizeListeningAudio(units)
   return {
     id: sessionId,
     mode: body.mode,
@@ -376,6 +423,7 @@ export async function getSession(sessionId: number): Promise<JsonRecord> {
     }
     units.push(unit)
   }
+  normalizeListeningAudio(units)
   const resultSummary = session.status === 'submitted'
     ? {
         score: session.score,
@@ -674,7 +722,31 @@ export async function dashboard(): Promise<JsonRecord> {
      ORDER BY s.id DESC LIMIT 5`,
     [profileId],
   )
-  return { ...counts, frequent_count: frequentCount, recent_sessions: recentSessions }
+  const unitTypeCounts = Object.fromEntries(
+    (await rows<{ unit_type: string; count: number }>(
+      `SELECT u.unit_type, COUNT(*) AS count
+       FROM units u JOIN papers p ON p.id = u.paper_id
+       WHERE p.profile_id = ? AND p.status = 'published' AND p.deleted_at IS NULL
+       GROUP BY u.unit_type`,
+      [profileId],
+    )).map(item => [item.unit_type, Number(item.count)]),
+  )
+  const paperTypeCounts = Object.fromEntries(
+    (await rows<{ unit_type: string; count: number }>(
+      `SELECT u.unit_type, COUNT(DISTINCT p.id) AS count
+       FROM units u JOIN papers p ON p.id = u.paper_id
+       WHERE p.profile_id = ? AND p.status = 'published' AND p.deleted_at IS NULL
+       GROUP BY u.unit_type`,
+      [profileId],
+    )).map(item => [item.unit_type, Number(item.count)]),
+  )
+  return {
+    ...counts,
+    frequent_count: frequentCount,
+    unit_type_counts: unitTypeCounts,
+    paper_type_counts: paperTypeCounts,
+    recent_sessions: recentSessions,
+  }
 }
 
 export async function listWrong(): Promise<JsonRecord[]> {

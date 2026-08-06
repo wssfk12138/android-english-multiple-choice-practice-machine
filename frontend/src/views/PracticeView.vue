@@ -590,7 +590,6 @@ async function submitSession() {
 }
 
 function switchUnit(index: number) {
-  listeningPlayer.value?.pause()
   activeUnitIndex.value = index
   unansweredNotice.value = ''
   highlightedQuestionId.value = null

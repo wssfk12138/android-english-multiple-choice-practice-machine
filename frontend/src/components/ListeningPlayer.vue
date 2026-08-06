@@ -36,8 +36,23 @@ const failed = ref(false)
 const currentTime = ref(0)
 const duration = ref(0)
 const lastAllowedTime = ref(0)
+const pendingAutoplay = ref(false)
+const resumeAfterTimerPause = ref(false)
+const loadedTrackKey = ref('')
+const restoreTime = ref(0)
+const progressByTrack = new Map<string, number>()
 const selectedTrack = computed(() => props.tracks[selectedIndex.value] || null)
+const trackSignature = computed(() =>
+  props.tracks
+    .map(track => `${track.asset_id || ''}:${track.url}`)
+    .join('|'),
+)
 const progressMax = computed(() => Math.max(duration.value, 1))
+
+function selectedTrackKey() {
+  const track = selectedTrack.value
+  return track ? `${track.asset_id || ''}:${track.url}` : ''
+}
 
 function formatTime(value: number) {
   if (!Number.isFinite(value) || value < 0) return '00:00'
@@ -50,10 +65,16 @@ function formatTime(value: number) {
     : [minutes, seconds].map(item => String(item).padStart(2, '0')).join(':')
 }
 
-async function loadSelectedTrack() {
+async function loadSelectedTrack(autoPlay = false) {
+  if (loadedTrackKey.value) {
+    progressByTrack.set(loadedTrackKey.value, currentTime.value)
+  }
+  loadedTrackKey.value = selectedTrackKey()
+  restoreTime.value = progressByTrack.get(loadedTrackKey.value) || 0
   playing.value = false
   loading.value = Boolean(selectedTrack.value)
   failed.value = false
+  pendingAutoplay.value = autoPlay && Boolean(selectedTrack.value)
   currentTime.value = 0
   duration.value = 0
   lastAllowedTime.value = 0
@@ -65,6 +86,7 @@ async function togglePlayback() {
   const player = audio.value
   if (!player || failed.value) return
   if (!player.paused) {
+    resumeAfterTimerPause.value = false
     player.pause()
     return
   }
@@ -72,12 +94,12 @@ async function togglePlayback() {
   try {
     await player.play()
   } catch {
-    failed.value = true
     loading.value = false
   }
 }
 
 function pause() {
+  resumeAfterTimerPause.value = playing.value
   audio.value?.pause()
 }
 
@@ -108,15 +130,42 @@ function seek(event: Event) {
 }
 
 function onLoadedMetadata() {
-  duration.value = Number(audio.value?.duration || 0)
+  const player = audio.value
+  duration.value = Number(player?.duration || 0)
+  if (!loadedTrackKey.value) {
+    loadedTrackKey.value = selectedTrackKey()
+    restoreTime.value = progressByTrack.get(loadedTrackKey.value) || 0
+  }
+  const target = Math.min(restoreTime.value, duration.value || restoreTime.value)
+  if (player && target > 0) player.currentTime = target
+  currentTime.value = target
+  lastAllowedTime.value = target
   loading.value = false
   failed.value = false
+}
+
+async function autoplayWhenReady() {
+  const player = audio.value
+  if (!pendingAutoplay.value || props.timerPaused || !player || player.readyState < 2) return
+  pendingAutoplay.value = false
+  loading.value = true
+  try {
+    await player.play()
+  } catch {
+    loading.value = false
+  }
+}
+
+function onCanPlay() {
+  loading.value = false
+  void autoplayWhenReady()
 }
 
 function onTimeUpdate() {
   const value = Number(audio.value?.currentTime || 0)
   currentTime.value = value
   lastAllowedTime.value = value
+  if (loadedTrackKey.value) progressByTrack.set(loadedTrackKey.value, value)
 }
 
 function preventTimedSeeking() {
@@ -127,14 +176,29 @@ function preventTimedSeeking() {
   }
 }
 
-watch(() => props.tracks, () => {
-  selectedIndex.value = 0
-  void loadSelectedTrack()
-}, { deep: true })
+watch(trackSignature, (next, previous) => {
+  if (next === previous) return
+  const shouldAutoplay = Boolean(previous && next)
+  if (selectedIndex.value !== 0) {
+    pendingAutoplay.value = shouldAutoplay
+    selectedIndex.value = 0
+  } else {
+    void loadSelectedTrack(shouldAutoplay)
+  }
+})
 
-watch(selectedIndex, () => void loadSelectedTrack())
+watch(selectedIndex, () => void loadSelectedTrack(true))
 watch(() => props.timerPaused, paused => {
-  if (paused) pause()
+  if (paused) {
+    if (playing.value) resumeAfterTimerPause.value = true
+    audio.value?.pause()
+    return
+  }
+  if (resumeAfterTimerPause.value || pendingAutoplay.value) {
+    resumeAfterTimerPause.value = false
+    pendingAutoplay.value = true
+    void autoplayWhenReady()
+  }
 })
 
 defineExpose({ pause })
@@ -177,7 +241,7 @@ defineExpose({ pause })
           :disableRemotePlayback="!seekable"
           @loadstart="loading=true"
           @loadedmetadata="onLoadedMetadata"
-          @canplay="loading=false"
+          @canplay="onCanPlay"
           @play="playing=true;failed=false"
           @pause="playing=false"
           @ended="playing=false"

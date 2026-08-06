@@ -1337,14 +1337,21 @@ export async function repairPublishedDocumentAudio(
      WHERE paper_id = ? AND unit_type = 'listening'`,
     [paperId],
   )
-  for (const unit of listeningUnits) {
+  const oneTrackPerUnit = tracks.length > 1 && tracks.length === listeningUnits.length
+  for (let index = 0; index < listeningUnits.length; index++) {
+    const unit = listeningUnits[index]
     let sharedData: JsonRecord = {}
     try {
       sharedData = JSON.parse(unit.shared_data || '{}')
     } catch {
       sharedData = {}
     }
-    sharedData.audio_tracks = tracks
+    sharedData.audio_tracks = oneTrackPerUnit ? [tracks[index]] : tracks
+    sharedData.audio_mode = oneTrackPerUnit
+      ? 'per_unit'
+      : tracks.length === 1
+        ? 'continuous'
+        : 'playlist'
     await run(
       'UPDATE units SET shared_data = ? WHERE id = ?',
       [JSON.stringify(sharedData), unit.id],
@@ -1359,6 +1366,10 @@ async function publishDraft(
   audioTracks: StoredAudioTrack[] = [],
 ): Promise<number> {
   let paperId = 0
+  const listeningUnitCount = draft.units.filter(
+    (unit: JsonRecord) => unit.unit_type === 'listening',
+  ).length
+  let listeningUnitIndex = 0
   await transaction(async db => {
     const externalKey = `document:${draft.year}:${draft.subject || '英语一'}:${draft.title}`
     const existing = await db.query(
@@ -1379,6 +1390,19 @@ async function publishDraft(
     )
     paperId = Number(paper.changes?.lastId)
     for (const unit of draft.units) {
+      const isListening = unit.unit_type === 'listening'
+      const oneTrackPerUnit = audioTracks.length > 1
+        && audioTracks.length === listeningUnitCount
+      const unitAudioTracks = isListening
+        ? oneTrackPerUnit
+          ? [audioTracks[listeningUnitIndex]!]
+          : audioTracks
+        : []
+      const audioMode = oneTrackPerUnit
+        ? 'per_unit'
+        : audioTracks.length === 1
+          ? 'continuous'
+          : 'playlist'
       const unitResult = await db.run(
         `INSERT INTO units
           (paper_id, external_key, unit_type, subtype, title, sequence, passage, shared_data)
@@ -1393,13 +1417,14 @@ async function publishDraft(
           unit.passage || '',
           JSON.stringify({
             ...(unit.shared_data || {}),
-            ...(unit.unit_type === 'listening' && audioTracks.length
-              ? { audio_tracks: audioTracks }
+            ...(isListening && unitAudioTracks.length
+              ? { audio_tracks: unitAudioTracks, audio_mode: audioMode }
               : {}),
           }),
         ],
         false,
       )
+      if (isListening) listeningUnitIndex += 1
       const unitId = Number(unitResult.changes?.lastId)
       for (let index = 0; index < unit.questions.length; index++) {
         const question = unit.questions[index]
