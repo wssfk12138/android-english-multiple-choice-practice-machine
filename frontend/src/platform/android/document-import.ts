@@ -1,3 +1,4 @@
+import { Directory, Filesystem } from '@capacitor/filesystem'
 import { chatCompletion } from './ai'
 import { row, rows, run, transaction } from './database'
 import { extractDocument, type ExtractedDocument } from './document-extractor'
@@ -1262,7 +1263,101 @@ export async function updateDocumentAnswers(id: number, body: JsonRecord): Promi
   return { draft: Object.fromEntries(Object.entries(draft).filter(([key]) => !['source_text', 'answer_text'].includes(key))), warnings: draft.warnings }
 }
 
-async function publishDraft(draft: JsonRecord, profileId: number): Promise<number> {
+type StoredAudioTrack = {
+  asset_id: string
+  label: string
+  media_type: string
+  path: string
+}
+
+async function persistDocumentAudio(
+  jobId: number,
+  rawPayload: string,
+): Promise<StoredAudioTrack[]> {
+  let files: JsonRecord[] = []
+  try {
+    files = JSON.parse(rawPayload || '[]')
+  } catch {
+    files = []
+  }
+  const mediaTypeBySuffix: Record<string, string> = {
+    mp3: 'audio/mpeg',
+    m4a: 'audio/mp4',
+    wav: 'audio/wav',
+    ogg: 'audio/ogg',
+  }
+  const tracks: StoredAudioTrack[] = []
+  for (let index = 0; index < files.length; index++) {
+    const file = files[index]
+    const suffix = String(file.name || '').split('.').pop()?.toLowerCase() || 'mp3'
+    if (!mediaTypeBySuffix[suffix] || !String(file.base64 || '')) continue
+    const path = `question-banks/document-import-${jobId}/assets/audio/track-${index + 1}.${suffix}`
+    await Filesystem.writeFile({
+      path,
+      data: String(file.base64),
+      directory: Directory.Data,
+      recursive: true,
+    })
+    tracks.push({
+      asset_id: `listening.track.${index + 1}`,
+      label: String(file.name || `听力音频 ${index + 1}`).replace(/\.[^.]+$/, ''),
+      media_type: String(file.type || mediaTypeBySuffix[suffix]),
+      path,
+    })
+  }
+  return tracks
+}
+
+export async function repairPublishedDocumentAudio(
+  paperId: number,
+): Promise<StoredAudioTrack[]> {
+  const jobs = await rows<JsonRecord>(
+    `SELECT id, audio_files_base64, published_paper_ids
+     FROM document_import_jobs
+     WHERE status = 'published' AND deleted_at IS NULL
+     ORDER BY id DESC`,
+  )
+  const job = jobs.find(item => {
+    try {
+      return (JSON.parse(item.published_paper_ids || '[]') as number[])
+        .map(Number)
+        .includes(paperId)
+    } catch {
+      return false
+    }
+  })
+  if (!job) return []
+  const tracks = await persistDocumentAudio(
+    Number(job.id),
+    String(job.audio_files_base64 || '[]'),
+  )
+  if (!tracks.length) return []
+  const listeningUnits = await rows<JsonRecord>(
+    `SELECT id, shared_data FROM units
+     WHERE paper_id = ? AND unit_type = 'listening'`,
+    [paperId],
+  )
+  for (const unit of listeningUnits) {
+    let sharedData: JsonRecord = {}
+    try {
+      sharedData = JSON.parse(unit.shared_data || '{}')
+    } catch {
+      sharedData = {}
+    }
+    sharedData.audio_tracks = tracks
+    await run(
+      'UPDATE units SET shared_data = ? WHERE id = ?',
+      [JSON.stringify(sharedData), unit.id],
+    )
+  }
+  return tracks
+}
+
+async function publishDraft(
+  draft: JsonRecord,
+  profileId: number,
+  audioTracks: StoredAudioTrack[] = [],
+): Promise<number> {
   let paperId = 0
   await transaction(async db => {
     const externalKey = `document:${draft.year}:${draft.subject || '英语一'}:${draft.title}`
@@ -1296,7 +1391,12 @@ async function publishDraft(draft: JsonRecord, profileId: number): Promise<numbe
           unit.title,
           unit.sequence,
           unit.passage || '',
-          JSON.stringify(unit.shared_data || {}),
+          JSON.stringify({
+            ...(unit.shared_data || {}),
+            ...(unit.unit_type === 'listening' && audioTracks.length
+              ? { audio_tracks: audioTracks }
+              : {}),
+          }),
         ],
         false,
       )
@@ -1344,7 +1444,11 @@ export async function publishDocumentImport(id: number): Promise<JsonRecord> {
   }
   const warnings = validateDocumentDraft(draft)
   if (warnings.length) throw new LocalApiError(409, `仍有校验问题：${warnings.join('；')}`)
-  const paperId = await publishDraft(draft, Number(job.profile_id))
+  const audioTracks = await persistDocumentAudio(
+    id,
+    String(job.audio_files_base64 || '[]'),
+  )
+  const paperId = await publishDraft(draft, Number(job.profile_id), audioTracks)
   await run(
     `UPDATE document_import_jobs SET status = 'published',
       published_paper_ids = ?, published_scope_title = ?,

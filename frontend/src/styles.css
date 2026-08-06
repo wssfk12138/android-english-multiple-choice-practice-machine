@@ -263,7 +263,9 @@ h2, h3 { margin: 0; }
 .practice-timer.finished { padding-right:11px; color:var(--success); }
 .timer-label { color:var(--muted); font-size:11px; }
 .practice-layout { display: grid; grid-template-columns: minmax(520px, 58%) minmax(410px, 42%); height: calc(100vh - 68px); }
+.practice-layout.listening-layout { grid-template-columns:minmax(360px,420px) minmax(520px,1fr); }
 .passage-pane { padding: 38px 48px 80px max(48px, calc((100vw - 1280px)/2)); overflow: auto; border-right: 1px solid var(--line); }
+.listening-console-pane { padding:36px 34px 96px; background:linear-gradient(180deg,color-mix(in srgb,var(--primary-soft) 34%,var(--bg)),var(--bg)); }
 .passage { max-width: 780px; font-family: Georgia, "Times New Roman", Cambria, serif; font-size: 20px; font-weight: 400; line-height: 1.92; letter-spacing: .008em; white-space: pre-wrap; color: color-mix(in srgb, var(--ink) 96%, black); }
 .dark .passage { color: #f0f4f1; }
 .passage-blank { display: inline-grid; width: 4.35em; min-width: 66px; height: 1.38em; margin: 0 .25em; place-items: center; white-space: nowrap; vertical-align: -.22em; color: var(--primary); font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif; font-weight: 750; border-bottom: 2px solid currentColor; }
@@ -300,6 +302,7 @@ h2, h3 { margin: 0; }
 .option.wrong { background: var(--danger-soft); border-color: var(--danger); }
 .option-letter { font-weight: 700; color: var(--primary); min-width: 18px; }
 .practice-footer { position: fixed; right: 0; bottom: 0; width: 42%; padding: 15px 38px; background: var(--surface); border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; backdrop-filter: blur(16px); }
+.practice-footer.listening-footer { width:calc(100% - 420px); }
 .unit-tabs { display: flex; gap: 7px; overflow: auto; }
 .unit-tab { border: 0; padding: 8px 11px; border-radius: 9px; background: transparent; color: var(--muted); white-space: nowrap; display:inline-flex; align-items:center; gap:5px; }
 .unit-tab.active { background: var(--primary-soft); color: var(--ink); }
@@ -597,10 +600,12 @@ h2, h3 { margin: 0; }
   .vocabulary-layout { grid-template-columns: 160px minmax(260px,1fr); }
   .vocab-detail { grid-column: 1 / -1; position: static; }
   .practice-layout { grid-template-columns: 1fr; height: auto; }
+  .practice-layout.listening-layout { grid-template-columns:1fr; }
   .passage-pane, .question-pane { overflow: visible; }
   .passage-pane { border-right: 0; border-bottom: 1px solid var(--line); padding: 32px clamp(22px,5vw,48px); }
   .question-pane { padding: 28px clamp(22px,5vw,48px) 100px; }
   .practice-footer { width: 100%; }
+  .practice-footer.listening-footer { width:100%; }
   .result-overlay,.timer-overlay { left:0; right:auto; width:100vw; }
   .practice-top { width:100%; min-width:0; height:auto; min-height:68px; padding:9px 16px; gap:10px; flex-wrap:wrap; }
   .practice-top>div:first-child { min-width:0; max-width:100%; }
@@ -699,6 +704,7 @@ h2, h3 { margin: 0; }
   html[data-platform="android"] .app-shell { grid-template-columns:224px minmax(0,1fr); }
   html[data-platform="android"] .page { padding-left:clamp(28px,3vw,52px); padding-right:clamp(28px,3vw,52px); }
   html[data-platform="android"] .practice-layout { grid-template-columns:minmax(0,1.08fr) minmax(420px,.92fr); }
+  html[data-platform="android"] .practice-layout.listening-layout { grid-template-columns:minmax(360px,420px) minmax(0,1fr); }
 }
 
 @media (min-width: 600px) and (max-width: 1199px) {
@@ -744,6 +750,10 @@ h2, h3 { margin: 0; }
     grid-template-columns:minmax(0,1.04fr) minmax(340px,.96fr);
     height:calc(100dvh - 68px);
   }
+  html[data-platform="android"] .practice-layout.listening-layout {
+    grid-template-columns:minmax(330px,390px) minmax(0,1fr);
+  }
+  html[data-platform="android"] .practice-footer.listening-footer { width:calc(100% - 390px); }
   html[data-platform="android"] .passage-pane { padding-left:32px; padding-right:28px; }
   html[data-platform="android"] .question-pane { padding-left:28px; padding-right:30px; }
   html[data-platform="android"] .vocabulary-layout { grid-template-columns:190px minmax(300px,1fr); }
@@ -755,6 +765,7 @@ h2, h3 { margin: 0; }
   html[data-platform="android"] .practice-shell { padding-bottom:calc(74px + env(safe-area-inset-bottom)); }
   html[data-platform="android"] .sidebar { padding-bottom:calc(8px + env(safe-area-inset-bottom)); }
   html[data-platform="android"] .practice-layout { grid-template-columns:1fr; height:auto; }
+  html[data-platform="android"] .practice-footer.listening-footer { width:100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -18,6 +18,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { get, post, put } from '../api'
 import ContentBlocks from '../components/ContentBlocks.vue'
+import ListeningPlayer from '../components/ListeningPlayer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,6 +33,7 @@ const resultPanelVisible = ref(false)
 const resultPanelMode = ref<'unit' | 'session'>('unit')
 const resultPanelUnitId = ref<number | null>(null)
 const vocabMenu = ref({ visible: false, x: 0, y: 0, term: '', sentence: '', questionId: null as number | null })
+const listeningPlayer = ref<InstanceType<typeof ListeningPlayer> | null>(null)
 type VocabularyTranslationTrigger = 'unit_submit' | 'session_submit' | 'practice_exit'
 type PendingVocabularyRecord = { entryId: number, unitId: number | null }
 const pendingVocabulary = ref<PendingVocabularyRecord[]>([])
@@ -66,6 +68,7 @@ const progress = computed(() => {
 const isPartB = computed(() => activeUnit.value?.unit_type === 'part_b')
 const isMatchingPartB = computed(() => isPartB.value && activeUnit.value?.subtype !== 'true_false')
 const isOrdering = computed(() => activeUnit.value?.subtype === 'paragraph_reordering')
+const isListening = computed(() => activeUnit.value?.unit_type === 'listening')
 const orderingItems = ref<any[]>([])
 const candidateOptions = computed(() => activeUnit.value?.questions?.[0]?.options || [])
 const timerElapsedMs = computed(() => {
@@ -80,6 +83,8 @@ const timerText = computed(() => formatDuration(timerElapsedMs.value))
 const timerEnabled = computed(() =>
   Boolean(timerState.value && timerState.value.mode !== 'off'),
 )
+const audioSeekable = computed(() => !timerEnabled.value || timerState.value?.mode === 'finished')
+const audioTracks = computed(() => activeUnit.value?.shared_data?.audio_tracks || [])
 const activeUnitSubmitted = computed(() =>
   Boolean(activeUnit.value?.submission?.submitted || session.value?.status === 'submitted'),
 )
@@ -380,6 +385,7 @@ function pauseTimer() {
   state.startedAt = null
   state.mode = 'paused'
   timerNow.value = now
+  listeningPlayer.value?.pause()
   persistTimer()
 }
 
@@ -584,6 +590,7 @@ async function submitSession() {
 }
 
 function switchUnit(index: number) {
+  listeningPlayer.value?.pause()
   activeUnitIndex.value = index
   unansweredNotice.value = ''
   highlightedQuestionId.value = null
@@ -734,9 +741,17 @@ async function copySelectedTerm() {
     <div v-if="unansweredNotice" class="unanswered-banner" role="alert">
       <AlertCircle :size="18" />{{ unansweredNotice }}
     </div>
-    <div v-if="session && activeUnit" class="practice-layout">
-      <section class="passage-pane">
+    <div v-if="session && activeUnit" class="practice-layout" :class="{'listening-layout':isListening}">
+      <section class="passage-pane" :class="{'listening-console-pane':isListening}">
         <span class="eyebrow">{{ activeUnit.year }} · {{ activeUnit.title }}</span>
+        <ListeningPlayer
+          v-if="isListening"
+          ref="listeningPlayer"
+          :tracks="audioTracks"
+          :seekable="audioSeekable"
+          :timer-paused="timerState?.mode === 'paused'"
+        />
+        <template v-else>
         <h1>{{ activeUnit.unit_type === 'cloze' ? 'Use of English' : activeUnit.title }}</h1>
         <p v-if="activeUnit.shared_data?.directions" class="lead" style="margin-bottom:24px">{{ activeUnit.shared_data.directions }}</p>
         <div class="passage" data-vocab-text @contextmenu="openVocabularyMenu">
@@ -753,6 +768,7 @@ async function copySelectedTerm() {
             <template v-else>{{ segment.text }}</template>
           </template>
         </div>
+        </template>
       </section>
       <section class="question-pane">
         <div v-if="isOrdering" class="ordering-board">
@@ -812,7 +828,7 @@ async function copySelectedTerm() {
           </div>
         </div>
       </section>
-      <footer class="practice-footer">
+      <footer class="practice-footer" :class="{'listening-footer':isListening}">
         <div class="practice-footer-summary">
           <span>{{ activeUnitIndex + 1 }} / {{ session.units.length }} 篇</span>
           <button

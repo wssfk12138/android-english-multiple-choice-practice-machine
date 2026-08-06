@@ -1,10 +1,13 @@
 import type { SQLiteDBConnection } from '@capacitor-community/sqlite'
+import { Capacitor } from '@capacitor/core'
+import { Directory, Filesystem } from '@capacitor/filesystem'
 import { row, rows, run, transaction } from './database'
 import { incompleteSubmission, LocalApiError } from './errors'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
 
 type JsonRecord = Record<string, any>
 type TransactionDb = Pick<SQLiteDBConnection, 'query' | 'run'>
+const audioUrlCache = new Map<string, string>()
 
 function parseJson<T>(value: unknown, fallback: T): T {
   if (typeof value !== 'string' || !value) return fallback
@@ -22,6 +25,28 @@ function shuffled<T>(items: T[]): T[] {
     ;[output[index], output[target]] = [output[target], output[index]]
   }
   return output
+}
+
+async function resolveAudioTracks(sharedData: JsonRecord): Promise<JsonRecord[]> {
+  const tracks = Array.isArray(sharedData.audio_tracks)
+    ? sharedData.audio_tracks.filter((track: unknown) => track && typeof track === 'object')
+    : []
+  const resolved = []
+  for (const rawTrack of tracks) {
+    const track = { ...(rawTrack as JsonRecord) }
+    const path = String(track.path || '')
+    if (!track.url && path) {
+      let url = audioUrlCache.get(path)
+      if (!url) {
+        const result = await Filesystem.getUri({ path, directory: Directory.Data })
+        url = Capacitor.convertFileSrc(result.uri)
+        audioUrlCache.set(path, url)
+      }
+      track.url = url
+    }
+    if (track.url) resolved.push(track)
+  }
+  return resolved
 }
 
 async function serializeQuestion(
@@ -116,6 +141,13 @@ async function serializeUnit(
     ))
   }
   const sharedData = parseJson<JsonRecord>(unit.shared_data, {})
+  if (unit.unit_type === 'listening') {
+    if (!Array.isArray(sharedData.audio_tracks) || !sharedData.audio_tracks.length) {
+      const { repairPublishedDocumentAudio } = await import('./document-import')
+      sharedData.audio_tracks = await repairPublishedDocumentAudio(Number(unit.paper_id))
+    }
+    sharedData.audio_tracks = await resolveAudioTracks(sharedData)
+  }
   return {
     id: unit.id,
     paper_id: unit.paper_id,
