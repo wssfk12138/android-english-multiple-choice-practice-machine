@@ -1201,3 +1201,198 @@ html[data-platform="android"][data-window-mode="compact"] .practice-submit-actio
     display: none;
   }
 }
+
+/* Phone portrait practice uses the mobile exam pattern: keep the source
+   material and response controls visible together, each with its own scroll
+   surface. The footer stays fixed, so its space is reserved by the layout. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .practice-page {
+    --compact-practice-footer-height: calc(116px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    min-height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+  }
+
+  html[data-platform="android"] .practice-top {
+    flex: 0 0 auto;
+  }
+
+  html[data-platform="android"] .practice-mobile-switch {
+    display: none;
+  }
+
+  html[data-platform="android"] .practice-layout,
+  html[data-platform="android"][data-window-mode="compact"] .practice-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    padding-bottom: var(--compact-practice-footer-height);
+    box-sizing: border-box;
+  }
+
+  html[data-platform="android"] .passage-pane,
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .passage-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    display: block;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  html[data-platform="android"] .passage-pane,
+  html[data-platform="android"][data-window-mode="compact"] .passage-pane {
+    padding: 18px 16px 24px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+  }
+
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    padding: 12px 16px 28px;
+    background: color-mix(in srgb, var(--surface-solid) 52%, var(--bg));
+  }
+
+  html[data-platform="android"] .mobile-pane-passage .question-pane,
+  html[data-platform="android"] .mobile-pane-questions .passage-pane,
+  html[data-platform="android"][data-window-mode="compact"] .mobile-pane-passage .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .passage-pane {
+    display: block;
+  }
+
+  html[data-platform="android"] .passage {
+    max-width: none;
+    font-size: 17px;
+    line-height: 1.78;
+  }
+
+  html[data-platform="android"] .passage-pane h1 {
+    margin: 6px 0 12px;
+    font-size: 22px;
+  }
+
+  html[data-platform="android"] .passage-pane .lead {
+    margin-bottom: 14px !important;
+    font-size: 14px;
+    line-height: 1.62;
+  }
+
+  html[data-platform="android"] .question-card {
+    padding: 14px 0 18px;
+  }
+
+  html[data-platform="android"] .question-title {
+    font-size: 16px;
+    line-height: 1.64;
+    margin-bottom: 10px;
+  }
+
+  html[data-platform="android"] .option {
+    min-height: 46px;
+    margin: 7px 0;
+    padding: 11px 13px;
+    font-size: 16px;
+    line-height: 1.56;
+  }
+
+  html[data-platform="android"] .listening-console-pane {
+    padding: 12px 14px 18px;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--primary-soft) 36%, var(--bg)), var(--bg));
+  }
+
+  html[data-platform="android"] .listening-console {
+    gap: 12px;
+  }
+
+  html[data-platform="android"] .listening-heading {
+    grid-template-columns: 38px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  html[data-platform="android"] .listening-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+  }
+
+  html[data-platform="android"] .listening-icon svg {
+    width: 21px;
+    height: 21px;
+  }
+
+  html[data-platform="android"] .listening-heading .eyebrow,
+  html[data-platform="android"] .listening-heading p {
+    display: none;
+  }
+
+  html[data-platform="android"] .listening-heading h1 {
+    margin: 7px 0 0;
+    font-size: 19px;
+  }
+
+  html[data-platform="android"] .track-picker {
+    gap: 4px;
+  }
+
+  html[data-platform="android"] .track-picker select {
+    min-height: 42px;
+    border-radius: 11px;
+  }
+
+  html[data-platform="android"] .player-surface {
+    grid-template-columns: 58px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px 12px;
+    padding: 11px 12px;
+    border-radius: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  html[data-platform="android"] .main-play-button {
+    grid-row: 1;
+    width: 58px;
+    height: 58px;
+    box-shadow: 0 7px 17px color-mix(in srgb, var(--primary) 28%, transparent);
+  }
+
+  html[data-platform="android"] .timeline {
+    grid-column: 2;
+    grid-row: 1;
+    gap: 3px;
+  }
+
+  html[data-platform="android"] .audio-progress {
+    min-height: 32px;
+  }
+
+  html[data-platform="android"] .secondary-controls,
+  html[data-platform="android"] .seek-lock-note,
+  html[data-platform="android"] .audio-error {
+    grid-column: 1 / -1;
+  }
+
+  html[data-platform="android"] .secondary-controls {
+    gap: 7px;
+  }
+
+  html[data-platform="android"] .secondary-controls button {
+    min-height: 44px;
+    border-radius: 11px;
+  }
+
+  html[data-platform="android"] .practice-footer,
+  html[data-platform="android"] .practice-footer.listening-footer {
+    min-height: var(--compact-practice-footer-height);
+    box-sizing: border-box;
+  }
+}

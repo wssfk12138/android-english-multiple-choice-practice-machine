@@ -29,7 +29,6 @@ const saving = ref<number | null>(null)
 const vocabularyToast = ref('')
 const unansweredNotice = ref('')
 const highlightedQuestionId = ref<number | null>(null)
-const mobilePane = ref<'passage' | 'questions'>('passage')
 const resultPanelVisible = ref(false)
 const resultPanelMode = ref<'unit' | 'session'>('unit')
 const resultPanelUnitId = ref<number | null>(null)
@@ -703,7 +702,7 @@ async function copySelectedTerm() {
 </script>
 
 <template>
-  <div class="practice-page" :class="`mobile-pane-${mobilePane}`" @click="vocabMenu.visible=false">
+  <div class="practice-page" @click="vocabMenu.visible=false">
     <header class="practice-top">
       <div style="display:flex;align-items:center;gap:18px">
         <button class="button ghost" @click="router.push('/library')"><ArrowLeft :size="18" />退出</button>
@@ -712,10 +711,6 @@ async function copySelectedTerm() {
             {{ unit.title }}<CheckCircle2 v-if="unit.submission?.submitted" :size="13" />
           </button>
         </div>
-      </div>
-      <div class="practice-mobile-switch" role="tablist" aria-label="做题内容切换">
-        <button type="button" role="tab" :aria-selected="mobilePane === 'passage'" :class="{active: mobilePane === 'passage'}" @click="mobilePane = 'passage'">{{ isListening ? '音频' : '文章' }}</button>
-        <button type="button" role="tab" :aria-selected="mobilePane === 'questions'" :class="{active: mobilePane === 'questions'}" @click="mobilePane = 'questions'">题目</button>
       </div>
       <div v-if="session" class="practice-status">
         <span v-if="saving"><Save :size="15" />正在保存</span><span v-else>已完成 {{ progress.answered }}/{{ progress.total }}</span>
