@@ -201,6 +201,7 @@ async function selectUnitIds(body: JsonRecord): Promise<{ unitIds: number[]; pap
       if (!body.unit_type) throw new LocalApiError(400, '整套题型练习需要指定题型')
       let paperSql = `SELECT DISTINCT p.id
         FROM papers p JOIN units u ON u.paper_id = p.id
+        JOIN questions q ON q.unit_id = u.id
         WHERE p.status = 'published'
           AND p.deleted_at IS NULL
           AND p.profile_id = ?
@@ -724,8 +725,9 @@ export async function dashboard(): Promise<JsonRecord> {
   )
   const unitTypeCounts = Object.fromEntries(
     (await rows<{ unit_type: string; count: number }>(
-      `SELECT u.unit_type, COUNT(*) AS count
+      `SELECT u.unit_type, COUNT(DISTINCT u.id) AS count
        FROM units u JOIN papers p ON p.id = u.paper_id
+       JOIN questions q ON q.unit_id = u.id
        WHERE p.profile_id = ? AND p.status = 'published' AND p.deleted_at IS NULL
        GROUP BY u.unit_type`,
       [profileId],
@@ -735,6 +737,7 @@ export async function dashboard(): Promise<JsonRecord> {
     (await rows<{ unit_type: string; count: number }>(
       `SELECT u.unit_type, COUNT(DISTINCT p.id) AS count
        FROM units u JOIN papers p ON p.id = u.paper_id
+       JOIN questions q ON q.unit_id = u.id
        WHERE p.profile_id = ? AND p.status = 'published' AND p.deleted_at IS NULL
        GROUP BY u.unit_type`,
       [profileId],
