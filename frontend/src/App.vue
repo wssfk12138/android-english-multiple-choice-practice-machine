@@ -19,6 +19,14 @@ const installerCleanupBusy = ref(false)
 const installerCleanupError = ref('')
 const retainInstallerButton = ref<HTMLButtonElement | null>(null)
 let appStateListener: PluginListenerHandle | null = null
+function updateWindowMode() {
+  const width = window.innerWidth
+  const mode = width < 600 ? 'compact' : width < 840 ? 'medium' : 'expanded'
+  document.documentElement.dataset.windowMode = mode
+  document.documentElement.dataset.orientation = window.matchMedia('(orientation: portrait)').matches
+    ? 'portrait'
+    : 'landscape'
+}
 function applyTheme() {
   document.documentElement.classList.toggle('dark', dark.value)
   localStorage.setItem('linjian-theme', dark.value ? 'dark' : 'light')
@@ -72,6 +80,9 @@ function handleInstallerCleanupKeydown(event: KeyboardEvent) {
 }
 
 onMounted(async () => {
+  updateWindowMode()
+  window.addEventListener('resize', updateWindowMode, { passive: true })
+  window.addEventListener('orientationchange', updateWindowMode, { passive: true })
   dark.value = localStorage.getItem('linjian-theme') === 'dark'
     || (!localStorage.getItem('linjian-theme') && matchMedia('(prefers-color-scheme: dark)').matches)
   applyTheme()
@@ -103,6 +114,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateWindowMode)
+  window.removeEventListener('orientationchange', updateWindowMode)
   window.removeEventListener('keydown', handleInstallerCleanupKeydown)
   void appStateListener?.remove()
 })

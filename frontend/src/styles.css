@@ -913,6 +913,208 @@ html[data-platform="android"] .page {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* The phone-only practice tabs stay hidden outside Android Compact mode. */
+.practice-mobile-switch { display: none; }
+
+/* Compact Android phones: use a true single-column flow. This block is kept
+   last so it wins over the legacy tablet rail rules above. */
+html[data-platform="android"][data-window-mode="compact"] .app-shell {
+  display: block;
+  min-height: 100dvh;
+  padding-bottom: calc(72px + env(safe-area-inset-bottom));
+}
+html[data-platform="android"][data-window-mode="compact"] .sidebar {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 40;
+  width: 100%;
+  height: calc(68px + env(safe-area-inset-bottom));
+  padding: 6px 8px env(safe-area-inset-bottom);
+  border: 1px solid var(--line);
+  border-width: 1px 0 0;
+  display: block;
+  background: color-mix(in srgb, var(--surface-solid) 96%, transparent);
+}
+html[data-platform="android"][data-window-mode="compact"] .brand,
+html[data-platform="android"][data-window-mode="compact"] .sidebar-note,
+html[data-platform="android"][data-window-mode="compact"] .theme-button {
+  display: none;
+}
+html[data-platform="android"][data-window-mode="compact"] .sidebar nav {
+  height: 100%;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+html[data-platform="android"][data-window-mode="compact"] .sidebar nav a {
+  min-height: 52px;
+  padding: 6px 2px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 10px;
+  font-size: 10px;
+  text-align: center;
+}
+html[data-platform="android"][data-window-mode="compact"] .sidebar nav a:nth-child(5),
+html[data-platform="android"][data-window-mode="compact"] .sidebar nav a:nth-child(6),
+html[data-platform="android"][data-window-mode="compact"] .sidebar nav a:nth-child(8) {
+  display: none;
+}
+html[data-platform="android"][data-window-mode="compact"] .page {
+  width: 100%;
+  padding: 24px 16px calc(32px + env(safe-area-inset-bottom));
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-shell {
+  min-height: 100dvh;
+  padding-bottom: 0;
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-top {
+  min-height: 64px;
+  height: auto;
+  position: static;
+  padding: 8px 12px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-top > div:first-child {
+  width: 100%;
+  gap: 8px !important;
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-top > div:first-child .button {
+  min-height: 42px;
+  padding: 9px 11px;
+}
+html[data-platform="android"][data-window-mode="compact"] .unit-tabs {
+  max-width: calc(100vw - 92px);
+  min-width: 0;
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-status {
+  width: 100%;
+  justify-content: space-between;
+  margin-left: 0;
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-mobile-switch {
+  display: flex;
+  width: 100%;
+  order: 3;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--primary-faint);
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-mobile-switch button {
+  flex: 1;
+  min-height: 40px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-mobile-switch button.active {
+  background: var(--surface-solid);
+  color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-layout {
+  display: block;
+  height: auto;
+  min-height: calc(100dvh - 148px);
+}
+html[data-platform="android"][data-window-mode="compact"] .passage-pane,
+html[data-platform="android"][data-window-mode="compact"] .question-pane {
+  min-width: 0;
+  overflow: visible;
+  border: 0;
+  padding: 24px 16px calc(170px + env(safe-area-inset-bottom));
+}
+html[data-platform="android"][data-window-mode="compact"] .question-pane {
+  background: transparent;
+}
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-passage .question-pane {
+  display: none;
+}
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .passage-pane {
+  display: none;
+}
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .practice-layout.listening-layout .passage-pane {
+  position: sticky;
+  top: 0;
+  z-index: 18;
+  display: block;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-solid) 97%, transparent);
+  box-shadow: 0 8px 22px rgba(35, 48, 41, .08);
+  backdrop-filter: blur(16px);
+}
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .listening-console-pane > .eyebrow,
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .listening-console .listening-heading,
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .listening-console .track-picker,
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .listening-console .secondary-controls,
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .listening-console .seek-lock-note {
+  display: none;
+}
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .listening-console {
+  gap: 0;
+}
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .listening-console .player-surface {
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 14px;
+  box-shadow: none;
+}
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .listening-console .main-play-button {
+  grid-row: 1;
+  width: 52px;
+  height: 52px;
+  box-shadow: 0 6px 15px color-mix(in srgb, var(--primary) 26%, transparent);
+}
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .listening-console .timeline {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  gap: 3px;
+}
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .listening-console .audio-error {
+  grid-column: 1 / -1;
+}
+html[data-platform="android"][data-window-mode="compact"] .mobile-pane-questions .practice-layout.listening-layout .question-pane {
+  padding-top: 16px;
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-footer,
+html[data-platform="android"][data-window-mode="compact"] .practice-footer.listening-footer {
+  position: fixed;
+  z-index: 30;
+  left: 0;
+  width: 100%;
+  right: auto;
+  bottom: 0;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  gap: 8px;
+  flex-wrap: wrap;
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-footer-summary {
+  width: 100%;
+  justify-content: space-between;
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-submit-actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+html[data-platform="android"][data-window-mode="compact"] .practice-submit-actions .button {
+  min-height: 46px;
+  padding-inline: 10px;
+}
+
+@media (min-width: 600px) {
+  .practice-mobile-switch { display: none; }
+}
 .bank-switcher { position: relative; margin: 0 0 18px; }
 .bank-switcher-main { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .bank-switcher select { min-width:190px; padding:9px 34px 9px 12px; border:1px solid var(--line, #d9dfd7); border-radius:12px; background:var(--surface, #fff); color:inherit; }
