@@ -21,11 +21,17 @@ const retainInstallerButton = ref<HTMLButtonElement | null>(null)
 let appStateListener: PluginListenerHandle | null = null
 function updateWindowMode() {
   const width = window.innerWidth
-  const mode = width < 600 ? 'compact' : width < 840 ? 'medium' : 'expanded'
+  const height = window.innerHeight
+  const portrait = window.matchMedia('(orientation: portrait)').matches
+  // Some Android WebViews report a scaled CSS width above 600px on phones.
+  // Use the viewport's short edge and height as a fallback so those devices
+  // still receive the compact bottom navigation layout.
+  const phonePortrait = portrait
+    && width < 840
+    && height / Math.max(width, 1) > 1.35
+  const mode = width < 600 || phonePortrait ? 'compact' : width < 840 ? 'medium' : 'expanded'
   document.documentElement.dataset.windowMode = mode
-  document.documentElement.dataset.orientation = window.matchMedia('(orientation: portrait)').matches
-    ? 'portrait'
-    : 'landscape'
+  document.documentElement.dataset.orientation = portrait ? 'portrait' : 'landscape'
 }
 function applyTheme() {
   document.documentElement.classList.toggle('dark', dark.value)

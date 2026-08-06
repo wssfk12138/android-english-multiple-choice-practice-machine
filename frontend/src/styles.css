@@ -1137,3 +1137,67 @@ html[data-platform="android"][data-window-mode="compact"] .practice-submit-actio
   .bank-manager { position:fixed; left:16px; right:16px; top:90px; width:auto; max-height:70vh; overflow:auto; }
   .trash-row { align-items:flex-start; flex-direction:column; }
 }
+
+/* Android phone portrait fallback.  A few WebViews report a scaled width
+   that misses the compact data attribute, so the physical portrait shape is
+   also used as a CSS guard.  Keep every navigation ancestor at a fixed bar
+   height; historical tablet rules must not be able to stretch it to 100dvh. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .app-shell,
+  html[data-platform="android"][data-window-mode="compact"] .app-shell {
+    display: block;
+    min-height: 100dvh;
+    padding-bottom: calc(74px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .sidebar,
+  html[data-platform="android"][data-window-mode="compact"] .sidebar {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 40;
+    width: 100%;
+    height: calc(68px + env(safe-area-inset-bottom));
+    min-height: 0;
+    max-height: calc(68px + env(safe-area-inset-bottom));
+    padding: 6px 8px env(safe-area-inset-bottom);
+    box-sizing: border-box;
+    border: 1px solid var(--line);
+    border-width: 1px 0 0;
+    display: block;
+    flex: none;
+  }
+
+  html[data-platform="android"] .sidebar nav,
+  html[data-platform="android"][data-window-mode="compact"] .sidebar nav {
+    height: 56px;
+    min-height: 0;
+    max-height: 56px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+    align-items: stretch;
+  }
+
+  html[data-platform="android"] .sidebar nav a,
+  html[data-platform="android"][data-window-mode="compact"] .sidebar nav a {
+    min-height: 0;
+    height: 56px;
+    max-height: 56px;
+    padding: 6px 2px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    font-size: 10px;
+    text-align: center;
+  }
+
+  html[data-platform="android"] .brand,
+  html[data-platform="android"] .sidebar-note,
+  html[data-platform="android"] .theme-button,
+  html[data-platform="android"] .sidebar nav a:nth-child(5),
+  html[data-platform="android"] .sidebar nav a:nth-child(6),
+  html[data-platform="android"] .sidebar nav a:nth-child(8) {
+    display: none;
+  }
+}
