@@ -137,7 +137,8 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   }
   if (pathname === '/vocabulary/translation-runs' && method === 'POST') {
     let ids = (body?.entry_ids || []).map(Number).filter(Boolean)
-    if (String(body?.trigger || '') === 'practice_exit') {
+    const trigger = String(body?.trigger || '')
+    if (trigger === 'practice_exit' || trigger === 'vocabulary_open') {
       const { rows } = await import('./database')
       const pending = await rows<{ id: number }>(
         `SELECT id FROM vocabulary_entries
@@ -154,7 +155,11 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (params && method === 'PUT') return await updateVocabulary(Number(params[1]), body!) as T
   if (params && method === 'DELETE') return await deleteVocabulary(Number(params[1])) as T
   params = match(pathname, /^\/vocabulary\/(\d+)\/retry$/)
-  if (params && method === 'POST') return await retryVocabulary(Number(params[1])) as T
+  if (params && method === 'POST') {
+    const id = Number(params[1])
+    await retryVocabulary(id)
+    return await queueAndStartVocabularyTranslations([id]) as T
+  }
   params = match(pathname, /^\/vocabulary\/(\d+)\/review$/)
   if (params && method === 'POST') return await reviewVocabulary(Number(params[1]), body?.rating) as T
 

@@ -373,12 +373,13 @@ function discriminationList(value: unknown, limit = 3): { word: string; note: st
 }
 
 export async function translateVocabularyEntries(entryIds: number[]): Promise<number> {
+  if (!entryIds.length) return 0
   const profile = await row<JsonRecord>(
     `SELECT * FROM ai_profiles
      WHERE enabled = 1 AND TRIM(default_model) <> ''
      ORDER BY is_default DESC, id LIMIT 1`,
   )
-  if (!profile || !entryIds.length) return 0
+  if (!profile) throw new LocalApiError(400, '请先配置并启用一个用于单词翻译的模型')
   const placeholders = entryIds.map(() => '?').join(',')
   const items = await rows<JsonRecord>(
     `SELECT v.id, v.term,

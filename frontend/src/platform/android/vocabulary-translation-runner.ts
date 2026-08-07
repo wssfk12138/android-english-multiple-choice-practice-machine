@@ -53,7 +53,7 @@ export function startVocabularyTranslationWorker(): Promise<void> {
 export async function queueAndStartVocabularyTranslations(entryIds: number[]) {
   const queued = await queueTranslations(entryIds)
   void startVocabularyTranslationWorker()
-  return queued
+  return { ...queued, workerStarted: true }
 }
 
 export function resumeVocabularyTranslations() {

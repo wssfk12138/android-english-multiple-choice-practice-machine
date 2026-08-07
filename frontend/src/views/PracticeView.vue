@@ -41,6 +41,7 @@ const portraitPaneResizing = ref(false)
 type VocabularyTranslationTrigger = 'unit_submit' | 'session_submit' | 'practice_exit'
 type PendingVocabularyRecord = { entryId: number, unitId: number | null }
 const pendingVocabulary = ref<PendingVocabularyRecord[]>([])
+let practiceExitTranslation: Promise<void> | null = null
 type TimerMode = 'off' | 'running' | 'paused' | 'finished'
 type PracticeTimerState = {
   mode: TimerMode
@@ -353,14 +354,11 @@ async function flushVocabularyTranslations(
 }
 
 function flushVocabularyOnPageHide() {
-  const entryIds = [...new Set(pendingVocabulary.value.map(item => item.entryId))]
   if (document.documentElement.dataset.platform === 'android') {
-    void post('/vocabulary/translation-runs', {
-      entry_ids: entryIds,
-      trigger: 'practice_exit',
-    }).catch(() => undefined)
+    void flushVocabularyOnPracticeExit()
     return
   }
+  const entryIds = [...new Set(pendingVocabulary.value.map(item => item.entryId))]
   if (!entryIds.length) return
   void fetch('/api/vocabulary/translation-runs', {
     method: 'POST',
@@ -371,6 +369,22 @@ function flushVocabularyOnPageHide() {
     }),
     keepalive: true,
   }).catch(() => undefined)
+}
+
+function flushVocabularyOnPracticeExit(): Promise<void> {
+  if (!practiceExitTranslation) {
+    practiceExitTranslation = flushVocabularyTranslations('practice_exit')
+  }
+  return practiceExitTranslation
+}
+
+function flushVocabularyOnVisibilityChange() {
+  if (document.visibilityState === 'hidden') {
+    void flushVocabularyOnPracticeExit()
+  } else {
+    // The user may return to the same practice session and add more words.
+    practiceExitTranslation = null
+  }
 }
 
 function readTimer(sessionId: number): PracticeTimerState | null {
@@ -492,15 +506,18 @@ onMounted(() => {
   }, 500)
   window.addEventListener('keydown', handleWindowKeydown)
   window.addEventListener('pagehide', flushVocabularyOnPageHide)
+  document.addEventListener('visibilitychange', flushVocabularyOnVisibilityChange)
   load()
 })
 onBeforeUnmount(() => {
   if (timerTicker !== null) window.clearInterval(timerTicker)
   window.removeEventListener('keydown', handleWindowKeydown)
   window.removeEventListener('pagehide', flushVocabularyOnPageHide)
+  document.removeEventListener('visibilitychange', flushVocabularyOnVisibilityChange)
+  void flushVocabularyOnPracticeExit()
 })
 onBeforeRouteLeave(async () => {
-  await flushVocabularyTranslations('practice_exit')
+  await flushVocabularyOnPracticeExit()
 })
 
 function handleWindowKeydown(event: KeyboardEvent) {
@@ -772,7 +789,7 @@ async function addSelectedVocabulary() {
     }
     vocabularyToast.value = result.is_frequent
       ? `已记录第 ${result.encounter_count} 次，已标记为 🌟 高频词`
-      : '已加入单词本，退出答题界面后统一翻译'
+      : '已加入单词本，退出答题界面后将在后台翻译'
     window.setTimeout(() => { vocabularyToast.value = '' }, 2600)
     window.getSelection()?.removeAllRanges()
   } catch (e) {

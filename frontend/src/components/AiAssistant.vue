@@ -317,6 +317,14 @@ onBeforeUnmount(() => {
         <div v-else class="ai-history-empty">还没有保存的对话</div>
       </aside>
 
+      <button
+        v-if="historyOpen"
+        class="ai-history-dismiss-area"
+        type="button"
+        aria-label="返回当前对话"
+        @click="historyOpen=false"
+      />
+
       <div class="ai-chat-panel">
         <header class="ai-chat-toolbar">
           <div>

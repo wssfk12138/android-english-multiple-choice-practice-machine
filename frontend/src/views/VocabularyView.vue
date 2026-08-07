@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { BookOpen, Check, ChevronDown, RefreshCw, Search, Star, Trash2 } from 'lucide-vue-next'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { del, get, post, put } from '../api'
 
@@ -46,8 +46,50 @@ function isAndroidPortrait() {
 
 function translationStatusText(status: string, detail = false) {
   if (status === 'translating') return detail ? '模型正在后台翻译' : '正在后台翻译…'
-  if (status === 'failed') return detail ? '翻译暂未完成' : '等待重新翻译'
-  return detail ? '退出答题界面后统一翻译' : '退出答题界面后翻译'
+  if (status === 'queued') return detail ? '已提交后台翻译' : '正在等待后台翻译…'
+  if (status === 'failed') return detail ? '翻译失败，可重新尝试' : '翻译失败，可重试'
+  return detail ? '正在准备后台翻译' : '正在准备翻译…'
+}
+
+let translationRefreshTimer = 0
+let translationRefreshAttempts = 0
+
+async function refreshTranslationStatuses() {
+  if (editing.value || reviewMode.value) return
+  try {
+    const result: any = await get(`/vocabulary?status=${filter.value}&search=${encodeURIComponent(search.value)}`)
+    items.value = result.items || []
+    counts.value = result.counts || counts.value
+    if (selected.value && selected.value.translation_status !== 'ready') {
+      selected.value = await get(`/vocabulary/${selected.value.id}`)
+      Object.assign(editForm, selected.value)
+    }
+    translationRefreshAttempts += 1
+    if (!(counts.value.pending > 0) || translationRefreshAttempts >= 24) {
+      window.clearInterval(translationRefreshTimer)
+      translationRefreshTimer = 0
+    }
+  } catch {
+    window.clearInterval(translationRefreshTimer)
+    translationRefreshTimer = 0
+  }
+}
+
+async function startPendingTranslations() {
+  try {
+    const result: any = await post('/vocabulary/translation-runs', {
+      entry_ids: [],
+      trigger: 'vocabulary_open',
+    })
+    await load()
+    if (result.workerStarted && counts.value.pending > 0 && !translationRefreshTimer) {
+      translationRefreshAttempts = 0
+      translationRefreshTimer = window.setInterval(refreshTranslationStatuses, 2500)
+    }
+  } catch (cause) {
+    error.value = String(cause)
+    await load()
+  }
 }
 
 async function load() {
@@ -103,9 +145,13 @@ async function removeEntry() {
 }
 
 async function retryTranslation() {
-  await post(`/vocabulary/${selected.value.id}/retry`)
-  notice.value = '已重新提交翻译，请稍后刷新'
+  const result: any = await post(`/vocabulary/${selected.value.id}/retry`)
+  notice.value = result.workerStarted ? '已重新提交后台翻译' : '已重新提交翻译'
   await load()
+  if (!translationRefreshTimer) {
+    translationRefreshAttempts = 0
+    translationRefreshTimer = window.setInterval(refreshTranslationStatuses, 2500)
+  }
 }
 
 async function rate(rating: string) {
@@ -130,7 +176,8 @@ watch(search, () => {
   searchTimer = window.setTimeout(load, 250)
 })
 watch(filter, load)
-onMounted(load)
+onMounted(startPendingTranslations)
+onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
 </script>
 
 <template>
