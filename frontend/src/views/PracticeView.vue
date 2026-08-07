@@ -8,6 +8,7 @@ import {
   Clock3,
   Coffee,
   GripVertical,
+  Pause,
   Play,
   Save,
   Send,
@@ -34,6 +35,9 @@ const resultPanelMode = ref<'unit' | 'session'>('unit')
 const resultPanelUnitId = ref<number | null>(null)
 const vocabMenu = ref({ visible: false, x: 0, y: 0, term: '', sentence: '', questionId: null as number | null })
 const listeningPlayer = ref<InstanceType<typeof ListeningPlayer> | null>(null)
+const practiceLayout = ref<HTMLElement | null>(null)
+const portraitPaneRatio = ref(50)
+const portraitPaneResizing = ref(false)
 type VocabularyTranslationTrigger = 'unit_submit' | 'session_submit' | 'practice_exit'
 type PendingVocabularyRecord = { entryId: number, unitId: number | null }
 const pendingVocabulary = ref<PendingVocabularyRecord[]>([])
@@ -187,11 +191,71 @@ function timerStorageKey(sessionId: number) {
   return `linjian-practice-timer-${sessionId}`
 }
 
+function isAndroidPortrait() {
+  return document.documentElement.dataset.platform === 'android'
+    && window.matchMedia('(orientation: portrait) and (max-width: 840px)').matches
+}
+
+function clampPortraitPaneRatio(value: number) {
+  return Math.min(75, Math.max(25, Math.round(value)))
+}
+
+function restorePortraitPaneRatio() {
+  const saved = Number(localStorage.getItem('practice-portrait-pane-ratio'))
+  if (Number.isFinite(saved)) portraitPaneRatio.value = clampPortraitPaneRatio(saved)
+}
+
+function updatePortraitPaneRatio(clientY: number) {
+  const bounds = practiceLayout.value?.getBoundingClientRect()
+  if (!bounds || bounds.height <= 0) return
+  portraitPaneRatio.value = clampPortraitPaneRatio(
+    ((clientY - bounds.top) / bounds.height) * 100,
+  )
+}
+
+function startPortraitPaneResize(event: PointerEvent) {
+  if (!isAndroidPortrait()) return
+  portraitPaneResizing.value = true
+  event.currentTarget instanceof HTMLElement
+    && event.currentTarget.setPointerCapture(event.pointerId)
+  updatePortraitPaneRatio(event.clientY)
+}
+
+function movePortraitPaneResize(event: PointerEvent) {
+  if (!portraitPaneResizing.value) return
+  updatePortraitPaneRatio(event.clientY)
+}
+
+function finishPortraitPaneResize(event: PointerEvent) {
+  if (!portraitPaneResizing.value) return
+  portraitPaneResizing.value = false
+  event.currentTarget instanceof HTMLElement
+    && event.currentTarget.hasPointerCapture(event.pointerId)
+    && event.currentTarget.releasePointerCapture(event.pointerId)
+  localStorage.setItem('practice-portrait-pane-ratio', String(portraitPaneRatio.value))
+}
+
+function adjustPortraitPaneRatio(event: KeyboardEvent) {
+  let next = portraitPaneRatio.value
+  if (event.key === 'ArrowUp') next -= 5
+  else if (event.key === 'ArrowDown') next += 5
+  else if (event.key === 'Home') next = 25
+  else if (event.key === 'End') next = 75
+  else return
+  event.preventDefault()
+  portraitPaneRatio.value = clampPortraitPaneRatio(next)
+  localStorage.setItem('practice-portrait-pane-ratio', String(portraitPaneRatio.value))
+}
+
 function formatDuration(milliseconds: number) {
   const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000))
   const hours = Math.floor(totalSeconds / 3600)
   const minutes = Math.floor((totalSeconds % 3600) / 60)
   const seconds = totalSeconds % 60
+  if (isAndroidPortrait()) {
+    if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}`
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  }
   return [hours, minutes, seconds]
     .map(value => String(value).padStart(2, '0'))
     .join(':')
@@ -422,6 +486,7 @@ async function load() {
   catch (e) { error.value = String(e) }
 }
 onMounted(() => {
+  restorePortraitPaneRatio()
   timerTicker = window.setInterval(() => {
     timerNow.value = Date.now()
   }, 500)
@@ -659,10 +724,30 @@ function openVocabularyMenu(event: MouseEvent) {
   if (!source) return
   event.preventDefault()
   const question = target.closest<HTMLElement>('[data-question-id]')
+  const rangeRect = selection?.rangeCount
+    ? selection.getRangeAt(0).getBoundingClientRect()
+    : null
+  const anchor = rangeRect && (rangeRect.width || rangeRect.height)
+    ? rangeRect
+    : new DOMRect(event.clientX, event.clientY, 1, 1)
+  const menuWidth = Math.min(208, window.innerWidth - 24)
+  const menuHeight = 112
+  const edge = 12
+  const bottomReserve = document.documentElement.dataset.platform === 'android'
+    && window.matchMedia('(orientation: portrait)').matches
+    ? 82 + (Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-area-bottom')) || 0)
+    : edge
+  const centeredX = anchor.left + anchor.width / 2 - menuWidth / 2
+  const x = Math.max(edge, Math.min(centeredX, window.innerWidth - menuWidth - edge))
+  const below = anchor.bottom + 14
+  const above = anchor.top - menuHeight - 14
+  const y = below + menuHeight <= window.innerHeight - bottomReserve
+    ? below
+    : Math.max(edge, above)
   vocabMenu.value = {
     visible: true,
-    x: Math.min(event.clientX, window.innerWidth - 220),
-    y: Math.min(event.clientY, window.innerHeight - 120),
+    x,
+    y,
     term,
     sentence: sentenceAround(source.innerText || source.textContent || '', term),
     questionId: question?.dataset.questionId ? Number(question.dataset.questionId) : null,
@@ -718,11 +803,12 @@ async function copySelectedTerm() {
           <Clock3 :size="16" />
           <span v-if="timerState?.mode === 'finished'" class="timer-label">本次用时</span>
           <strong>{{ timerText }}</strong>
-          <button v-if="timerState?.mode === 'running' && session.status === 'active'" type="button" @click="pauseTimer">
-            <Coffee :size="15" />休息一下
+          <button v-if="timerState?.mode === 'running' && session.status === 'active'" type="button" title="暂停计时" aria-label="暂停计时" @click="pauseTimer">
+            <Pause class="portrait-timer-control-icon" :size="16" />
+            <Coffee class="default-timer-control-content" :size="15" /><span class="default-timer-control-content">休息一下</span>
           </button>
-          <button v-else-if="timerState?.mode === 'paused' && session.status === 'active'" type="button" @click="resumeTimer">
-            <Play :size="14" />继续练习
+          <button v-else-if="timerState?.mode === 'paused' && session.status === 'active'" type="button" title="继续计时" aria-label="继续计时" @click="resumeTimer">
+            <Play :size="16" /><span class="default-timer-control-content">继续练习</span>
           </button>
         </div>
         <button
@@ -740,7 +826,16 @@ async function copySelectedTerm() {
     <div v-if="unansweredNotice" class="unanswered-banner" role="alert">
       <AlertCircle :size="18" />{{ unansweredNotice }}
     </div>
-    <div v-if="session && activeUnit" class="practice-layout" :class="{'listening-layout':isListening}">
+    <div
+      v-if="session && activeUnit"
+      ref="practiceLayout"
+      class="practice-layout"
+      :class="{'listening-layout':isListening, 'portrait-pane-resizing':portraitPaneResizing}"
+      :style="{
+        '--portrait-passage-size': `${portraitPaneRatio}fr`,
+        '--portrait-question-size': `${100 - portraitPaneRatio}fr`,
+      }"
+    >
       <section class="passage-pane" :class="{'listening-console-pane':isListening}">
         <span class="eyebrow">{{ activeUnit.year }} · {{ activeUnit.title }}</span>
         <ListeningPlayer
@@ -769,6 +864,23 @@ async function copySelectedTerm() {
         </div>
         </template>
       </section>
+      <div
+        class="portrait-pane-divider"
+        role="separator"
+        aria-label="调整题目与选项区域高度"
+        aria-orientation="horizontal"
+        aria-valuemin="25"
+        aria-valuemax="75"
+        :aria-valuenow="portraitPaneRatio"
+        tabindex="0"
+        @pointerdown.prevent="startPortraitPaneResize"
+        @pointermove.prevent="movePortraitPaneResize"
+        @pointerup="finishPortraitPaneResize"
+        @pointercancel="finishPortraitPaneResize"
+        @keydown="adjustPortraitPaneRatio"
+      >
+        <span aria-hidden="true"></span>
+      </div>
       <section class="question-pane">
         <div v-if="isOrdering" class="ordering-board">
           <div class="ordering-note">拖动候选段落调整顺序。前 5 项依次作为第 41–45 题答案，系统会自动保存。</div>

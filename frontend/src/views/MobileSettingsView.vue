@@ -1,7 +1,28 @@
 <script setup lang="ts">
+import { ChevronDown, Eye } from 'lucide-vue-next'
 import { onMounted, ref } from 'vue'
 
 const dark = ref(false)
+const vocabDisplayOpen = ref(false)
+const vocabularyDisplayOptions = [
+  ['common_meaning', '常用释义'],
+  ['contextual', '语境释义'],
+  ['sentence', '真题例句'],
+  ['memory_hint', '记忆提示'],
+  ['synonyms', '同义词辨析'],
+  ['antonyms', '反义词辨析'],
+  ['similar_forms', '形近词辨析'],
+] as const
+const vocabDisplayConfig = ref<Record<string, boolean>>({
+  common_meaning: true,
+  contextual: true,
+  sentence: true,
+  memory_hint: false,
+  synonyms: false,
+  antonyms: false,
+  similar_forms: false,
+})
+
 function applyTheme() {
   document.documentElement.classList.toggle('dark', dark.value)
   localStorage.setItem('linjian-theme', dark.value ? 'dark' : 'light')
@@ -10,8 +31,25 @@ function toggleTheme() {
   dark.value = !dark.value
   applyTheme()
 }
+
+function loadVocabularyDisplayConfig() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('vocab-display-config') || '{}')
+    if (saved && typeof saved === 'object') {
+      vocabDisplayConfig.value = { ...vocabDisplayConfig.value, ...saved }
+    }
+  } catch {
+    // Keep the defaults when an older local value is invalid.
+  }
+}
+
+function saveVocabularyDisplayConfig() {
+  localStorage.setItem('vocab-display-config', JSON.stringify(vocabDisplayConfig.value))
+}
+
 onMounted(() => {
   dark.value = document.documentElement.classList.contains('dark')
+  loadVocabularyDisplayConfig()
 })
 </script>
 
@@ -24,6 +62,20 @@ onMounted(() => {
       <img src="/assets/icons/theme.png" alt="">
       <span><strong>外观</strong><small>{{ dark ? '深色模式已开启' : '浅色模式已开启' }}</small></span>
       <button class="button secondary compact" type="button" @click="toggleTheme">切换</button>
+    </section>
+    <section class="card settings-vocab-display">
+      <button class="settings-vocab-display-toggle" type="button" :aria-expanded="vocabDisplayOpen" @click="vocabDisplayOpen=!vocabDisplayOpen">
+        <span class="settings-vocab-display-icon"><Eye :size="20" /></span>
+        <span><strong>单词本显示</strong><small>选择竖屏单词详情默认展开的内容</small></span>
+        <ChevronDown :size="19" :class="{ open: vocabDisplayOpen }" />
+      </button>
+      <div v-if="vocabDisplayOpen" class="settings-vocab-display-options">
+        <label v-for="[key, label] in vocabularyDisplayOptions" :key="key">
+          <input v-model="vocabDisplayConfig[key]" type="checkbox" @change="saveVocabularyDisplayConfig">
+          <span>{{ label }}</span>
+        </label>
+        <small>仅影响 Android 竖屏单词本，横屏与电脑端保持原有显示。</small>
+      </div>
     </section>
     <div class="mobile-hub-list settings-hub-list">
       <RouterLink class="card mobile-hub-item" to="/library"><img src="/assets/icons/paper.png" alt=""><span><strong>题库管理</strong><small>查看试卷、批量移动或移入回收站。</small></span><b aria-hidden="true">›</b></RouterLink>

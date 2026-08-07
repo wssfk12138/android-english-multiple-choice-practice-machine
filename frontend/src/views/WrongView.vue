@@ -367,26 +367,6 @@ function analysisLabel(unitIds: number[]): string {
               :class="{ open: openYears.has(yearGroup.year) }"
             />
           </button>
-          <div class="wrong-scope-actions">
-            <button
-              class="button secondary compact"
-              type="button"
-              :disabled="Boolean(analyzingKey)"
-              @click="analyzeScope(`year-${yearGroup.year}`, yearGroup.questionIds, `${yearGroup.year} 年`, yearGroup.units.map(unit => unit.unitId))"
-            >
-              <Sparkles :size="15" />
-              {{ analyzingKey === `year-${yearGroup.year}` ? '分析中…' : analysisLabel(yearGroup.units.map(unit => unit.unitId)) }}
-            </button>
-            <button
-              class="button compact"
-              type="button"
-              :disabled="Boolean(startingKey)"
-              @click="retryScope(`year-${yearGroup.year}`, yearGroup.units.map(unit => unit.unitId), yearGroup.questionIds, `${yearGroup.year} 年`)"
-            >
-              <Play :size="15" />
-              {{ startingKey === `year-${yearGroup.year}` ? '正在启动…' : '开始重做' }}
-            </button>
-          </div>
         </div>
 
         <div
