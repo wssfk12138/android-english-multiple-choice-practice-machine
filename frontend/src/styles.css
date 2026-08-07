@@ -312,16 +312,37 @@ h2, h3 { margin: 0; }
 .unit-tab.submitted { color:var(--success); }
 .result-banner { min-height:42px; padding:10px 14px; border:1px solid color-mix(in srgb,var(--primary) 20%,var(--line)); background:var(--primary-soft); border-radius:12px; color:var(--primary); display:inline-flex; align-items:center; gap:7px; font-weight:700; transition:background-color .18s ease,border-color .18s ease,box-shadow .18s ease; }
 .result-banner:hover { background:color-mix(in srgb,var(--primary-soft) 78%,var(--surface-solid)); border-color:color-mix(in srgb,var(--primary) 36%,var(--line)); box-shadow:var(--shadow-sm); }
-.ordering-board { display: grid; gap: 12px; }
-.ordering-note { color: var(--muted); font-size: 13px; line-height: 1.7; padding: 13px 15px; background: var(--blue); border-radius: 13px; margin-bottom: 6px; }
-.candidate-card { display: grid; grid-template-columns: 24px 52px 24px 1fr auto; align-items: start; gap: 10px; padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-solid); margin-bottom: 10px; box-shadow: 0 7px 22px rgba(58,73,64,.05); }
-.candidate-card.extra { opacity: .72; border-style: dashed; }
-.candidate-card p { margin: 0; font-family: "Segoe UI", "Microsoft YaHei UI", Arial, sans-serif; font-size: 16px; line-height: 1.72; }
-.drag-handle { color: var(--muted); cursor: grab; padding-top: 2px; }
-.candidate-position { color: var(--primary); font-weight: 700; font-size: 12px; padding: 4px 7px; background: var(--primary-soft); border-radius: 8px; text-align: center; }
-.drag-ghost { opacity: .35; }
-.order-result { font-size: 12px; color: var(--danger); white-space: nowrap; }
+.ordering-reference-sheet { display:grid; gap:0; color:var(--ink); }
+.ordering-paragraph { display:grid; grid-template-columns:30px minmax(0,1fr); gap:8px; padding:0 0 18px; }
+.ordering-paragraph-label { color:var(--primary); font-size:16px; line-height:1.75; }
+.ordering-paragraph-content,.ordering-paragraph-content p { margin:0; font-family:"Segoe UI","Microsoft YaHei UI",Arial,sans-serif; font-size:16px; line-height:1.75; }
+.ordering-board { display:grid; gap:14px; }
+.ordering-section-heading { display:flex; align-items:baseline; justify-content:space-between; gap:10px; color:var(--ink); font-weight:700; }
+.ordering-section-heading small { color:var(--muted); font-size:12px; font-weight:500; }
+.ordering-answer-list { display:grid; gap:8px; }
+.ordering-answer-row { display:grid; grid-template-columns:42px minmax(0,1fr); align-items:center; gap:8px 10px; padding:10px 0; border-bottom:1px solid var(--line); }
+.ordering-answer-row>strong { color:var(--primary); font-size:16px; text-align:center; }
+.ordering-choice-row { display:grid; grid-template-columns:repeat(7,minmax(36px,1fr)); gap:7px; min-width:0; }
+.ordering-choice { min-width:36px; min-height:40px; padding:6px; border:1px solid var(--line); border-radius:8px; background:var(--surface-solid); color:var(--ink); font:inherit; font-weight:700; cursor:pointer; }
+.ordering-choice:hover:not(:disabled),.ordering-choice.selected { border-color:var(--primary); background:var(--primary-soft); }
+.ordering-choice.correct { border-color:var(--success); background:#dfeee5; }
+.dark .ordering-choice.correct { background:#294437; }
+.ordering-choice.wrong { border-color:var(--danger); background:var(--danger-soft); }
+.ordering-choice:disabled { cursor:default; }
+.ordering-choice:disabled:not(.selected):not(.correct):not(.wrong) { opacity:.38; }
+.order-result { font-size:12px; color:var(--danger); white-space:nowrap; }
+.ordering-answer-row .order-result { grid-column:2; }
 .order-result.correct { color: var(--success); }
+@media (max-width: 720px) and (orientation: portrait) {
+  html[data-platform="android"] .ordering-board { gap:10px; }
+  html[data-platform="android"] .ordering-paragraph { grid-template-columns:26px minmax(0,1fr); gap:6px; padding-bottom:16px; }
+  html[data-platform="android"] .ordering-paragraph-label { font-size:15px; line-height:1.68; }
+  html[data-platform="android"] .ordering-paragraph-content,
+  html[data-platform="android"] .ordering-paragraph-content p { font-size:15px; line-height:1.68; }
+  html[data-platform="android"] .ordering-answer-row { grid-template-columns:38px minmax(0,1fr); gap:7px; padding:8px 0; }
+  html[data-platform="android"] .ordering-choice-row { grid-template-columns:repeat(4,minmax(44px,1fr)); gap:7px; }
+  html[data-platform="android"] .ordering-choice { min-width:44px; min-height:44px; }
+}
 .matching-board { display: grid; gap: 12px; }
 .candidate-bank { display: grid; gap: 9px; margin-bottom: 12px; }
 .candidate-reference { display: grid; grid-template-columns: 24px 1fr; gap: 11px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); }
@@ -335,7 +356,7 @@ h2, h3 { margin: 0; }
 .match-chip.wrong { border-color: var(--danger); background: var(--danger-soft); }
 .match-result { margin-top: 9px; font-size: 13px; }
 .unanswered-banner { position:fixed; top:80px; left:50%; z-index:35; transform:translateX(-50%); max-width:min(560px,calc(100vw - 32px)); display:flex; align-items:center; gap:9px; padding:12px 16px; border:1px solid color-mix(in srgb,var(--danger) 34%,var(--line)); border-radius:13px; background:color-mix(in srgb,var(--danger-soft) 92%,var(--surface-solid)); color:var(--danger); box-shadow:var(--shadow); font-size:14px; font-weight:650; }
-.question-card.unanswered-focus,.candidate-card.unanswered-focus { border-radius:14px; animation:unanswered-pulse 1s ease 2; box-shadow:0 0 0 3px color-mix(in srgb,var(--danger) 24%,transparent); }
+.question-card.unanswered-focus,.candidate-card.unanswered-focus,.ordering-answer-row.unanswered-focus { border-radius:14px; animation:unanswered-pulse 1s ease 2; box-shadow:0 0 0 3px color-mix(in srgb,var(--danger) 24%,transparent); }
 @keyframes unanswered-pulse { 50% { background:color-mix(in srgb,var(--danger-soft) 65%,var(--surface-solid)); box-shadow:0 0 0 5px color-mix(in srgb,var(--danger) 20%,transparent); } }
 .practice-footer-summary { display:flex; align-items:center; gap:12px; color:var(--muted); font-size:13px; }
 .practice-footer-summary strong { color:var(--success); }
