@@ -8,6 +8,11 @@ import { activeQuestionBankProfileId } from './question-bank-profiles'
 type JsonRecord = Record<string, any>
 type TransactionDb = Pick<SQLiteDBConnection, 'query' | 'run'>
 const audioUrlCache = new Map<string, string>()
+const listeningHasAudioSql = (alias = 'u') => `
+  json_valid(${alias}.shared_data)
+  AND json_type(${alias}.shared_data, '$.audio_tracks') = 'array'
+  AND json_array_length(${alias}.shared_data, '$.audio_tracks') > 0
+`
 
 function parseJson<T>(value: unknown, fallback: T): T {
   if (typeof value !== 'string' || !value) return fallback
@@ -207,6 +212,9 @@ async function selectUnitIds(body: JsonRecord): Promise<{ unitIds: number[]; pap
           AND p.profile_id = ?
           AND u.unit_type = ?`
       const paperValues: unknown[] = [activeProfileId, body.unit_type]
+      if (body.unit_type === 'listening') {
+        paperSql += ` AND (${listeningHasAudioSql('u')})`
+      }
       if (body.paper_id) {
         paperSql += ' AND p.id = ?'
         paperValues.push(body.paper_id)
@@ -221,6 +229,7 @@ async function selectUnitIds(body: JsonRecord): Promise<{ unitIds: number[]; pap
       const unitIds = (await rows<{ id: number }>(
         `SELECT id FROM units
          WHERE paper_id = ? AND unit_type = ?
+           AND (unit_type <> 'listening' OR (${listeningHasAudioSql('units')}))
          ORDER BY sequence, id`,
         [selectedPaperId, body.unit_type],
       )).map(item => item.id)
@@ -233,6 +242,9 @@ async function selectUnitIds(body: JsonRecord): Promise<{ unitIds: number[]; pap
     if (body.unit_type) {
       sql += ' AND u.unit_type = ?'
       values.push(body.unit_type)
+      if (body.unit_type === 'listening') {
+        sql += ` AND (${listeningHasAudioSql('u')})`
+      }
     }
     if (body.paper_id) {
       sql += ' AND u.paper_id = ?'
@@ -729,6 +741,7 @@ export async function dashboard(): Promise<JsonRecord> {
        FROM units u JOIN papers p ON p.id = u.paper_id
        JOIN questions q ON q.unit_id = u.id
        WHERE p.profile_id = ? AND p.status = 'published' AND p.deleted_at IS NULL
+         AND (u.unit_type <> 'listening' OR (${listeningHasAudioSql('u')}))
        GROUP BY u.unit_type`,
       [profileId],
     )).map(item => [item.unit_type, Number(item.count)]),
@@ -739,6 +752,7 @@ export async function dashboard(): Promise<JsonRecord> {
        FROM units u JOIN papers p ON p.id = u.paper_id
        JOIN questions q ON q.unit_id = u.id
        WHERE p.profile_id = ? AND p.status = 'published' AND p.deleted_at IS NULL
+         AND (u.unit_type <> 'listening' OR (${listeningHasAudioSql('u')}))
        GROUP BY u.unit_type`,
       [profileId],
     )).map(item => [item.unit_type, Number(item.count)]),
