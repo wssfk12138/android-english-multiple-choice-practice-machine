@@ -772,6 +772,458 @@ h2, h3 { margin: 0; }
   html[data-platform="android"] .practice-footer.listening-footer { width:100%; }
 }
 
+/* Android portrait practice and review surfaces. Desktop and landscape keep the established layout. */
+.portrait-practice-top { display: none; }
+.answer-card-overlay { display: none; }
+
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .default-practice-top {
+    display: none;
+  }
+
+  html[data-platform="android"] .portrait-practice-top {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: grid;
+    min-height: calc(82px + env(safe-area-inset-top));
+    padding: calc(7px + env(safe-area-inset-top)) 10px 7px;
+    gap: 4px;
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--surface-solid) 94%, transparent);
+    backdrop-filter: blur(16px);
+  }
+
+  html[data-platform="android"] .portrait-practice-actions {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  html[data-platform="android"] .portrait-icon-button {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    display: inline-grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--ink);
+  }
+
+  html[data-platform="android"] .portrait-icon-button:active,
+  html[data-platform="android"] .portrait-icon-button:focus-visible {
+    background: var(--primary-soft);
+    color: var(--primary);
+  }
+
+  html[data-platform="android"] .portrait-toolbar-spacer { flex: 1; }
+
+  html[data-platform="android"] .portrait-timer-pill {
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px 3px 4px;
+    border-radius: 10px;
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill.paused {
+    background: color-mix(in srgb, var(--apricot) 32%, var(--surface-solid));
+  }
+
+  html[data-platform="android"] .portrait-timer-pill button {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: currentColor;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill strong {
+    min-width: 42px;
+    font-size: 13px;
+    letter-spacing: 0;
+  }
+
+  html[data-platform="android"] .portrait-save-state {
+    padding: 5px 8px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  html[data-platform="android"] .portrait-practice-heading {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 4px;
+    font-size: 12px;
+  }
+
+  html[data-platform="android"] .portrait-practice-heading strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  html[data-platform="android"] .portrait-practice-heading span {
+    flex: none;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  html[data-platform="android"] .portrait-more-wrap { position: relative; }
+
+  html[data-platform="android"] .portrait-more-menu {
+    position: absolute;
+    top: 43px;
+    right: 0;
+    z-index: 45;
+    width: min(250px, calc(100vw - 24px));
+    max-height: min(58vh, 410px);
+    overflow-y: auto;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    background: var(--surface-solid);
+    box-shadow: var(--shadow);
+  }
+
+  html[data-platform="android"] .portrait-more-menu > span {
+    display: block;
+    padding: 6px 9px 8px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  html[data-platform="android"] .portrait-more-menu button {
+    width: 100%;
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 9px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+  }
+
+  html[data-platform="android"] .portrait-more-menu button.active {
+    background: var(--primary-soft);
+    color: var(--primary);
+  }
+
+  html[data-platform="android"] .practice-page {
+    --compact-practice-footer-height: 0px;
+  }
+
+  html[data-platform="android"] .practice-layout,
+  html[data-platform="android"][data-window-mode="compact"] .practice-layout {
+    height: calc(100dvh - 82px - env(safe-area-inset-top));
+  }
+
+  html[data-platform="android"] .practice-footer,
+  html[data-platform="android"] .practice-footer.listening-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer.listening-footer {
+    display: none;
+  }
+
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    scroll-padding-bottom: 24px;
+    padding-bottom: 24px;
+  }
+
+  html[data-platform="android"] .unanswered-banner {
+    top: calc(90px + env(safe-area-inset-top));
+  }
+
+  html[data-platform="android"] .answer-card-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-top: max(54px, env(safe-area-inset-top));
+    background: rgba(20, 28, 24, .48);
+    backdrop-filter: blur(4px);
+  }
+
+  html[data-platform="android"] .answer-card-drawer {
+    width: 100%;
+    max-height: 86dvh;
+    min-height: 48dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 22px 22px 0 0;
+    background: var(--surface-solid);
+    box-shadow: 0 -18px 60px rgba(20, 32, 26, .24);
+  }
+
+  html[data-platform="android"] .answer-card-heading {
+    flex: none;
+    min-height: 70px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 13px 16px 10px 20px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  html[data-platform="android"] .answer-card-heading h2 {
+    margin: 1px 0 0;
+    font-size: 21px;
+  }
+
+  html[data-platform="android"] .answer-card-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 5px 18px 18px;
+  }
+
+  html[data-platform="android"] .answer-card-unit {
+    padding: 16px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  html[data-platform="android"] .answer-card-unit-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+    font-size: 14px;
+  }
+
+  html[data-platform="android"] .answer-card-unit-title span {
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  html[data-platform="android"] .answer-number-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(42px, 1fr));
+    gap: 10px;
+  }
+
+  html[data-platform="android"] .answer-number {
+    aspect-ratio: 1;
+    max-width: 50px;
+    display: grid;
+    place-items: center;
+    justify-self: center;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--muted) 9%, var(--surface-solid));
+    color: var(--muted);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  html[data-platform="android"] .answer-number.answered {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-weight: 750;
+  }
+
+  html[data-platform="android"] .answer-number.current {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+  }
+
+  html[data-platform="android"] .answer-number.submitted {
+    border-color: var(--success);
+    background: color-mix(in srgb, var(--success) 16%, var(--surface-solid));
+    color: var(--success);
+  }
+
+  html[data-platform="android"] .answer-card-actions {
+    flex: none;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+    padding: 11px 16px calc(11px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+    background: var(--surface-solid);
+  }
+
+  html[data-platform="android"] .answer-card-actions .button:only-child {
+    grid-column: 1 / -1;
+  }
+
+  html[data-platform="android"] .review-overlay {
+    align-items: stretch;
+    place-items: stretch;
+    padding: 0;
+    background: var(--bg);
+    backdrop-filter: none;
+  }
+
+  html[data-platform="android"] .review-card {
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    background: var(--bg);
+    text-align: left;
+    box-shadow: none;
+  }
+
+  html[data-platform="android"] .review-header {
+    flex: none;
+    min-height: calc(58px + env(safe-area-inset-top));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: calc(8px + env(safe-area-inset-top)) 14px 8px 18px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-solid);
+  }
+
+  html[data-platform="android"] .review-header strong {
+    font-size: 14px;
+  }
+
+  html[data-platform="android"] .review-header strong span {
+    margin-left: 5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  html[data-platform="android"] .review-close {
+    position: static;
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 26px;
+    line-height: 1;
+  }
+
+  html[data-platform="android"] .review-content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 34px 20px 28px;
+    text-align: center;
+  }
+
+  html[data-platform="android"] .review-term {
+    margin-top: 0;
+    font-size: clamp(34px, 11vw, 46px);
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .review-phonetic {
+    min-height: 22px;
+    margin-top: 7px;
+  }
+
+  html[data-platform="android"] .reveal-button {
+    min-height: 46px;
+    margin-top: 54px;
+  }
+
+  html[data-platform="android"] .review-answer {
+    display: grid;
+    gap: 14px;
+    margin-top: 32px;
+    text-align: left;
+  }
+
+  html[data-platform="android"] .review-meaning-block,
+  html[data-platform="android"] .review-sentence-block {
+    display: grid;
+    gap: 7px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    background: var(--surface-solid);
+  }
+
+  html[data-platform="android"] .review-answer small {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 750;
+  }
+
+  html[data-platform="android"] .review-answer strong {
+    font-size: 19px;
+    line-height: 1.55;
+  }
+
+  html[data-platform="android"] .review-answer p {
+    margin: 0;
+    color: var(--ink);
+    line-height: 1.7;
+  }
+
+  html[data-platform="android"] .review-answer blockquote {
+    max-height: min(29dvh, 230px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin: 0;
+    padding: 12px 13px;
+    border-left: 3px solid var(--primary);
+    border-radius: 0 9px 9px 0;
+    background: var(--primary-soft);
+    font-size: 15px;
+    line-height: 1.75;
+  }
+
+  html[data-platform="android"] .review-actions {
+    flex: none;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+    background: var(--surface-solid);
+  }
+
+  html[data-platform="android"] .review-actions .button {
+    min-width: 0;
+    min-height: 46px;
+    padding: 8px 5px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+}
+
 /* Android is a tablet-only build. The native activity is locked to landscape,
    but a few tablets report a narrow CSS viewport because of display scaling or
    split-window sizing. Keep the navigation rail and two-pane practice layout

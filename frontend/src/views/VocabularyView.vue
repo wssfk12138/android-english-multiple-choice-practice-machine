@@ -200,23 +200,34 @@ onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
 
     <section v-if="reviewMode" class="review-overlay">
       <div class="review-card" v-if="reviewWord">
-        <button class="button ghost review-close" @click="reviewMode=false">退出复习</button>
-        <span class="eyebrow">今日 {{ reviewIndex + 1 }} / {{ reviewItems.length }}</span>
-        <div class="review-term"><span v-if="reviewWord.is_frequent">🌟</span>{{ reviewWord.lemma || reviewWord.term }}</div>
-        <div class="review-phonetic">{{ reviewWord.phonetic }}</div>
-        <button v-if="!reveal" class="button secondary reveal-button" @click="reveal=true">显示释义和原句</button>
-        <div v-else class="review-answer">
-          <strong>{{ reviewWord.common_meaning || reviewWord.contextual_meaning }}</strong>
-          <p v-if="reviewWord.contextual_meaning && reviewWord.contextual_meaning !== reviewWord.common_meaning">
-            本句语境：{{ reviewWord.contextual_meaning }}
-          </p>
-          <blockquote>{{ reviewWord.latest_sentence }}</blockquote>
-          <div class="review-actions">
-            <button class="button danger" @click="rate('again')">不认识</button>
-            <button class="button secondary" @click="rate('hard')">有点印象</button>
-            <button class="button" @click="rate('mastered')">已掌握</button>
+        <header class="review-header">
+          <strong>今日复习 <span>{{ String(reviewIndex + 1).padStart(2, '0') }} / {{ String(reviewItems.length).padStart(2, '0') }}</span></strong>
+          <button class="review-close" type="button" title="退出复习" aria-label="退出复习" @click="reviewMode=false">×</button>
+        </header>
+        <div class="review-content">
+          <div class="review-term"><span v-if="reviewWord.is_frequent">🌟</span>{{ reviewWord.lemma || reviewWord.term }}</div>
+          <div class="review-phonetic">{{ reviewWord.phonetic }}</div>
+          <button v-if="!reveal" class="button secondary reveal-button" @click="reveal=true">显示释义和原句</button>
+          <div v-else class="review-answer">
+            <section class="review-meaning-block">
+              <small>普通释义</small>
+              <strong>{{ reviewWord.common_meaning || reviewWord.contextual_meaning }}</strong>
+            </section>
+            <section v-if="reviewWord.contextual_meaning && reviewWord.contextual_meaning !== reviewWord.common_meaning" class="review-meaning-block">
+              <small>本句语境</small>
+              <p>{{ reviewWord.contextual_meaning }}</p>
+            </section>
+            <section v-if="reviewWord.latest_sentence" class="review-sentence-block">
+              <small>真题原句</small>
+              <blockquote>{{ reviewWord.latest_sentence }}</blockquote>
+            </section>
           </div>
         </div>
+        <footer v-if="reveal" class="review-actions">
+          <button class="button danger" @click="rate('again')">不认识</button>
+          <button class="button secondary" @click="rate('hard')">有点印象</button>
+          <button class="button" @click="rate('mastered')">已掌握</button>
+        </footer>
       </div>
       <div v-else class="card empty">今天没有待复习的单词。</div>
     </section>

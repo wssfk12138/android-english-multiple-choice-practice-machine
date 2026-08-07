@@ -5,9 +5,11 @@ import {
   Award,
   CheckCircle2,
   ChevronRight,
+  ClipboardList,
   Clock3,
   Coffee,
   GripVertical,
+  MoreVertical,
   Pause,
   Play,
   Save,
@@ -31,6 +33,8 @@ const vocabularyToast = ref('')
 const unansweredNotice = ref('')
 const highlightedQuestionId = ref<number | null>(null)
 const resultPanelVisible = ref(false)
+const answerCardVisible = ref(false)
+const portraitMoreVisible = ref(false)
 const resultPanelMode = ref<'unit' | 'session'>('unit')
 const resultPanelUnitId = ref<number | null>(null)
 const vocabMenu = ref({ visible: false, x: 0, y: 0, term: '', sentence: '', questionId: null as number | null })
@@ -93,6 +97,13 @@ const audioTracks = computed(() => activeUnit.value?.shared_data?.audio_tracks |
 const activeUnitSubmitted = computed(() =>
   Boolean(activeUnit.value?.submission?.submitted || session.value?.status === 'submitted'),
 )
+const activeUnitProgress = computed(() => {
+  const questions = activeUnit.value?.questions || []
+  return {
+    answered: questions.filter((question: any) => Boolean(question.user_answer)).length,
+    total: questions.length,
+  }
+})
 const resultUnit = computed(() =>
   session.value?.units?.find((unit: any) => unit.id === resultPanelUnitId.value)
   || activeUnit.value,
@@ -678,6 +689,23 @@ function switchUnit(index: number) {
   syncOrdering()
 }
 
+async function jumpToQuestion(unitIndex: number, questionId: number) {
+  switchUnit(unitIndex)
+  answerCardVisible.value = false
+  portraitMoreVisible.value = false
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  document.querySelector<HTMLElement>(`[data-question-id="${questionId}"]`)
+    ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function questionCardState(unit: any, question: any, unitIndex: number) {
+  return {
+    answered: Boolean(question.user_answer),
+    current: unitIndex === activeUnitIndex.value && highlightedQuestionId.value === question.id,
+    submitted: Boolean(unit.submission?.submitted || session.value?.status === 'submitted'),
+  }
+}
+
 function showUnitResult(unitId = activeUnit.value?.id) {
   if (!unitId) return
   resultPanelMode.value = 'unit'
@@ -805,7 +833,52 @@ async function copySelectedTerm() {
 
 <template>
   <div class="practice-page" @click="vocabMenu.visible=false">
-    <header class="practice-top">
+    <header class="portrait-practice-top" v-if="session">
+      <div class="portrait-practice-actions">
+        <button class="portrait-icon-button" type="button" title="退出练习" aria-label="退出练习" @click="router.push('/library')">
+          <X :size="20" />
+        </button>
+        <div v-if="timerEnabled" class="portrait-timer-pill" :class="{ paused: timerState?.mode === 'paused' }" aria-live="polite">
+          <button
+            v-if="timerState?.mode === 'running' && session.status === 'active'"
+            type="button"
+            title="暂停计时"
+            aria-label="暂停计时"
+            @click="pauseTimer"
+          ><Pause :size="17" /></button>
+          <button
+            v-else-if="timerState?.mode === 'paused' && session.status === 'active'"
+            type="button"
+            title="继续计时"
+            aria-label="继续计时"
+            @click="resumeTimer"
+          ><Play :size="17" /></button>
+          <Clock3 v-else :size="16" />
+          <strong>{{ timerText }}</strong>
+        </div>
+        <span v-else class="portrait-save-state">{{ saving ? '保存中' : `${activeUnitProgress.answered}/${activeUnitProgress.total}` }}</span>
+        <div class="portrait-toolbar-spacer"></div>
+        <button class="portrait-icon-button portrait-answer-card-trigger" type="button" title="打开答题卡" aria-label="打开答题卡" @click="answerCardVisible=true">
+          <ClipboardList :size="20" />
+        </button>
+        <div class="portrait-more-wrap">
+          <button class="portrait-icon-button" type="button" title="更多操作" aria-label="更多操作" :aria-expanded="portraitMoreVisible" @click.stop="portraitMoreVisible=!portraitMoreVisible">
+            <MoreVertical :size="20" />
+          </button>
+          <div v-if="portraitMoreVisible" class="portrait-more-menu" @click.stop>
+            <span>切换篇目</span>
+            <button v-for="(unit, i) in session.units" :key="`more-${unit.id}`" type="button" :class="{active:i===activeUnitIndex}" @click="switchUnit(i);portraitMoreVisible=false">
+              {{ unit.title }}<CheckCircle2 v-if="unit.submission?.submitted" :size="14" />
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="portrait-practice-heading">
+        <strong>{{ activeUnit?.year }} {{ activeUnit?.title }}</strong>
+        <span>{{ activeUnitProgress.answered }}/{{ activeUnitProgress.total }}</span>
+      </div>
+    </header>
+    <header class="practice-top default-practice-top">
       <div style="display:flex;align-items:center;gap:18px">
         <button class="button ghost" @click="router.push('/library')"><ArrowLeft :size="18" />退出</button>
         <div class="unit-tabs" v-if="session">
@@ -985,6 +1058,45 @@ async function copySelectedTerm() {
       <button @click="copySelectedTerm">复制所选内容</button>
     </div>
     <div v-if="vocabularyToast" class="toast vocabulary-toast">{{ vocabularyToast }}</div>
+    <section v-if="answerCardVisible && session" class="answer-card-overlay" role="dialog" aria-modal="true" aria-labelledby="answer-card-title">
+      <div class="answer-card-drawer">
+        <header class="answer-card-heading">
+          <div>
+            <span class="eyebrow">ANSWER SHEET</span>
+            <h2 id="answer-card-title">答题卡</h2>
+          </div>
+          <button class="portrait-icon-button" type="button" title="关闭答题卡" aria-label="关闭答题卡" @click="answerCardVisible=false"><X :size="20" /></button>
+        </header>
+        <div class="answer-card-scroll">
+          <section v-for="(unit, unitIndex) in session.units" :key="`answer-unit-${unit.id}`" class="answer-card-unit">
+            <div class="answer-card-unit-title">
+              <strong>{{ unit.title }}</strong>
+              <span>{{ unit.questions.filter((question:any) => question.user_answer).length }}/{{ unit.questions.length }}</span>
+            </div>
+            <div class="answer-number-grid">
+              <button
+                v-for="question in unit.questions"
+                :key="`answer-question-${question.id}`"
+                type="button"
+                class="answer-number"
+                :class="questionCardState(unit, question, unitIndex)"
+                :aria-label="`前往${unit.title}第${question.number}题`"
+                @click="jumpToQuestion(unitIndex, question.id)"
+              >{{ question.number }}</button>
+            </div>
+          </section>
+        </div>
+        <footer class="answer-card-actions">
+          <button v-if="session.status==='active' && session.mode==='paper' && !isListening && !activeUnit.submission?.submitted" class="button secondary" type="button" @click="answerCardVisible=false;submitCurrentUnit()">
+            提交本篇
+          </button>
+          <button v-if="session.status==='active'" class="button" type="button" @click="answerCardVisible=false;submitSession()">
+            {{ session.mode === 'paper' ? '提交整卷' : '提交练习' }}
+          </button>
+          <button v-else class="button" type="button" @click="answerCardVisible=false;router.push('/wrong')">查看错题</button>
+        </footer>
+      </div>
+    </section>
     <section
       v-if="resultPanelVisible && session"
       class="result-overlay"
