@@ -450,23 +450,28 @@ function scopeKeyOf(unitIds: number[]): string {
 async function latestWrongSnapshot(
   unitIds: number[],
   questionIds: number[],
+  retrySessionIds = new Map<number, number>(),
 ): Promise<JsonRecord> {
   const placeholders = questionIds.map(() => '?').join(',')
   const snapshot: JsonRecord = {}
   for (const unitId of unitIds) {
+    const retrySessionId = retrySessionIds.get(unitId)
     const questionRows = await rows<JsonRecord>(
       `SELECT q.id, q.number,
          (SELECT pa.user_answer
           FROM practice_answers pa
           JOIN practice_sessions ps ON ps.id = pa.session_id
-          WHERE pa.question_id = q.id AND pa.is_correct IS NOT NULL
+          WHERE pa.question_id = q.id AND pa.is_correct = 0
             AND TRIM(pa.user_answer) <> ''
+            ${retrySessionId ? 'AND pa.session_id = ?' : ''}
           ORDER BY COALESCE(ps.submitted_at, pa.answered_at) DESC, pa.id DESC
           LIMIT 1) AS user_answer
        FROM questions q
        WHERE q.unit_id = ? AND q.id IN (${placeholders})
        ORDER BY q.sequence`,
-      [unitId, ...questionIds],
+      retrySessionId
+        ? [retrySessionId, unitId, ...questionIds]
+        : [unitId, ...questionIds],
     )
     snapshot[String(unitId)] = {
       errors: questionRows
@@ -479,6 +484,24 @@ async function latestWrongSnapshot(
     }
   }
   return snapshot
+}
+
+async function latestCompletedWrongRetrySession(
+  unitId: number,
+  afterSessionId: number,
+): Promise<number | null> {
+  const completed = await row<{ session_id: number }>(
+    `SELECT pus.session_id
+     FROM practice_unit_submissions pus
+     JOIN practice_sessions ps ON ps.id = pus.session_id
+     WHERE pus.unit_id = ?
+       AND pus.session_id > ?
+       AND ps.mode = 'wrong'
+     ORDER BY pus.session_id DESC
+     LIMIT 1`,
+    [unitId, afterSessionId],
+  )
+  return completed ? Number(completed.session_id) : null
 }
 
 function parseJsonObject(value: unknown): JsonRecord {
@@ -500,10 +523,9 @@ export async function analyzeWrongStatus(): Promise<JsonRecord> {
   )
   const units = []
   for (const state of states) {
-    const completed = await row(
-      `SELECT 1 AS found FROM practice_unit_submissions
-       WHERE unit_id = ? AND session_id > ? LIMIT 1`,
-      [state.unit_id, state.analyzed_session_id],
+    const completed = await latestCompletedWrongRetrySession(
+      Number(state.unit_id),
+      Number(state.analyzed_session_id),
     )
     units.push({
       unit_id: Number(state.unit_id),
@@ -550,17 +572,19 @@ export async function analyzeWrongQuestions(
 
   let allRetried = true
   const lockedReportIds: number[] = []
+  const retrySessionIds = new Map<number, number>()
   for (const unitId of unitIds) {
     const state = statesByUnit.get(unitId)
     if (!state) continue
-    const completed = await row(
-      `SELECT 1 AS found FROM practice_unit_submissions
-       WHERE unit_id = ? AND session_id > ? LIMIT 1`,
-      [unitId, state.analyzed_session_id],
+    const completed = await latestCompletedWrongRetrySession(
+      unitId,
+      Number(state.analyzed_session_id),
     )
     if (!completed) {
       allRetried = false
       lockedReportIds.push(Number(state.report_id))
+    } else {
+      retrySessionIds.set(unitId, completed)
     }
   }
 
@@ -603,30 +627,68 @@ export async function analyzeWrongQuestions(
     }
   }
 
+  const inputSnapshot = await latestWrongSnapshot(unitIds, normalized, retrySessionIds)
+  const currentWrongAnswers = new Map<number, string>()
+  for (const unitId of unitIds) {
+    for (const item of (inputSnapshot[String(unitId)]?.errors || [])) {
+      currentWrongAnswers.set(Number(item.question_id), String(item.selected))
+    }
+  }
+
+  const retryingAnExistingAnalysis = statesByUnit.size > 0
+  if (retryingAnExistingAnalysis && !currentWrongAnswers.size) {
+    const aggregate = {
+      question_count: 0,
+      categories: [],
+      recommended_actions: ['本次重做没有新的错误选项，无需再次进行错题分析。'],
+      uncertain_count: 0,
+    }
+    const content = '本次重做没有新的错误选项，无需再次进行错题分析。'
+    let reportId = 0
+    await transaction(async db => {
+      const created = await db.run(
+        `INSERT INTO wrong_analysis_reports
+          (scope_key, unit_ids, input_snapshot, scope_title,
+           question_count, aggregate_data, report, model_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [scopeKey, JSON.stringify(unitIds), JSON.stringify(inputSnapshot), scopeTitle,
+          0, JSON.stringify(aggregate), content, 'local'],
+        false,
+      )
+      reportId = Number(created.changes?.lastId)
+      for (const unitId of unitIds) {
+        await db.run(
+          `INSERT OR REPLACE INTO wrong_analysis_states
+            (unit_id, report_id, analyzed_session_id, analyzed_at)
+           VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+          [unitId, reportId, retrySessionIds.get(unitId) || 0],
+          false,
+        )
+      }
+    })
+    return {
+      analysis: content, aggregate, report_id: reportId, scope_title: scopeTitle,
+      cached: false, locked: true, reanalyze_after_retry: true,
+    }
+  }
+
   const profile = await row<JsonRecord>(
     `SELECT * FROM ai_profiles
      WHERE enabled = 1 AND TRIM(default_model) <> ''
      ORDER BY is_default DESC, id LIMIT 1`,
   )
   if (!profile) throw new LocalApiError(400, '请先配置并启用一个模型')
-  const questions = await rows<JsonRecord>(
+  const questions = (await rows<JsonRecord>(
     `SELECT q.id, q.number, q.stem, q.answer, q.unit_id, u.title AS unit_title,
        l.primary_skill, l.secondary_skills, l.trap_types,
        l.attention_points, l.vocabulary_demand, l.context_dependency,
-       l.grammar_dependency,
-       (SELECT pa.user_answer
-        FROM practice_answers pa
-        JOIN practice_sessions ps ON ps.id = pa.session_id
-        WHERE pa.question_id = q.id AND pa.is_correct IS NOT NULL
-          AND TRIM(pa.user_answer) <> ''
-        ORDER BY COALESCE(ps.submitted_at, pa.answered_at) DESC, pa.id DESC
-        LIMIT 1) AS latest_wrong_answer
+       l.grammar_dependency
      FROM questions q
      JOIN units u ON u.id = q.unit_id
      LEFT JOIN question_ai_labels l ON l.question_id = q.id
      WHERE q.id IN (${placeholders})`,
     normalized,
-  )
+  )).filter(item => currentWrongAnswers.has(Number(item.id)))
   const content = await chatCompletion(
     profile.id,
     profile.default_model,
@@ -649,7 +711,7 @@ export async function analyzeWrongQuestions(
           scope: scopeTitle,
           questions: questions.map(item => ({
             stem: item.stem,
-            wrongAnswer: item.latest_wrong_answer,
+            wrongAnswer: currentWrongAnswers.get(Number(item.id)),
             correctAnswer: item.answer,
             previousErrors: previousSnapshot[String(item.unit_id)]?.errors || [],
             labels: {
@@ -673,7 +735,6 @@ export async function analyzeWrongQuestions(
     recommended_actions: [],
     uncertain_count: 0,
   }
-  const inputSnapshot = await latestWrongSnapshot(unitIds, normalized)
   let reportId = 0
   await transaction(async db => {
     const created = await db.run(
@@ -702,7 +763,7 @@ export async function analyzeWrongQuestions(
         `INSERT OR REPLACE INTO wrong_analysis_states
           (unit_id, report_id, analyzed_session_id, analyzed_at)
          VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
-        [unitId, reportId, Number(maxSession?.max_id || 0)],
+        [unitId, reportId, retrySessionIds.get(unitId) || Number(maxSession?.max_id || 0)],
         false,
       )
     }

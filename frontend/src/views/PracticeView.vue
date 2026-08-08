@@ -558,13 +558,8 @@ function resultClass(question: any, option: any) {
   }
   return {
     selected: question.user_answer === option.stable_key,
-    correct: question.answer === option.stable_key,
-    wrong: question.user_answer === option.stable_key && question.answer !== option.stable_key,
+    wrong: question.user_answer === option.stable_key && question.is_correct === false,
   }
-}
-
-function displayedAnswer(question: any) {
-  return question.options.find((option: any) => option.stable_key === question.answer)?.label || question.answer
 }
 
 function firstUnanswered(unitIndexes: number[]) {
@@ -958,7 +953,7 @@ async function copySelectedTerm() {
                   @click="selectOrdering(question, option.stable_key)"
                 >{{ option.label }}</button>
               </div>
-              <span v-if="activeUnitSubmitted" class="order-result" :class="{correct: question.is_correct}">{{ question.is_correct ? '正确' : `正确答案：${displayedAnswer(question)}` }}</span>
+              <span v-if="activeUnitSubmitted" class="order-result" :class="{correct: question.is_correct}">{{ question.is_correct ? '正确' : '回答错误' }}</span>
             </div>
           </div>
         </div>
@@ -974,7 +969,7 @@ async function copySelectedTerm() {
               <button v-for="option in question.options" :key="option.stable_key" class="match-chip" :class="resultClass(question, option)" :disabled="activeUnitSubmitted" @click="select(question, option.stable_key)">{{ option.label }}</button>
             </div>
             <div v-if="activeUnitSubmitted" class="match-result" :style="{color:question.is_correct?'var(--success)':'var(--danger)'}">
-              {{ question.is_correct ? '回答正确' : `正确答案：${displayedAnswer(question)}` }}
+              {{ question.is_correct ? '回答正确' : '回答错误' }}
             </div>
           </div>
         </div>
@@ -993,7 +988,7 @@ async function copySelectedTerm() {
             <span class="option-content" data-vocab-text><ContentBlocks v-if="option.content_blocks?.length" :blocks="option.content_blocks" :package-id="activeContentPackage.packageId" :content-version="activeContentPackage.contentVersion" /><template v-else>{{ option.content }}</template></span>
           </button>
           <div v-if="activeUnitSubmitted" style="margin-top:10px;font-size:13px" :style="{color:question.is_correct?'var(--success)':'var(--danger)'}">
-            <CheckCircle2 :size="15" style="vertical-align:-2px" /> {{ question.is_correct ? '回答正确' : `正确答案：${displayedAnswer(question)}` }}
+            <CheckCircle2 :size="15" style="vertical-align:-2px" /> {{ question.is_correct ? '回答正确' : '回答错误' }}
           </div>
         </div>
       </section>

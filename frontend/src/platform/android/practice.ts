@@ -398,7 +398,9 @@ export async function getSession(sessionId: number): Promise<JsonRecord> {
     const unit = await serializeUnit(unitId, {
       shuffleOptions: Boolean(session.shuffle_options),
       answerOrders,
-      includeAnswers: session.status === 'submitted',
+      // Correct answers remain in the local database. Submitted practice
+      // sessions expose only the user's selection and whether it was correct.
+      includeAnswers: false,
       onlyQuestionIds: session.mode === 'wrong' ? onlyByUnit.get(unitId) : undefined,
     })
     const unitSubmission = unitSubmissions.get(unitId)
@@ -407,11 +409,6 @@ export async function getSession(sessionId: number): Promise<JsonRecord> {
       question.user_answer = answer?.user_answer || ''
       if ((session.status === 'submitted' || unitSubmission) && answer) {
         question.is_correct = Boolean(answer.is_correct)
-        const answerRow = await row<{ answer: string }>(
-          'SELECT answer FROM questions WHERE id = ?',
-          [question.id],
-        )
-        question.answer = answerRow?.answer || ''
       }
     }
     const submitted = Boolean(unitSubmission || session.status === 'submitted')
