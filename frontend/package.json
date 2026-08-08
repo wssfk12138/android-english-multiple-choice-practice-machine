@@ -1,0 +1,47 @@
+{
+  "name": "english-multiple-choice-practice-machine-android",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Android 本地英语选择题训练、错题复习、单词记忆与 AI 学习辅助应用",
+  "author": "往事随风k",
+  "license": "GPL-3.0-only",
+  "packageManager": "pnpm@11.9.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
+    "test:diagnostics": "node --experimental-strip-types tests/serial-queue.mjs",
+    "test:vocabulary-exit-flow": "node tests/vocabulary-exit-flow.mjs",
+    "test:database-migration": "node tests/database-migration.mjs",
+    "test:esq-compatibility": "node --experimental-strip-types tests/esq-1.1-import.mjs",
+    "preview": "vite preview",
+    "cap:sync": "pnpm build && cap sync",
+    "cap:copy": "pnpm build && cap copy",
+    "android:open": "pnpm cap:sync && cap open android",
+    "android:run": "pnpm cap:sync && cap run android"
+  },
+  "dependencies": {
+    "@capacitor-community/sqlite": "8.1.0",
+    "@capacitor/android": "8.5.0",
+    "@capacitor/app": "8.0.1",
+    "@capacitor/core": "8.5.0",
+    "@capacitor/filesystem": "8.1.2",
+    "@capacitor/network": "8.0.1",
+    "@capacitor/preferences": "8.0.1",
+    "@formkit/auto-animate": "^0.9.0",
+    "dompurify": "^3.4.13",
+    "jszip": "3.10.1",
+    "lucide-vue-next": "^0.468.0",
+    "marked": "^18.0.9",
+    "vue": "^3.5.13",
+    "vue-draggable-next": "^2.2.1",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vue-tsc": "^2.2.0"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "paperKey": "org.example.english.demo.2026",
+  "labelVersion": "1.0",
+  "labels": {
+    "org.example.english.demo.2026.q01": {
+      "questionContentHash": "51e61a5a8c8527b5000f6bc6b0b05ba275a8b7f6b39b492236655abe35ac6a33",
+      "primarySkill": "细节理解",
+      "secondarySkills": [
+        "信息定位"
+      ],
+      "trapTypes": [],
+      "attentionPoints": [
+        "定位第一段第二句中的直接信息"
+      ],
+      "vocabularyDemand": "low",
+      "contextDependency": "medium",
+      "grammarDependency": "low",
+      "confidence": 0.95,
+      "source": "demo",
+      "reviewStatus": "unreviewed"
+    }
+  }
+}

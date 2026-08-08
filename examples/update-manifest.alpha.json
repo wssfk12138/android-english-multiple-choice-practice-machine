@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "channel": "alpha",
+  "versionName": "0.1.0-alpha.3",
+  "versionCode": 3,
+  "apkUrl": "https://example.com/english-practice-machine-android-alpha-3.apk",
+  "apkSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "releaseNotes": "Replace this example with the actual APK URL, hash, and release notes."
+}

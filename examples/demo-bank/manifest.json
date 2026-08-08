@@ -1,0 +1,37 @@
+{
+  "format": "esq",
+  "schemaVersion": "1.0",
+  "packageId": "org.example.english.demo",
+  "contentVersion": "1.0.0",
+  "title": "英语刷题机 ESQ 演示题库",
+  "subject": "英语演示题",
+  "language": "en",
+  "locale": "zh-CN",
+  "publisher": "英语刷题机项目",
+  "license": {
+    "spdx": "CC0-1.0",
+    "notice": "演示内容为项目自建文本，可自由用于格式测试。"
+  },
+  "source": {
+    "type": "demo",
+    "description": "用于测试 ESQ 1.0 导入和导出的自建演示题。"
+  },
+  "papers": [
+    {
+      "paperKey": "org.example.english.demo.2026",
+      "year": 2026,
+      "path": "papers/2026.json",
+      "answerPath": "answers/2026.json",
+      "labelPath": "labels/2026.json"
+    }
+  ],
+  "features": {
+    "hasAnswers": true,
+    "hasAiLabels": true,
+    "hasAssets": false
+  },
+  "generator": {
+    "name": "英语刷题机",
+    "version": "0.1.0"
+  }
+}
