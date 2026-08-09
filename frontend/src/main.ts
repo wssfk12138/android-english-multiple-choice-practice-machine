@@ -16,7 +16,6 @@ async function runAndroidStartupPreparation() {
     const { purgeExpiredTrash } = await import('./platform/android/question-bank-profiles')
     await purgeExpiredTrash()
     const bundledEnabled = import.meta.env.VITE_BUNDLED_QUESTION_BANKS !== '0'
-      && import.meta.env.VITE_BUNDLED_QUESTION_BANK !== '0'
     if (bundledEnabled) {
       const { installBundledQuestionBanks } = await import('./platform/android/question-bank')
       await installBundledQuestionBanks()
