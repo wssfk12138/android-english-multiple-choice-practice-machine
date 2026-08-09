@@ -34,7 +34,7 @@
    - `corepack.cmd pnpm run build`
    - `corepack.cmd pnpm exec cap sync android`
    - `frontend\android\gradlew.bat assembleDebug`
-4. 有真机时，再执行与改动相关的荣耀平板核心交互验证。
+4. 有真机时，再执行与改动相关的平板/手机核心交互验证。
 5. 发布前检查应用 ID、签名证书、递增的 `versionCode`、APK SHA-256 和更新清单。
 
 ## 常用命令
@@ -48,4 +48,4 @@
 - 远程题库支持目录检查、ESQ 下载、SHA-256 校验与导入预览；仍需用户确认冲突处理后发布。
 - ESQ 多媒体资产尚未落盘。
 - Word/PDF 解析和智能标注在 Android 本机执行，模型密钥仍只由 SecureStore 提供。
-- 尚未完成荣耀平板 9 真机验收。
+- 尚未完成实体设备真机验收。

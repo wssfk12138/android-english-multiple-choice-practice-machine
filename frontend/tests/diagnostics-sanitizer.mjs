@@ -14,8 +14,8 @@ const samples = [
     forbidden: ['private-token', '#section'],
   },
   {
-    raw: 'C:\\Users\\MEC\\Documents\\private\\paper.esq',
-    forbidden: ['Users\\MEC', 'Documents\\private'],
+    raw: 'C:\\Users\\example\\Documents\\private\\paper.esq',
+    forbidden: ['Users\\example', 'Documents\\private'],
   },
   {
     raw: '/storage/emulated/0/Download/private.esq',
