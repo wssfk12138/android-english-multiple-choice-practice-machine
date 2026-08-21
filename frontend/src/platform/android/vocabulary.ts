@@ -1,7 +1,5 @@
 import { row, rows, run } from './database'
 import { LocalApiError } from './errors'
-import { tombstoneVocabularyEntry } from './lan-sync'
-import { notifyLocalChange } from './sync-scheduler'
 
 type JsonRecord = Record<string, any>
 
@@ -201,7 +199,6 @@ export async function addVocabulary(body: JsonRecord): Promise<JsonRecord> {
     ],
   )
   const entry = await serializeEntry(id)
-  notifyLocalChange()
   return {
     entry_id: id,
     is_new: isNew,
@@ -292,14 +289,11 @@ export async function updateVocabulary(id: number, body: JsonRecord): Promise<Js
     values.push(id)
     await run(`UPDATE vocabulary_entries SET ${assignments.join(', ')} WHERE id = ?`, values)
   }
-  notifyLocalChange()
   return serializeEntry(id)
 }
 
 export async function deleteVocabulary(id: number): Promise<{ ok: true }> {
-  await tombstoneVocabularyEntry(id)
   await run('DELETE FROM vocabulary_entries WHERE id = ?', [id])
-  notifyLocalChange()
   return { ok: true }
 }
 
@@ -339,7 +333,6 @@ export async function reviewVocabulary(id: number, rating: string, mode = 'sched
     "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at) VALUES (?, ?, 'scheduled', ?)",
     [id, rating, next],
   )
-  notifyLocalChange()
   return serializeEntry(id)
 }
 

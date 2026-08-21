@@ -4,8 +4,6 @@ import { Directory, Filesystem } from '@capacitor/filesystem'
 import { row, rows, run, transaction } from './database'
 import { incompleteSubmission, LocalApiError } from './errors'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
-import { tombstoneWrongUnit } from './lan-sync'
-import { notifyLocalChange } from './sync-scheduler'
 
 type JsonRecord = Record<string, any>
 type TransactionDb = Pick<SQLiteDBConnection, 'query' | 'run'>
@@ -767,7 +765,6 @@ export async function submitUnit(sessionId: number, unitId: number): Promise<Jso
       false,
     )
   })
-  notifyLocalChange()
   return getSession(sessionId)
 }
 
@@ -828,7 +825,6 @@ export async function submitSession(sessionId: number): Promise<JsonRecord> {
       false,
     )
   })
-  notifyLocalChange()
   return getSession(sessionId)
 }
 
@@ -972,9 +968,6 @@ export async function archiveWrongUnits(unitIds: number[]): Promise<JsonRecord> 
   const batchId = `wrong-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
   const purgeAfter = new Date(Date.now() + 7 * 86400000).toISOString()
   let archived = 0
-  for (const id of ids) {
-    await tombstoneWrongUnit(id)
-  }
   await transaction(async db => {
     for (const unitId of ids) {
       const unitResult = await db.query(
@@ -1007,6 +1000,5 @@ export async function archiveWrongUnits(unitIds: number[]): Promise<JsonRecord> 
       archived += 1
     }
   })
-  notifyLocalChange()
   return { archived, batch_id: batchId }
 }

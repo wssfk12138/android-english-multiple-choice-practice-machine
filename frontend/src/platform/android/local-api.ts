@@ -4,7 +4,6 @@ import { archiveWrongUnits, createSession, dashboard, getSession, listWrong, sav
 import { createEsqImport, listEsqImports, listPapers, publishEsqImport, readEsqImport } from './question-bank'
 import { addVocabulary, deleteVocabulary, homeVocabulary, listVocabulary, reviewVocabulary, retryVocabulary, serializeEntry, updateVocabulary } from './vocabulary'
 import { checkAppUpdate, checkQuestionBankCatalog, downloadQuestionBankPackage, installAppUpdate, readUpdateSettings, updateSettings } from './app-update'
-import { lanSyncStatus, runLanSync, updateLanSyncSettings } from './lan-sync'
 import {
   createDocumentImport,
   listDocumentImports,
@@ -238,15 +237,6 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   }
   if (pathname === '/android/updates/question-banks/download' && method === 'POST') {
     return await downloadQuestionBankPackage(body || {}) as T
-  }
-  if (pathname === '/android/lan-sync/status' && method === 'GET') {
-    return await lanSyncStatus() as T
-  }
-  if (pathname === '/android/lan-sync/settings' && method === 'PUT') {
-    return await updateLanSyncSettings(body || {}) as T
-  }
-  if (pathname === '/android/lan-sync/run' && method === 'POST') {
-    return await runLanSync() as T
   }
   if (pathname === '/android/diagnostics/settings' && method === 'GET') {
     return await readUpdateSettings() as T

@@ -152,10 +152,6 @@ onMounted(async () => {
     } catch (cause) {
       console.warn('Unable to inspect downloaded update package:', String(cause))
     }
-    // 打开应用时自动同步（需在“更新与远程题库 → 局域网同步”中开启）。
-    void import('./platform/android/sync-scheduler').then(({ startAutoSync }) => {
-      startAutoSync()
-    })
   }
   window.addEventListener('keydown', handleInstallerCleanupKeydown)
 })
