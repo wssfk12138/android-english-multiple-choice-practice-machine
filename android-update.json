@@ -4,6 +4,6 @@
   "versionName": "0.1.0-beta.2",
   "versionCode": 101,
   "apkUrl": "https://github.com/wssfk12138/android-english-multiple-choice-practice-machine/releases/download/v0.1.0-beta.2/english-practice-machine-android-0.1.0-beta.2.apk",
-  "apkSha256": "2ada1a5e4ce6a96923dd94b272ebc2ccf84fdf90e00916ecc9ed545f644b692f",
+  "apkSha256": "8354769bb22756bc9aba038ff55390dc51a7d532773d9d903996d82441e9fc55",
   "releaseNotes": "修复华为 MatePad/HarmonyOS WebView 横竖屏状态分裂：统一方向检测、旋转后路由归一化、导航互斥、答题双栏兜底和设置图标尺寸。"
 }

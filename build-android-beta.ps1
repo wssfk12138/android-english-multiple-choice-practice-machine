@@ -14,8 +14,6 @@ $DesktopDirectory = (Resolve-Path -LiteralPath $DesktopDirectory).Path
 $frontendRoot = Join-Path $projectRoot 'frontend'
 $androidRoot = Join-Path $frontendRoot 'android'
 $signingProperties = Join-Path $androidRoot 'signing.properties'
-$englishOneSource = Join-Path $projectRoot 'work\internal-channel\postgraduate-english-one-2010-2026-v1.0.0.esq'
-$englishTwoSource = Join-Path $projectRoot 'work\internal-channel\postgraduate-english-two-2010-2025-v1.1.1.esq'
 $englishOneTarget = Join-Path $frontendRoot 'public\internal-question-bank.esq'
 $englishTwoTarget = Join-Path $frontendRoot 'public\internal-question-bank-english-two.esq'
 $apk = Join-Path $androidRoot 'app\build\outputs\apk\release\app-release.apk'
@@ -23,8 +21,8 @@ $apk = Join-Path $androidRoot 'app\build\outputs\apk\release\app-release.apk'
 if ($VersionCode -lt 1) { throw 'VersionCode must be a positive integer.' }
 if ([string]::IsNullOrWhiteSpace($VersionName)) { throw 'VersionName cannot be empty.' }
 if (-not (Test-Path -LiteralPath $signingProperties)) { throw "Fixed signing is not configured: $signingProperties" }
-foreach ($source in @($englishOneSource, $englishTwoSource)) {
-    if (-not (Test-Path -LiteralPath $source)) { throw "Bundled ESQ seed is missing: $source" }
+foreach ($bank in @($englishOneTarget, $englishTwoTarget)) {
+    if (-not (Test-Path -LiteralPath $bank)) { throw "Bundled public ESQ is missing: $bank" }
 }
 
 $sdkRoot = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
@@ -56,8 +54,6 @@ function Invoke-Checked([scriptblock]$Command, [string]$Description) {
 }
 
 try {
-    Copy-Item -LiteralPath $englishOneSource -Destination $englishOneTarget -Force
-    Copy-Item -LiteralPath $englishTwoSource -Destination $englishTwoTarget -Force
     Push-Location $frontendRoot
     try {
         Invoke-Checked { corepack.cmd pnpm run build } 'Frontend build'
@@ -68,7 +64,6 @@ try {
         Invoke-Checked { .\gradlew.bat assembleRelease "-PappVersionCode=$VersionCode" "-PappVersionName=$VersionName" } 'Gradle release build'
     } finally { Pop-Location }
 } finally {
-    Remove-Item -LiteralPath $englishOneTarget, $englishTwoTarget -Force -ErrorAction SilentlyContinue
     $env:VITE_BUNDLED_QUESTION_BANK = $previousBank
     $env:VITE_BUNDLED_QUESTION_BANKS = $previousBanks
 }
