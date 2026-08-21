@@ -337,24 +337,7 @@ onBeforeUnmount(() => {
             >
               <PanelLeftOpen :size="19" />
             </button>
-            <span class="ai-assistant-icon"><Bot :size="19" /></span>
-            <span><strong>{{ conversationId ? '继续对话' : '新的学习对话' }}</strong><small>回答由所选 AI 模型生成</small></span>
-          </div>
-          <div class="ai-model-control">
-            <label for="assistant-model">当前模型</label>
-            <select
-              id="assistant-model"
-              v-model="selectedModel"
-              :disabled="!models.length || loading"
-              aria-label="切换对话模型"
-            >
-              <option v-if="!models.length" value="">暂无可用模型</option>
-              <optgroup v-for="group in groupedModels" :key="group.name" :label="group.name">
-                <option v-for="model in group.items" :key="modelValue(model)" :value="modelValue(model)">
-                  {{ model.display_name || model.model_id }}
-                </option>
-              </optgroup>
-            </select>
+            <span><strong>{{ conversationId ? '继续对话' : '新的学习对话' }}</strong></span>
           </div>
         </header>
 
@@ -400,8 +383,23 @@ onBeforeUnmount(() => {
             aria-label="向 AI 学习助手提问"
             @keydown="handleInputKey"
           />
-          <div>
-            <small>{{ activeModel ? `${activeModel.profile_name} / ${activeModel.display_name || activeModel.model_id}` : '尚未选择模型' }}</small>
+          <div class="ai-composer-actions">
+            <div class="ai-model-control">
+              <label class="sr-only" for="assistant-model">对话模型</label>
+              <select
+                id="assistant-model"
+                v-model="selectedModel"
+                :disabled="!models.length || loading"
+                aria-label="切换对话模型"
+              >
+                <option v-if="!models.length" value="">暂无可用模型</option>
+                <optgroup v-for="group in groupedModels" :key="group.name" :label="group.name">
+                  <option v-for="model in group.items" :key="modelValue(model)" :value="modelValue(model)">
+                    {{ model.display_name || model.model_id }}
+                  </option>
+                </optgroup>
+              </select>
+            </div>
             <button
               v-if="loading"
               class="ai-send-button stop"

@@ -77,6 +77,10 @@ const isMatchingPartB = computed(() => isPartB.value && activeUnit.value?.subtyp
 const isOrdering = computed(() => activeUnit.value?.subtype === 'paragraph_reordering')
 const isListening = computed(() => activeUnit.value?.unit_type === 'listening')
 const candidateOptions = computed(() => activeUnit.value?.questions?.[0]?.options || [])
+const orderingFixedSlots = computed(() => {
+  const slots = activeUnit.value?.shared_data?.fixed_slots
+  return Array.isArray(slots) ? slots : []
+})
 const timerElapsedMs = computed(() => {
   const state = timerState.value
   if (!state) return 0
@@ -194,7 +198,7 @@ function timerStorageKey(sessionId: number) {
 
 function isAndroidPortrait() {
   return document.documentElement.dataset.platform === 'android'
-    && window.matchMedia('(orientation: portrait) and (max-width: 840px)').matches
+    && document.documentElement.dataset.orientation === 'portrait'
 }
 
 function clampPortraitPaneRatio(value: number) {
@@ -447,12 +451,20 @@ function startTimedPractice() {
   }
   timerPromptVisible.value = false
   persistTimer()
+  resetPracticeScroll()
 }
 
 function startWithoutTimer() {
   timerState.value = { mode: 'off', elapsedMs: 0, startedAt: null }
   timerPromptVisible.value = false
   persistTimer()
+  resetPracticeScroll()
+}
+
+function resetPracticeScroll() {
+  ;(document.activeElement as HTMLElement | null)?.blur?.()
+  window.scrollTo(0, 0)
+  document.documentElement.scrollTop = 0
 }
 
 function pauseTimer() {
@@ -939,6 +951,20 @@ async function copySelectedTerm() {
       <section class="question-pane">
         <div v-if="isOrdering" class="ordering-board">
           <div class="ordering-section-heading"><span>选择答案</span><small>{{ activeUnit.questions.filter((question: any) => question.user_answer).length }} / {{ activeUnit.questions.length }} 已完成</small></div>
+          <div
+            v-if="orderingFixedSlots.length"
+            class="ordering-fixed-slots"
+            aria-label="原题固定段落位置"
+          >
+            <span class="ordering-fixed-caption">原题固定位置</span>
+            <div class="ordering-fixed-chain">
+              <template v-for="(slot, index) in orderingFixedSlots" :key="`${slot.type}-${slot.number ?? slot.label}-${index}`">
+                <strong v-if="slot.type === 'question'" class="ordering-fixed-question">{{ slot.number }}</strong>
+                <span v-else class="ordering-fixed-label">{{ slot.label }}</span>
+                <span v-if="index < orderingFixedSlots.length - 1" class="ordering-slot-arrow" aria-hidden="true">→</span>
+              </template>
+            </div>
+          </div>
           <div class="ordering-answer-list">
             <div v-for="question in activeUnit.questions" :key="question.id" class="ordering-answer-row" :class="{'unanswered-focus': highlightedQuestionId === question.id}" :data-question-id="question.id">
               <strong>{{ question.number }}.</strong>
@@ -1177,8 +1203,8 @@ async function copySelectedTerm() {
         </template>
       </div>
     </section>
-    <section v-if="timerPromptVisible" class="timer-overlay" role="dialog" aria-modal="true" aria-labelledby="timer-choice-title">
-      <div class="timer-dialog card">
+    <section v-if="timerPromptVisible" class="timer-overlay" role="dialog" aria-modal="true" aria-labelledby="timer-choice-title" @click.self.prevent>
+      <div class="timer-dialog card" @click.stop>
         <span class="timer-dialog-icon"><Clock3 :size="30" /></span>
         <span class="eyebrow">FOCUS TIMER</span>
         <h2 id="timer-choice-title">这次练习要计时吗？</h2>
@@ -1192,8 +1218,8 @@ async function copySelectedTerm() {
         <small>本次选择只对当前练习生效。</small>
       </div>
     </section>
-    <section v-if="timerState?.mode === 'paused' && session?.status === 'active'" class="timer-overlay timer-pause-overlay" role="dialog" aria-modal="true" aria-labelledby="timer-pause-title">
-      <div class="timer-dialog pause-dialog card">
+    <section v-if="timerState?.mode === 'paused' && session?.status === 'active'" class="timer-overlay timer-pause-overlay" role="dialog" aria-modal="true" aria-labelledby="timer-pause-title" @click.self.prevent>
+      <div class="timer-dialog pause-dialog card" @click.stop>
         <span class="timer-dialog-icon rest"><Coffee :size="30" /></span>
         <span class="eyebrow">TAKE A BREATH</span>
         <h2 id="timer-pause-title">计时已暂停</h2>

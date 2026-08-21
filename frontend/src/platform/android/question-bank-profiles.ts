@@ -446,6 +446,49 @@ export async function restoreTrash(id: number, body: JsonRecord = {}): Promise<J
           'UPDATE esq_import_jobs SET profile_id = ?, deleted_at = NULL, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
           [profileId, previousStatus, item.resource_id], false,
         )
+      } else if (item.resource_type === 'wrong_archive') {
+        for (const retryRound of metadata.rounds || []) {
+          await db.run(
+            `INSERT OR REPLACE INTO wrong_retry_rounds
+              (id, unit_id, session_id, round_number, question_count,
+               correct_count, wrong_count, submitted_at, deleted_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              retryRound.id, retryRound.unit_id, retryRound.session_id,
+              retryRound.round_number, retryRound.question_count,
+              retryRound.correct_count, retryRound.wrong_count,
+              retryRound.submitted_at, retryRound.deleted_at,
+            ], false,
+          )
+        }
+        for (const question of metadata.round_questions || []) {
+          await db.run(
+            `INSERT OR REPLACE INTO wrong_retry_round_questions
+              (round_id, question_id, user_answer, is_correct)
+             VALUES (?, ?, ?, ?)`,
+            [question.round_id, question.question_id, question.user_answer || '', question.is_correct || 0],
+            false,
+          )
+        }
+        for (const question of metadata.current || []) {
+          await db.run(
+            `INSERT OR REPLACE INTO wrong_current_questions
+              (unit_id, question_id, since_round_id, deleted_at)
+             VALUES (?, ?, ?, ?)`,
+            [question.unit_id, question.question_id, question.since_round_id, question.deleted_at],
+            false,
+          )
+        }
+        if (metadata.state) {
+          const state = metadata.state
+          await db.run(
+            `INSERT OR REPLACE INTO wrong_analysis_states
+              (unit_id, report_id, analyzed_session_id, analyzed_at)
+             VALUES (?, ?, ?, ?)`,
+            [state.unit_id, state.report_id, state.analyzed_session_id || 0, state.analyzed_at],
+            false,
+          )
+        }
       }
     }
     await db.run(

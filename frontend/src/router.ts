@@ -11,6 +11,7 @@ import TrashView from './views/TrashView.vue'
 import AndroidUpdatesView from './views/AndroidUpdatesView.vue'
 import NotesHubView from './views/NotesHubView.vue'
 import MobileSettingsView from './views/MobileSettingsView.vue'
+import HelpView from './views/HelpView.vue'
 
 export default createRouter({
   history: createWebHistory(),
@@ -27,5 +28,6 @@ export default createRouter({
     { path: '/android-updates', component: AndroidUpdatesView },
     { path: '/notes', component: NotesHubView },
     { path: '/mobile-settings', component: MobileSettingsView },
+    { path: '/help', component: HelpView },
   ],
 })

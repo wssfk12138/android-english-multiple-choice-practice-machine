@@ -10,7 +10,7 @@ import {
   Server,
   Trash2,
 } from 'lucide-vue-next'
-import { onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { get, post, put } from '../api'
 import {
@@ -29,6 +29,20 @@ const settings = reactive({
   question_bank_catalog_url: '',
   diagnostic_receiver_url: '',
 })
+const lanSync = reactive({
+  configured: false,
+  host: '',
+  passcode: '',
+  auto: false,
+  tables: [] as string[],
+})
+const syncResult = ref<any>(null)
+const syncStatus = reactive({
+  online: true,
+  lastSyncAt: '',
+  running: false,
+})
+let unsubscribeSync: (() => void) | null = null
 const appUpdate = ref<any>(null)
 const questionBankCatalog = ref<any>(null)
 const diagnosticLogs = ref<DiagnosticLogEntry[]>([])
@@ -53,9 +67,46 @@ async function load() {
   } catch (cause) {
     error.value = String(cause)
   }
+  try {
+    Object.assign(lanSync, await get('/android/lan-sync/status'))
+  } catch (cause) {
+    lanSync.configured = false
+  }
   await refreshLogs()
   if (!settings.diagnostic_receiver_url) {
     settings.diagnostic_receiver_url = await readDiagnosticReceiverUrl()
+  }
+}
+
+async function saveLanSync() {
+  busy.value = 'lan-sync-save'; error.value = ''
+  try {
+    Object.assign(lanSync, await put('/android/lan-sync/settings', {
+      lan_sync_host: lanSync.host,
+      lan_sync_passcode: lanSync.passcode,
+      lan_sync_auto: lanSync.auto ? '1' : '0',
+    }))
+    notice.value = lanSync.configured ? '局域网同步设置已保存' : '请填写电脑端地址与同步口令'
+  } catch (cause) {
+    error.value = String(cause)
+  } finally {
+    busy.value = ''
+  }
+}
+
+async function runSync() {
+  busy.value = 'lan-sync-run'; error.value = ''
+  syncResult.value = null
+  try {
+    syncResult.value = await post('/android/lan-sync/run')
+    syncStatus.lastSyncAt = syncResult.value?.last_sync_at || new Date().toISOString()
+    const pulled = Object.entries<number>(syncResult.value.pulled || {}).filter(([, count]) => count > 0)
+    const pushed = Object.entries<number>(syncResult.value.pushed || {}).filter(([, count]) => count > 0)
+    notice.value = `同步完成：拉取 ${pulled.length} 类、推送 ${pushed.length} 类数据`
+  } catch (cause) {
+    error.value = String(cause)
+  } finally {
+    busy.value = ''
   }
 }
 
@@ -137,6 +188,16 @@ function formatLogTime(value: string) {
   }).format(new Date(value))
 }
 
+function formatSyncTime(value: string) {
+  if (!value) return ''
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
 async function copyLogs() {
   error.value = ''
   try {
@@ -183,7 +244,18 @@ async function clearLogs() {
   notice.value = '诊断日志已清空'
 }
 
-onMounted(load)
+async function mountSyncStatus() {
+  const { syncState, subscribeSync } = await import('../platform/android/sync-scheduler')
+  Object.assign(syncStatus, syncState())
+  unsubscribeSync = subscribeSync(state => Object.assign(syncStatus, state))
+}
+
+onMounted(() => {
+  load()
+  mountSyncStatus()
+})
+
+onBeforeUnmount(() => unsubscribeSync?.())
 </script>
 
 <template>
@@ -201,23 +273,38 @@ onMounted(load)
     <section class="card update-source-card">
       <div class="update-source-heading">
         <span class="api-profile-icon"><Server :size="20" /></span>
-        <div><h2>更新源</h2><p class="lead">正式版建议使用 GitHub Releases 的 HTTPS 清单；局域网地址主要用于调试。</p></div>
+        <div><h2>局域网同步</h2><p class="lead">电脑作为同步主机，手机连接电脑所在局域网即可双向同步做题记录、错题本和单词本。同步仅在局域网内进行。</p></div>
       </div>
       <div class="field">
-        <label for="app-update-url">程序更新清单 URL</label>
-        <input id="app-update-url" v-model.trim="settings.app_update_manifest_url" inputmode="url" placeholder="https://.../update.json">
+        <label for="lan-sync-host">电脑端地址</label>
+        <input id="lan-sync-host" v-model.trim="lanSync.host" inputmode="url" placeholder="http://电脑IP:端口">
       </div>
       <div class="field">
-        <label for="bank-update-url">远程题库目录 URL（可留空）</label>
-        <input id="bank-update-url" v-model.trim="settings.question_bank_catalog_url" inputmode="url" placeholder="https://.../catalog.json">
+        <label for="lan-sync-passcode">同步口令</label>
+        <input id="lan-sync-passcode" v-model.trim="lanSync.passcode" inputmode="text" placeholder="电脑端“局域网同步主机”生成的口令">
       </div>
-      <div class="field">
-        <label for="diagnostic-receiver-url">诊断日志接收端 URL（可留空）</label>
-        <input id="diagnostic-receiver-url" v-model.trim="settings.diagnostic_receiver_url" inputmode="url" placeholder="http://电脑IP:8877/diagnostics">
-        <small class="lead">填写开发端提供的接收地址后，可直接 POST 脱敏 JSON；不填写时仍可使用系统分享。</small>
+      <label class="check-row" style="display:flex;align-items:center;gap:8px;margin:8px 0">
+        <input v-model="lanSync.auto" type="checkbox">
+        <span>打开应用时自动同步</span>
+      </label>
+      <div class="update-source-actions" style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="button" type="button" :disabled="busy === 'lan-sync-run'" @click="runSync">
+          <RefreshCw :size="16" />{{ busy === 'lan-sync-run' ? '同步中…' : '立即同步' }}
+        </button>
+        <button class="button secondary" type="button" :disabled="busy === 'lan-sync-save'" @click="saveLanSync">
+          <Save :size="16" />保存设置
+        </button>
       </div>
-      <button class="button" type="button" :disabled="busy === 'save'" @click="save"><Save :size="16" />保存更新源</button>
+      <p class="lead" style="margin-top:10px">
+        {{ syncStatus.running ? '● 同步中' : (syncStatus.online ? '● 在线' : '○ 离线') }}
+        <span v-if="syncStatus.lastSyncAt"> · 上次同步 {{ formatSyncTime(syncStatus.lastSyncAt) }}</span>
+      </p>
+      <p v-if="syncResult" class="lead" style="margin-top:10px">
+        上次同步：拉取 {{ JSON.stringify(syncResult.pulled || {}) }}，推送 {{ JSON.stringify(syncResult.pushed || {}) }}
+      </p>
     </section>
+
+    
 
     <div class="grid grid-2 update-check-grid">
       <section class="card">

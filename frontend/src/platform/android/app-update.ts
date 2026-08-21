@@ -9,9 +9,11 @@ import { createEsqImportFromBytes } from './question-bank'
 type JsonRecord = Record<string, any>
 
 const BUILD_DEFAULTS: Record<string, string> = {
-  app_update_manifest_url: String(import.meta.env.VITE_APP_UPDATE_MANIFEST_URL || '').trim(),
-  question_bank_catalog_url: String(import.meta.env.VITE_QUESTION_BANK_CATALOG_URL || '').trim(),
-  diagnostic_receiver_url: String(import.meta.env.VITE_DIAGNOSTIC_RECEIVER_URL || '').trim(),
+  // Public builds read the signed release manifest from GitHub. Internal
+  // builds may override these values at build time or in local settings.
+  app_update_manifest_url: 'https://raw.githubusercontent.com/wssfk12138/android-english-multiple-choice-practice-machine/main/android-update.json',
+  question_bank_catalog_url: '',
+  diagnostic_receiver_url: '',
 }
 
 interface AppUpdaterPlugin {
@@ -39,16 +41,13 @@ export interface PendingInstallerCleanup {
 const NativeAppUpdater = registerPlugin<AppUpdaterPlugin>('AppUpdater')
 
 async function setting(key: string): Promise<string> {
+  const defaultValue = BUILD_DEFAULTS[key] || ''
+  if (defaultValue) return defaultValue
   const existing = await row<{ value: string }>(
     'SELECT value FROM app_settings WHERE key = ?',
     [key],
   )
-  if (existing) return existing.value || ''
-  const defaultValue = BUILD_DEFAULTS[key] || ''
-  if (defaultValue) {
-    await run('INSERT OR IGNORE INTO app_settings(key, value) VALUES (?, ?)', [key, defaultValue])
-  }
-  return defaultValue
+  return existing?.value || ''
 }
 
 export async function updateSettings(body: JsonRecord): Promise<JsonRecord> {

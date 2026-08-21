@@ -1,9 +1,10 @@
 import { analyzeWrongQuestions, analyzeWrongStatus, createProfile, createConversation, deleteConversation, deleteProfile, listConversations, listProfiles, selectorModels, sendChat, setAllModelVisibility, setModelVisibility, syncModels, testProfile, updateProfile } from './ai'
 import { LocalApiError } from './errors'
-import { createSession, dashboard, getSession, listWrong, saveAnswer, submitSession, submitUnit } from './practice'
+import { archiveWrongUnits, createSession, dashboard, getSession, listWrong, saveAnswer, submitSession, submitUnit } from './practice'
 import { createEsqImport, listEsqImports, listPapers, publishEsqImport, readEsqImport } from './question-bank'
 import { addVocabulary, deleteVocabulary, homeVocabulary, listVocabulary, reviewVocabulary, retryVocabulary, serializeEntry, updateVocabulary } from './vocabulary'
 import { checkAppUpdate, checkQuestionBankCatalog, downloadQuestionBankPackage, installAppUpdate, readUpdateSettings, updateSettings } from './app-update'
+import { lanSyncStatus, runLanSync, updateLanSyncSettings } from './lan-sync'
 import {
   createDocumentImport,
   listDocumentImports,
@@ -59,7 +60,8 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
 
   if (method === 'GET' && pathname === '/startup') return await dashboard() as T
   if (method === 'GET' && pathname === '/papers') return await listPapers() as T
-  if (method === 'GET' && pathname === '/wrong') return await listWrong() as T
+  if (method === 'GET' && pathname === '/wrong') return await listWrong(url.searchParams.get('view') || 'current') as T
+  if (method === 'POST' && pathname === '/wrong/archive-delete') return await archiveWrongUnits(body?.unit_ids || []) as T
   if (method === 'GET' && pathname === '/question-bank-profiles') {
     return await listQuestionBankProfiles() as T
   }
@@ -161,7 +163,7 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
     return await queueAndStartVocabularyTranslations([id]) as T
   }
   params = match(pathname, /^\/vocabulary\/(\d+)\/review$/)
-  if (params && method === 'POST') return await reviewVocabulary(Number(params[1]), body?.rating) as T
+  if (params && method === 'POST') return await reviewVocabulary(Number(params[1]), body?.rating, body?.mode) as T
 
   if (pathname === '/ai/profiles' && method === 'GET') return await listProfiles() as T
   if (pathname === '/ai/profiles' && method === 'POST') return await createProfile(body!) as T
@@ -236,6 +238,15 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   }
   if (pathname === '/android/updates/question-banks/download' && method === 'POST') {
     return await downloadQuestionBankPackage(body || {}) as T
+  }
+  if (pathname === '/android/lan-sync/status' && method === 'GET') {
+    return await lanSyncStatus() as T
+  }
+  if (pathname === '/android/lan-sync/settings' && method === 'PUT') {
+    return await updateLanSyncSettings(body || {}) as T
+  }
+  if (pathname === '/android/lan-sync/run' && method === 'POST') {
+    return await runLanSync() as T
   }
   if (pathname === '/android/diagnostics/settings' && method === 'GET') {
     return await readUpdateSettings() as T

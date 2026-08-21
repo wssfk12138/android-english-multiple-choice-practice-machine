@@ -6,6 +6,8 @@ import {
   CirclePlus,
   Eye,
   EyeOff,
+  BookOpen,
+  ExternalLink,
   KeyRound,
   LibraryBig,
   Lock,
@@ -147,9 +149,6 @@ async function load() {
   try {
     const result = await get<AiProfile[]>('/ai/profiles')
     profiles.value = result.map(profile => ({ ...profile, api_key: '' }))
-    if (!expanded.value.length && profiles.value.length) {
-      expanded.value = [profiles.value[0].id]
-    }
     error.value = ''
   } catch (cause) {
     error.value = String(cause)
@@ -269,7 +268,7 @@ async function createProfile() {
     message.value = `已添加“${created.name}”`
     error.value = ''
     await load()
-    expanded.value = [created.id, ...expanded.value.filter(id => id !== created.id)]
+    expanded.value = expanded.value.filter(id => id !== created.id)
     signalChanged()
   } catch (cause) {
     error.value = String(cause)
@@ -288,6 +287,7 @@ async function saveProfile(profile: AiProfile) {
     message.value = ''
     error.value = ''
     await load()
+    expanded.value = expanded.value.filter(id => id !== profile.id)
     signalChanged()
   } catch (cause) {
     error.value = String(cause)
@@ -627,5 +627,16 @@ onMounted(() => {
         </div>
       </article>
     </div>
+
+    <section class="settings-about card" aria-labelledby="settings-about-title">
+      <div class="settings-about-heading">
+        <span class="api-profile-icon"><BookOpen :size="20" /></span>
+        <div><span class="eyebrow">HELP &amp; FEEDBACK</span><h2 id="settings-about-title">帮助与关于</h2><p>查看离线使用帮助，或提交使用中遇到的问题。</p></div>
+      </div>
+      <div class="settings-about-actions">
+        <RouterLink class="button secondary" to="/help"><BookOpen :size="16" />使用帮助</RouterLink>
+        <a class="button ghost" href="https://xiaoheihe.cn/creator/content_management/detail/187311918" target="_blank" rel="noopener noreferrer"><ExternalLink :size="16" />问题反馈</a>
+      </div>
+    </section>
   </div>
 </template>

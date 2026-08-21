@@ -1,5 +1,7 @@
 import { row, rows, run } from './database'
 import { LocalApiError } from './errors'
+import { tombstoneVocabularyEntry } from './lan-sync'
+import { notifyLocalChange } from './sync-scheduler'
 
 type JsonRecord = Record<string, any>
 
@@ -199,6 +201,7 @@ export async function addVocabulary(body: JsonRecord): Promise<JsonRecord> {
     ],
   )
   const entry = await serializeEntry(id)
+  notifyLocalChange()
   return {
     entry_id: id,
     is_new: isNew,
@@ -217,7 +220,6 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
   else if (status === 'review') {
     conditions.push("(next_review_at IS NULL OR next_review_at <= CURRENT_TIMESTAMP)")
     conditions.push("translation_status = 'ready'")
-    conditions.push("study_status != 'mastered'")
   } else if (status === 'learning') conditions.push("study_status = 'learning'")
   else if (status === 'mastered') conditions.push("study_status = 'mastered'")
   else if (status === 'pending') conditions.push("translation_status != 'ready'")
@@ -243,7 +245,6 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
        COALESCE(SUM(CASE WHEN study_status = 'mastered' THEN 1 ELSE 0 END), 0) AS mastered,
        COALESCE(SUM(CASE WHEN translation_status != 'ready' THEN 1 ELSE 0 END), 0) AS pending,
        COALESCE(SUM(CASE WHEN translation_status = 'ready'
-         AND study_status != 'mastered'
          AND (next_review_at IS NULL OR next_review_at <= CURRENT_TIMESTAMP)
        THEN 1 ELSE 0 END), 0) AS review
      FROM vocabulary_entries`,
@@ -291,11 +292,14 @@ export async function updateVocabulary(id: number, body: JsonRecord): Promise<Js
     values.push(id)
     await run(`UPDATE vocabulary_entries SET ${assignments.join(', ')} WHERE id = ?`, values)
   }
+  notifyLocalChange()
   return serializeEntry(id)
 }
 
 export async function deleteVocabulary(id: number): Promise<{ ok: true }> {
+  await tombstoneVocabularyEntry(id)
   await run('DELETE FROM vocabulary_entries WHERE id = ?', [id])
+  notifyLocalChange()
   return { ok: true }
 }
 
@@ -309,18 +313,33 @@ export async function retryVocabulary(id: number): Promise<{ ok: true }> {
   return { ok: true }
 }
 
-export async function reviewVocabulary(id: number, rating: string): Promise<JsonRecord> {
-  const days = rating === 'again' ? 1 : rating === 'hard' ? 3 : 7
-  const next = new Date(Date.now() + days * 86400000).toISOString()
+export async function reviewVocabulary(id: number, rating: string, mode = 'scheduled'): Promise<JsonRecord> {
+  if (!['again', 'hard', 'know', 'fluent'].includes(rating)) throw new LocalApiError(400, '无效的复习评价')
+  if (!['scheduled', 'reinforcement'].includes(mode)) throw new LocalApiError(400, '无效的复习模式')
+  const entry = await row<{ review_stage: number }>('SELECT review_stage FROM vocabulary_entries WHERE id = ?', [id])
+  if (!entry) throw new LocalApiError(404, '单词不存在')
+  const now = new Date()
+  if (mode === 'reinforcement') {
+    await run(
+      "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at) VALUES (?, ?, 'reinforcement', ?)",
+      [id, rating, now.toISOString()],
+    )
+    return serializeEntry(id)
+  }
+  let stage = Math.max(0, Math.min(7, Number(entry.review_stage || 0)))
+  stage = rating === 'again' ? 0 : rating === 'hard' ? Math.max(0, stage - 1) : rating === 'know' ? Math.min(7, stage + 1) : Math.min(7, stage + 2)
+  const delays = [10 / 1440, 1, 3, 7, 14, 30, 60, 120]
+  const next = new Date(now.getTime() + delays[stage] * 86400000).toISOString()
   await run(
-    `UPDATE vocabulary_entries SET study_status = ?, last_reviewed_at = ?,
-      next_review_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    [rating === 'mastered' ? 'mastered' : 'learning', new Date().toISOString(), next, id],
+    `UPDATE vocabulary_entries SET review_stage = ?, last_result = ?, study_status = ?, lapse_count = lapse_count + ?,
+      last_reviewed_at = ?, next_review_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    [stage, rating, rating === 'fluent' ? 'mastered' : 'learning', rating === 'again' ? 1 : 0, now.toISOString(), next, id],
   )
   await run(
-    'INSERT INTO vocabulary_reviews (entry_id, rating, next_review_at) VALUES (?, ?, ?)',
+    "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at) VALUES (?, ?, 'scheduled', ?)",
     [id, rating, next],
   )
+  notifyLocalChange()
   return serializeEntry(id)
 }
 

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { BookOpenText, Moon, PackageCheck, Sun, Trash2 } from 'lucide-vue-next'
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { App as CapacitorApp } from '@capacitor/app'
 import type { PluginListenerHandle } from '@capacitor/core'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { platformRuntime } from './platform/runtime'
 import { post } from './api'
 import {
@@ -13,22 +13,58 @@ import {
 } from './platform/android/app-update'
 
 const route = useRoute()
-const dark = ref(false)
+const router = useRouter()
+// 初始化时同步读取主题偏好，避免暗色用户在首帧渲染前闪一下浅色（FOUC）。
+const dark = ref(
+  localStorage.getItem('linjian-theme') === 'dark'
+    || (!localStorage.getItem('linjian-theme')
+      && typeof matchMedia !== 'undefined'
+      && matchMedia('(prefers-color-scheme: dark)').matches),
+)
 const installerCleanup = ref<PendingInstallerCleanup | null>(null)
 const installerCleanupBusy = ref(false)
 const installerCleanupError = ref('')
 const retainInstallerButton = ref<HTMLButtonElement | null>(null)
 let appStateListener: PluginListenerHandle | null = null
+function detectPortrait() {
+  // Android WebView can briefly report a stale CSS orientation while a
+  // tablet is rotating. Prefer the native screen orientation, then use the
+  // visual viewport dimensions and only finally fall back to matchMedia.
+  const orientationType = typeof screen !== 'undefined'
+    ? screen.orientation?.type
+    : undefined
+  if (orientationType?.startsWith('portrait')) return true
+  if (orientationType?.startsWith('landscape')) return false
+  const viewport = window.visualViewport
+  const width = viewport?.width || window.innerWidth
+  const height = viewport?.height || window.innerHeight
+  if (width > 0 && height > 0 && Math.abs(width - height) > 24) {
+    return height > width
+  }
+  return window.matchMedia('(orientation: portrait)').matches
+}
+
 function updateWindowMode() {
-  const width = window.innerWidth
-  const portrait = window.matchMedia('(orientation: portrait)').matches
+  const width = window.visualViewport?.width || window.innerWidth
+  const portrait = detectPortrait()
   // Portrait is a dedicated Android information architecture on phones and
   // tablets. Landscape continues to use the existing rail and split panes.
   const androidPortrait = platformRuntime.isAndroid && portrait
   const mode = androidPortrait || width < 600 ? 'compact' : width < 840 ? 'medium' : 'expanded'
   document.documentElement.dataset.windowMode = mode
   document.documentElement.dataset.orientation = portrait ? 'portrait' : 'landscape'
+  // The mobile settings hub is only valid in portrait. Do not leave a tablet
+  // in the phone information architecture after rotation.
+  if (platformRuntime.isAndroid && !portrait && route.path === '/mobile-settings') {
+    void router.replace('/settings')
+  }
 }
+
+watch(() => route.path, () => {
+  if (platformRuntime.isAndroid && document.documentElement.dataset.orientation === 'landscape' && route.path === '/mobile-settings') {
+    void router.replace('/settings')
+  }
+})
 function applyTheme() {
   document.documentElement.classList.toggle('dark', dark.value)
   localStorage.setItem('linjian-theme', dark.value ? 'dark' : 'light')
@@ -85,14 +121,19 @@ onMounted(async () => {
   updateWindowMode()
   window.addEventListener('resize', updateWindowMode, { passive: true })
   window.addEventListener('orientationchange', updateWindowMode, { passive: true })
-  dark.value = localStorage.getItem('linjian-theme') === 'dark'
-    || (!localStorage.getItem('linjian-theme') && matchMedia('(prefers-color-scheme: dark)').matches)
+  window.visualViewport?.addEventListener('resize', updateWindowMode, { passive: true })
+  // HarmonyOS/WebView may deliver the first rotation event before its viewport
+  // has settled. A second pass prevents the two layout systems coexisting.
+  window.setTimeout(updateWindowMode, 120)
+  window.setTimeout(updateWindowMode, 320)
   applyTheme()
   if (platformRuntime.isAndroid) {
     const { resumeVocabularyTranslations } = await import('./platform/android/vocabulary-translation-runner')
     resumeVocabularyTranslations()
     appStateListener = await CapacitorApp.addListener('appStateChange', ({ isActive }) => {
       if (isActive) {
+        updateWindowMode()
+        window.setTimeout(updateWindowMode, 180)
         resumeVocabularyTranslations()
       } else if (route.path.startsWith('/practice')) {
         void post('/vocabulary/translation-runs', {
@@ -111,6 +152,10 @@ onMounted(async () => {
     } catch (cause) {
       console.warn('Unable to inspect downloaded update package:', String(cause))
     }
+    // 打开应用时自动同步（需在“更新与远程题库 → 局域网同步”中开启）。
+    void import('./platform/android/sync-scheduler').then(({ startAutoSync }) => {
+      startAutoSync()
+    })
   }
   window.addEventListener('keydown', handleInstallerCleanupKeydown)
 })
@@ -118,6 +163,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', updateWindowMode)
   window.removeEventListener('orientationchange', updateWindowMode)
+  window.visualViewport?.removeEventListener('resize', updateWindowMode)
   window.removeEventListener('keydown', handleInstallerCleanupKeydown)
   void appStateListener?.remove()
 })

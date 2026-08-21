@@ -4,6 +4,7 @@ import { row, rows, run, transaction } from './database'
 import { extractDocument, type ExtractedDocument } from './document-extractor'
 import { LocalApiError } from './errors'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
+import { extractOrderingFixedSlots } from './ordering-fixed-slots'
 
 type JsonRecord = Record<string, any>
 
@@ -429,6 +430,9 @@ function parsePartB(blocks: string[], answers: Record<string, string>): JsonReco
         : /paragraphs from the list/i.test(direction)
           ? 'paragraph_insertion'
           : 'sentence_insertion'
+  const fixedSlots = subtype === 'paragraph_reordering'
+    ? extractOrderingFixedSlots(direction, section)
+    : []
   const options = Object.entries(candidates).map(([key, content]) => ({ key, content }))
   return {
     unit_type: 'part_b',
@@ -436,7 +440,11 @@ function parsePartB(blocks: string[], answers: Record<string, string>): JsonReco
     title: '阅读 Part B',
     sequence: 6,
     passage: ensureBlanks(material.join('\n\n'), 41, 45),
-    shared_data: { directions: direction, candidates },
+    shared_data: {
+      directions: direction,
+      candidates,
+      ...(fixedSlots.length ? { fixed_slots: fixedSlots } : {}),
+    },
     questions: Array.from({ length: 5 }, (_, index) => {
       const number = 41 + index
       return {

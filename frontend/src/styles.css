@@ -61,6 +61,13 @@ html { min-width: 320px; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background:
   radial-gradient(circle at 80% 5%, rgba(222,235,228,.7), transparent 30%),
   var(--bg); color: var(--ink); }
+:root.dark body {
+  /* 覆盖浅色 radial-gradient：暗色模式下不再残留白色/亮绿色光晕，
+     改为极低透明度的暗色系渐变，保留层次同时避免刺眼光斑。 */
+  background:
+    radial-gradient(circle at 80% 5%, rgba(141, 181, 163, .10), transparent 30%),
+    var(--bg);
+}
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
@@ -111,6 +118,12 @@ h2, h3 { margin: 0; }
 .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 22px; box-shadow: var(--shadow-sm); backdrop-filter: blur(12px); }
+.resume-practice { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; color: var(--ink); cursor: pointer; border-radius: var(--radius-lg); transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+.resume-practice:hover { transform: translateY(-2px); border-color: var(--line-strong); box-shadow: var(--shadow-hover); }
+.resume-icon { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: 13px; color: var(--primary); background: var(--primary-soft); }
+.resume-copy { display: grid; gap: 3px; min-width: 0; }
+.resume-copy small { color: var(--muted); font-size: 12px; }
+.resume-copy strong { font-size: 16px; }
 .action-card { position: relative; min-height: 224px; text-align: left; color: var(--ink); overflow: hidden; transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
 .action-card:hover { transform: translateY(-3px); border-color: var(--line-strong); box-shadow: var(--shadow-hover); }
 .feature-icon { width: 76px; height: 76px; display: grid; place-items: center; border-radius: 22px; margin-bottom: 20px; }
@@ -319,6 +332,13 @@ h2, h3 { margin: 0; }
 .ordering-board { display:grid; gap:14px; }
 .ordering-section-heading { display:flex; align-items:baseline; justify-content:space-between; gap:10px; color:var(--ink); font-weight:700; }
 .ordering-section-heading small { color:var(--muted); font-size:12px; font-weight:500; }
+.ordering-fixed-slots { display:grid; gap:7px; padding:10px 12px; border:1px solid color-mix(in srgb,var(--primary) 18%,var(--line)); border-radius:10px; background:color-mix(in srgb,var(--primary-soft) 48%,var(--surface-solid)); }
+.ordering-fixed-caption { color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.02em; }
+.ordering-fixed-chain { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; color:var(--ink); font-size:14px; line-height:1.5; }
+.ordering-fixed-question,.ordering-fixed-label { display:inline-flex; align-items:center; justify-content:center; min-width:25px; min-height:25px; padding:2px 6px; border-radius:6px; }
+.ordering-fixed-question { color:var(--primary); background:color-mix(in srgb,var(--primary) 10%,var(--surface-solid)); }
+.ordering-fixed-label { color:var(--ink); background:var(--surface-solid); border:1px solid var(--line); }
+.ordering-slot-arrow { color:var(--muted); user-select:none; }
 .ordering-answer-list { display:grid; gap:8px; }
 .ordering-answer-row { display:grid; grid-template-columns:42px minmax(0,1fr); align-items:center; gap:8px 10px; padding:10px 0; border-bottom:1px solid var(--line); }
 .ordering-answer-row>strong { color:var(--primary); font-size:16px; text-align:center; }
@@ -342,6 +362,10 @@ h2, h3 { margin: 0; }
   html[data-platform="android"] .ordering-answer-row { grid-template-columns:38px minmax(0,1fr); gap:7px; padding:8px 0; }
   html[data-platform="android"] .ordering-choice-row { grid-template-columns:repeat(4,minmax(44px,1fr)); gap:7px; }
   html[data-platform="android"] .ordering-choice { min-width:44px; min-height:44px; }
+  html[data-platform="android"] .ordering-fixed-slots { padding:9px 10px; gap:6px; }
+  html[data-platform="android"] .ordering-fixed-chain { font-size:13px; gap:4px; }
+  html[data-platform="android"] .ordering-fixed-question,
+  html[data-platform="android"] .ordering-fixed-label { min-width:24px; min-height:24px; padding:2px 5px; }
 }
 .matching-board { display: grid; gap: 12px; }
 .candidate-bank { display: grid; gap: 9px; margin-bottom: 12px; }
@@ -457,9 +481,11 @@ h2, h3 { margin: 0; }
 .stat-card.linked { transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
 .stat-card.linked:hover { border-color: var(--line-strong); transform: translateY(-2px); box-shadow: var(--shadow); }
 .stat-link { position: absolute; right: 18px; bottom: 16px; display: inline-flex; align-items: center; gap: 4px; color: var(--primary); font-size: 12px; font-weight: 700; }
-.paper-card { transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
+.paper-card { display:flex; flex-direction:column; padding:18px; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
 .paper-card:hover { transform: translateY(-2px); border-color: var(--line-strong); box-shadow: var(--shadow); }
-.paper-year { font-family: "STZhongsong", "Noto Serif SC", Georgia, serif; font-size: 30px; font-weight: 600; margin: 20px 0 6px; }
+.paper-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:20px; margin-bottom:14px; }
+.paper-card .paper-actions { margin-top:auto; padding-top:16px; display:flex; gap:8px; }
+.paper-year { font-family: "STZhongsong", "Noto Serif SC", Georgia, serif; font-size: 30px; font-weight: 600; margin: 14px 0 6px; }
 
 .ai-assistant-page { width:100%; height:100dvh; min-height:650px; padding:34px clamp(24px,3.5vw,54px) 38px; display:flex; flex-direction:column; overflow:hidden; }
 .ai-page-head { flex:0 0 auto; display:flex; align-items:flex-start; justify-content:space-between; gap:24px; margin-bottom:24px; }
@@ -517,7 +543,10 @@ h2, h3 { margin: 0; }
 .ai-composer:focus-within { border-color:var(--primary); box-shadow:0 0 0 3px var(--focus),0 12px 32px rgba(43,59,50,.1); }
 .ai-composer textarea { width:100%; min-height:78px; max-height:210px; padding:6px 8px; resize:vertical; border:0; outline:0; color:var(--ink); background:transparent; font-size:14px; line-height:1.65; }
 .ai-composer>div { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-.ai-composer small { min-width:0; padding-left:7px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:10px; }
+.ai-composer-actions { justify-content:flex-end !important; }
+.ai-composer-actions .ai-model-control { min-width:0; flex:1 1 auto; max-width:320px; }
+.ai-composer-actions .ai-model-control select { width:100%; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 .ai-send-button { width:40px; height:40px; flex:0 0 40px; display:grid; place-items:center; border:0; border-radius:12px; color:white; background:var(--primary); transition:background-color .18s ease,box-shadow .18s ease; }
 .ai-send-button:hover:not(:disabled) { background:var(--primary-hover); box-shadow:0 7px 18px rgba(60,95,79,.2); }
 .ai-send-button:disabled { opacity:.38; cursor:not-allowed; }
@@ -791,6 +820,2917 @@ h2, h3 { margin: 0; }
   html[data-platform="android"] .sidebar { padding-bottom:calc(8px + env(safe-area-inset-bottom)); }
   html[data-platform="android"] .practice-layout { grid-template-columns:1fr; height:auto; }
   html[data-platform="android"] .practice-footer.listening-footer { width:100%; }
+}
+
+/* Final Android portrait polish. Keep this override block last so the
+   narrow-screen information architecture has one predictable source of truth. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] {
+    --android-bottom-nav-height: calc(68px + env(safe-area-inset-bottom));
+    --android-portrait-top: env(safe-area-inset-top);
+  }
+
+  html[data-platform="android"] body {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  html[data-platform="android"] .app-shell {
+    min-height: 100dvh;
+  }
+
+  html[data-platform="android"] .main-content {
+    min-width: 0;
+    overflow-x: clip;
+    padding-bottom: var(--android-bottom-nav-height);
+  }
+
+  html[data-platform="android"] .page {
+    min-width: 0;
+    padding: 18px 14px calc(26px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .page-head {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  html[data-platform="android"] .page-head h1 {
+    min-width: 0;
+    font-size: 27px;
+    line-height: 1.2;
+  }
+
+  html[data-platform="android"] .grid-2,
+  html[data-platform="android"] .grid-3,
+  html[data-platform="android"] .grid-4,
+  html[data-platform="android"] .import-source-grid,
+  html[data-platform="android"] .workspace-grid,
+  html[data-platform="android"] .update-check-grid,
+  html[data-platform="android"] .draft-meta-grid,
+  html[data-platform="android"] .option-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  html[data-platform="android"] .paper-card,
+  html[data-platform="android"] .trash-row {
+    width: 100%;
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .paper-card {
+    padding: 14px;
+  }
+
+  html[data-platform="android"] .trash-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 11px;
+  }
+
+  html[data-platform="android"] .trash-row .button {
+    width: 100%;
+  }
+
+  html[data-platform="android"] .history-panel {
+    position: static;
+  }
+
+  html[data-platform="android"] .diagnostic-detail dl {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  html[data-platform="android"] .diagnostic-detail dt {
+    margin-top: 8px;
+  }
+
+  html[data-platform="android"] .diagnostic-detail dd {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  html[data-platform="android"] .content-block-table {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  html[data-platform="android"] .content-block-table table {
+    min-width: 520px;
+  }
+
+  html[data-platform="android"] .content-block-table td {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .content-block-media img {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+  }
+
+  html[data-platform="android"] .modal-overlay {
+    align-items: flex-start;
+    padding: calc(16px + env(safe-area-inset-top)) 12px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .modal-card {
+    max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .settings-vocab-display-options {
+    grid-template-columns: 1fr;
+  }
+
+  /* Practice: two independently scrollable panes with a touch-friendly divider. */
+  html[data-platform="android"] .practice-page {
+    --compact-practice-footer-height: 0px;
+    height: 100dvh;
+    min-height: 0;
+    padding-top: 0;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  html[data-platform="android"] .portrait-practice-top {
+    flex: none;
+    min-height: calc(76px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+  }
+
+  html[data-platform="android"] .portrait-practice-actions {
+    min-height: 52px;
+    padding: 6px 10px 4px;
+  }
+
+  html[data-platform="android"] .portrait-practice-heading {
+    min-height: 24px;
+    padding-bottom: 6px;
+  }
+
+  html[data-platform="android"] .practice-layout,
+  html[data-platform="android"][data-window-mode="compact"] .practice-layout {
+    height: calc(100dvh - 76px - env(safe-area-inset-top));
+    min-height: 0;
+    grid-template-rows:
+      minmax(0, var(--portrait-passage-size, 50fr))
+      18px
+      minmax(0, var(--portrait-question-size, 50fr));
+    padding-bottom: var(--compact-practice-footer-height, 0px);
+  }
+
+  html[data-platform="android"] .passage-pane,
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .passage-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  html[data-platform="android"] .passage-pane {
+    padding: 20px 16px 28px;
+    border-right: 0;
+    border-bottom: 0;
+  }
+
+  html[data-platform="android"] .question-pane {
+    padding: 16px 12px calc(24px + var(--compact-practice-footer-height, 0px));
+    background: color-mix(in srgb, var(--surface-solid) 55%, transparent);
+    scroll-padding-bottom: calc(24px + var(--compact-practice-footer-height, 0px));
+  }
+
+  html[data-platform="android"] .passage-pane h1 {
+    margin-top: 5px;
+    font-size: 22px;
+    line-height: 1.35;
+  }
+
+  html[data-platform="android"] .passage-pane .lead {
+    margin-bottom: 16px !important;
+    font-size: 14px;
+    line-height: 1.65;
+  }
+
+  html[data-platform="android"] .passage,
+  html[data-platform="android"] .question-card,
+  html[data-platform="android"] .candidate-card,
+  html[data-platform="android"] .candidate-reference {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  html[data-platform="android"] .question-card {
+    margin-bottom: 12px;
+    padding: 13px;
+  }
+
+  html[data-platform="android"] .option {
+    min-height: 44px;
+    padding: 10px 11px;
+    gap: 9px;
+  }
+
+  html[data-platform="android"] .listening-console-pane .listening-player,
+  html[data-platform="android"] .listening-console-pane audio {
+    position: relative;
+    z-index: 1;
+    max-width: 100%;
+  }
+
+  html[data-platform="android"] .portrait-pane-divider {
+    min-height: 18px;
+    touch-action: none;
+  }
+
+  html[data-platform="android"] .practice-footer,
+  html[data-platform="android"] .practice-footer.listening-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer.listening-footer {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    min-height: calc(76px + env(safe-area-inset-bottom));
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    gap: 8px;
+    z-index: 30;
+  }
+
+  html[data-platform="android"] .practice-footer-summary {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  html[data-platform="android"] .practice-submit-actions {
+    min-width: 0;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  html[data-platform="android"] .practice-submit-actions .button {
+    min-height: 42px;
+    min-width: 0;
+    padding: 8px 10px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  html[data-platform="android"] .answer-card-overlay {
+    padding-top: calc(42px + env(safe-area-inset-top));
+  }
+
+  html[data-platform="android"] .answer-card-drawer {
+    max-height: calc(100dvh - 42px - env(safe-area-inset-top));
+    min-height: 42dvh;
+  }
+
+  /* Vocabulary review: fixed header/actions, only the answer body scrolls. */
+  html[data-platform="android"] .review-card {
+    height: 100dvh;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  html[data-platform="android"] .review-header {
+    flex: 0 0 auto;
+  }
+
+  html[data-platform="android"] .review-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 20px 16px;
+  }
+
+  html[data-platform="android"] .review-actions {
+    flex: 0 0 auto;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .review-answer blockquote {
+    max-height: min(25dvh, 190px);
+    overflow-y: auto;
+  }
+
+  /* AI: keep the message stream scrollable and the composer above the IME. */
+  html[data-platform="android"] .ai-assistant-page {
+    height: calc(100dvh - var(--android-bottom-nav-height));
+    min-height: 0;
+    padding: 12px 10px 8px;
+  }
+
+  html[data-platform="android"] .ai-workspace,
+  html[data-platform="android"] .ai-workspace.history-closed {
+    min-height: 0;
+    grid-template-columns: 1fr;
+  }
+
+  html[data-platform="android"] .ai-chat-panel {
+    min-width: 0;
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
+
+  html[data-platform="android"] .ai-model-control {
+    min-width: 0;
+    max-width: 62%;
+  }
+
+  html[data-platform="android"] .ai-model-control select {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  html[data-platform="android"] .ai-messages {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  html[data-platform="android"] .ai-message > div {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  html[data-platform="android"] .ai-composer {
+    width: calc(100% - 16px);
+    margin-bottom: 0;
+    padding-bottom: max(7px, env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .ai-composer textarea {
+    min-height: 52px;
+    max-height: 130px;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 840px) and (max-height: 680px) {
+  html[data-platform="android"] .portrait-practice-top {
+    min-height: calc(68px + env(safe-area-inset-top));
+  }
+
+  html[data-platform="android"] .practice-layout {
+    height: calc(100dvh - 68px - env(safe-area-inset-top));
+  }
+
+  html[data-platform="android"] .passage-pane {
+    padding-top: 13px;
+    padding-bottom: 18px;
+  }
+
+  html[data-platform="android"] .question-pane {
+    padding-top: 10px;
+  }
+
+  html[data-platform="android"] .practice-footer {
+    min-height: calc(68px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .practice-submit-actions .button {
+    min-height: 38px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+}
+
+/* Final Android orientation guard. HarmonyOS WebView can expose a tablet
+   width while still in portrait; information architecture therefore follows
+   the runtime data-orientation attribute, not a width media query. */
+html[data-platform="android"][data-orientation="portrait"] .primary-nav {
+  display: none !important;
+}
+html[data-platform="android"][data-orientation="portrait"] .mobile-tab-nav {
+  display: grid !important;
+}
+html[data-platform="android"][data-orientation="landscape"] .primary-nav {
+  display: grid !important;
+}
+html[data-platform="android"][data-orientation="landscape"] .mobile-tab-nav {
+  display: none !important;
+}
+
+html[data-platform="android"] .mobile-hub-item > img,
+html[data-platform="android"] .settings-theme-row > img {
+  width: 42px !important;
+  height: 42px !important;
+  min-width: 42px !important;
+  max-width: 42px !important;
+  min-height: 42px !important;
+  max-height: 42px !important;
+  object-fit: contain;
+}
+html[data-platform="android"] .mobile-hub-item,
+html[data-platform="android"] .settings-theme-row {
+  min-width: 0;
+  overflow: hidden;
+}
+
+html[data-platform="android"][data-orientation="portrait"] .default-practice-top {
+  display: none !important;
+}
+html[data-platform="android"][data-orientation="portrait"] .portrait-practice-top {
+  display: flex !important;
+  width: 100%;
+  min-width: 0;
+}
+html[data-platform="android"][data-orientation="landscape"] .portrait-practice-top {
+  display: none !important;
+}
+html[data-platform="android"][data-orientation="landscape"] .default-practice-top {
+  display: flex !important;
+}
+html[data-platform="android"][data-orientation="portrait"] .practice-layout {
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows:
+    minmax(0, var(--portrait-passage-size, 50fr))
+    18px
+    minmax(0, var(--portrait-question-size, 50fr));
+  overflow: hidden;
+}
+html[data-platform="android"][data-orientation="portrait"] .passage-pane,
+html[data-platform="android"][data-orientation="portrait"] .question-pane {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+html[data-platform="android"][data-orientation="portrait"] .practice-footer {
+  display: none !important;
+}
+
+/* Practice-page viewport lock (Android portrait). The app-shell keeps a
+   74px bottom-nav reservation that practice pages do not need. If that
+   padding survives on any window mode, the document becomes scrollable and
+   Android WebView can scroll it when the timer prompt overlay closes,
+   hiding the top toolbar and leaving blank space below. Lock the practice
+   shell to exactly one viewport in every mode. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .practice-shell,
+  html[data-platform="android"][data-window-mode="compact"] .practice-shell {
+    height: 100dvh;
+    min-height: 0;
+    max-height: 100dvh;
+    padding-bottom: 0 !important;
+    overflow: hidden;
+  }
+
+  html[data-platform="android"] .practice-shell .main-content,
+  html[data-platform="android"][data-window-mode="compact"] .practice-shell .main-content {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
+/* Offline help uses a calm documentation layout: readable measure on wide
+   screens, and a touch-friendly directory drawer on Android portrait. */
+.settings-about { margin-top: 18px; padding: 18px 20px; display:flex; align-items:center; justify-content:space-between; gap:18px; }
+.settings-about-heading { display:flex; align-items:flex-start; gap:12px; min-width:0; }
+.settings-about-heading h2 { margin:3px 0 5px; font-size:18px; }
+.settings-about-heading p { margin:0; color:var(--muted); font-size:12px; line-height:1.55; }
+.settings-about-icon { width:44px; height:44px; flex:0 0 44px; display:grid; place-items:center; border-radius:14px; color:var(--primary); background:var(--primary-soft); }
+.settings-about-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.help-page { max-width:1280px; min-height:100dvh; padding-bottom:76px; }
+.help-toolbar { position:sticky; top:0; z-index:10; min-height:72px; display:flex; align-items:center; gap:14px; padding:12px clamp(16px,3vw,30px); border-bottom:1px solid var(--line); background:color-mix(in srgb,var(--surface-solid) 90%,transparent); backdrop-filter:blur(14px); }
+.help-title { min-width:0; display:flex; align-items:center; gap:10px; color:var(--primary); }
+.help-title>div { min-width:0; }
+.help-title h1 { margin:2px 0 0; color:var(--ink); font-size:20px; }
+.help-toolbar-actions { min-width:0; margin-left:auto; display:flex; align-items:center; gap:8px; }
+.icon-button { width:44px; height:44px; flex:0 0 44px; display:grid; place-items:center; border:1px solid var(--line); border-radius:12px; color:var(--muted); background:var(--surface-solid); }
+.icon-button:hover { color:var(--primary); border-color:var(--primary); background:var(--primary-faint); }
+.help-search { width:min(320px,36vw); height:42px; display:flex; align-items:center; gap:8px; padding:0 11px; border:1px solid var(--line); border-radius:12px; color:var(--muted); background:var(--surface-solid); }
+.help-search:focus-within { border-color:var(--primary); box-shadow:0 0 0 3px var(--focus); }
+.help-search input { min-width:0; width:100%; border:0; outline:0; color:var(--ink); background:transparent; font-size:12px; }
+.help-layout { position:relative; display:grid; grid-template-columns:252px minmax(0,1fr); gap:28px; padding:28px clamp(16px,3vw,30px); align-items:start; }
+.help-toc { position:sticky; top:100px; max-height:calc(100dvh - 126px); overflow:auto; padding:13px 10px 15px; border:1px solid var(--line); border-radius:16px; background:var(--surface); box-shadow:var(--shadow-sm); }
+.help-toc-head { display:flex; align-items:center; justify-content:space-between; padding:2px 8px 10px; color:var(--ink); }
+.help-toc-head strong { font-size:13px; }
+.help-toc-close,.help-toc-toggle { display:none; }
+.help-toc-item { width:100%; min-height:40px; padding:7px 9px; border:0; border-radius:9px; color:var(--muted); background:transparent; text-align:left; font-size:11px; line-height:1.4; }
+.help-toc-item:hover { color:var(--primary); background:var(--primary-faint); }
+.help-toc-item.level-1 { margin-top:5px; color:var(--ink); font-weight:750; }
+.help-toc-item.level-2 { padding-left:17px; }
+.help-toc-item.level-3 { padding-left:27px; font-size:10px; }
+.help-content { min-width:0; width:min(820px,100%); padding:8px 0 60px; }
+.markdown-body { color:var(--ink); font-size:14px; line-height:1.8; }
+.markdown-body h1,.markdown-body h2,.markdown-body h3 { scroll-margin-top:100px; color:var(--ink); line-height:1.35; }
+.markdown-body h1 { margin:0 0 22px; font-size:30px; }
+.markdown-body h2 { margin:36px 0 12px; padding-bottom:7px; border-bottom:1px solid var(--line); font-size:21px; }
+.markdown-body h3 { margin:25px 0 9px; font-size:16px; }
+.markdown-body p { margin:10px 0; }
+.markdown-body ul,.markdown-body ol { padding-left:24px; }
+.markdown-body li+li { margin-top:5px; }
+.markdown-body blockquote { margin:16px 0; padding:10px 15px; border-left:3px solid var(--primary); color:var(--muted); background:var(--primary-faint); }
+.markdown-body code { padding:2px 5px; border-radius:5px; color:var(--primary); background:var(--primary-faint); font-size:.9em; }
+.markdown-body pre { overflow:auto; padding:14px 16px; border-radius:12px; color:var(--ink); background:var(--primary-faint); }
+.markdown-body pre code { padding:0; background:transparent; }
+.markdown-body table { display:block; max-width:100%; overflow:auto; border-collapse:collapse; }
+.markdown-body th,.markdown-body td { min-width:120px; padding:8px 11px; border:1px solid var(--line); text-align:left; vertical-align:top; }
+.markdown-body th { background:var(--primary-faint); }
+.markdown-body a { color:var(--primary); text-decoration:underline; text-underline-offset:3px; }
+.help-feedback { position:fixed; right:20px; bottom:18px; z-index:12; min-height:44px; display:inline-flex; align-items:center; gap:7px; padding:0 14px; border:1px solid color-mix(in srgb,var(--primary) 30%,var(--line)); border-radius:12px; color:var(--primary); background:var(--surface-solid); box-shadow:var(--shadow-sm); font-size:12px; font-weight:700; }
+.help-feedback:hover { background:var(--primary-soft); }
+.help-empty { padding:12px 8px; color:var(--muted); font-size:11px; }
+
+@media (max-width: 720px) {
+  .settings-about { align-items:flex-start; flex-direction:column; }
+  .settings-about-actions { width:100%; justify-content:stretch; }
+  .settings-about-actions > * { flex:1 1 0; justify-content:center; }
+  .help-toolbar { min-height:64px; padding:9px 12px; }
+  .help-title h1 { font-size:18px; }
+  .help-search { width:42px; padding:0 12px; }
+  .help-search input { display:none; }
+  .help-toc-toggle { display:grid; }
+  .help-toc { position:fixed; inset:0 auto 0 0; z-index:20; width:min(310px,88vw); max-height:none; padding:calc(12px + env(safe-area-inset-top)) 12px calc(18px + env(safe-area-inset-bottom)); border:0; border-radius:0 18px 18px 0; transform:translateX(-105%); transition:transform .2s ease; }
+  .help-toc.open { transform:translateX(0); }
+  .help-toc-close { display:grid; }
+  .help-toc-backdrop { position:fixed; inset:0; z-index:19; background:rgba(18,25,21,.42); backdrop-filter:blur(2px); }
+  .help-layout { display:block; padding:18px 15px 72px; }
+  .help-content { padding-top:0; }
+  .markdown-body h1 { font-size:24px; }
+  .markdown-body h2 { font-size:19px; }
+  .help-feedback { right:14px; bottom:calc(14px + env(safe-area-inset-bottom)); }
+}
+
+/* System-wide Android portrait finishing pass. Every deep screen keeps its
+   own scroll region and respects the bottom navigation/safe-area boundary. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .main-content:has(.ai-assistant-page) {
+    padding-bottom: 0 !important;
+    overflow: hidden;
+  }
+
+  html[data-platform="android"] .ai-assistant-page {
+    height: calc(100dvh - var(--android-bottom-nav-height)) !important;
+    max-height: calc(100dvh - var(--android-bottom-nav-height)) !important;
+    padding: env(safe-area-inset-top) 0 0 !important;
+  }
+
+  html[data-platform="android"] .ai-workspace,
+  html[data-platform="android"] .ai-workspace.history-closed {
+    position: relative;
+    height: 100% !important;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  html[data-platform="android"] .ai-conversation-sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 7;
+    width: min(300px, 88vw);
+    max-width: 88vw;
+    transform: translateX(0);
+    box-shadow: 18px 0 50px rgba(31, 46, 38, .18);
+  }
+
+  html[data-platform="android"] .ai-workspace.history-closed .ai-conversation-sidebar {
+    transform: translateX(-105%);
+  }
+
+  html[data-platform="android"] .ai-history-dismiss-area {
+    inset: 0 0 0 min(300px, 88vw);
+    width: auto;
+    background: color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  html[data-platform="android"] .ai-chat-panel {
+    position: relative;
+    height: 100% !important;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
+
+  html[data-platform="android"] .ai-chat-toolbar {
+    min-height: 48px !important;
+    height: 48px;
+    padding: 5px 8px !important;
+  }
+
+  html[data-platform="android"] .ai-chat-toolbar strong {
+    font-size: 12px;
+  }
+
+  html[data-platform="android"] .ai-composer-actions {
+    gap: 7px;
+  }
+
+  html[data-platform="android"] .ai-composer-actions .ai-model-control {
+    max-width: none;
+  }
+
+  html[data-platform="android"] .ai-composer-actions .ai-model-control select {
+    height: 38px;
+    padding: 0 9px;
+    border-radius: 10px;
+    font-size: 11px;
+  }
+
+  html[data-platform="android"] .ai-messages {
+    padding: 10px 10px 8px !important;
+  }
+
+  html[data-platform="android"] .ai-composer {
+    width: 100% !important;
+    min-width: 0;
+    margin: 0 !important;
+    padding: 6px 8px max(6px, env(safe-area-inset-bottom)) !important;
+    border-radius: 0 !important;
+  }
+
+  html[data-platform="android"] .ai-composer textarea {
+    min-height: 44px;
+    max-height: 116px;
+    padding: 4px 6px;
+    font-size: 13px;
+  }
+
+  html[data-platform="android"] .ai-send-button {
+    width: 38px;
+    min-width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+    border-radius: 10px;
+  }
+
+  html[data-platform="android"] .modal-overlay,
+  html[data-platform="android"] .review-overlay,
+  html[data-platform="android"] .result-overlay,
+  html[data-platform="android"] .timer-overlay {
+    align-items: flex-start;
+    overflow-y: auto;
+    padding: calc(12px + env(safe-area-inset-top)) 10px calc(14px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .modal-card,
+  html[data-platform="android"] .import-assist-dialog,
+  html[data-platform="android"] .result-dialog,
+  html[data-platform="android"] .timer-dialog {
+    width: min(100%, 620px);
+    max-height: calc(100dvh - 26px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  html[data-platform="android"] .review-card:not(.review-card[data-review-fullscreen]) {
+    max-width: 100%;
+  }
+
+  html[data-platform="android"] .review-content,
+  html[data-platform="android"] .unit-editor-body,
+  html[data-platform="android"] .label-editor-modal,
+  html[data-platform="android"] .diagnostic-detail {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  html[data-platform="android"] .review-answer blockquote {
+    max-height: min(24dvh, 180px);
+    margin: 14px 0;
+    overflow-y: auto;
+  }
+
+  html[data-platform="android"] .review-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    padding: 8px 10px max(10px, env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .review-actions .button {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  html[data-platform="android"] .import-page .review-head,
+  html[data-platform="android"] .settings-section-head,
+  html[data-platform="android"] .update-source-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  html[data-platform="android"] .import-page .review-actions,
+  html[data-platform="android"] .question-label-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  html[data-platform="android"] .import-page .review-actions .button,
+  html[data-platform="android"] .question-label-actions .button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .field input,
+  html[data-platform="android"] .field textarea,
+  html[data-platform="android"] .field select,
+  html[data-platform="android"] .compact-field input,
+  html[data-platform="android"] .compact-field select,
+  html[data-platform="android"] .label-search input {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  html[data-platform="android"] .update-package-list,
+  html[data-platform="android"] .diagnostic-list,
+  html[data-platform="android"] .trash-list,
+  html[data-platform="android"] .api-profile-list {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+}
+
+/* Deep-screen Android portrait guardrails. These intentionally sit last so
+   feature-page scoped styles cannot enlarge navigation artwork or reintroduce
+   horizontal overflow on narrow phones. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .mobile-hub-item,
+  html[data-platform="android"] .settings-theme-row {
+    width: 100%;
+    min-width: 0;
+    min-height: 72px;
+    padding: 11px 12px;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    gap: 10px;
+    overflow: hidden;
+  }
+
+  html[data-platform="android"] .mobile-hub-item > img,
+  html[data-platform="android"] .settings-theme-row > img {
+    display: block;
+    width: 36px !important;
+    min-width: 36px;
+    max-width: 36px;
+    height: 36px !important;
+    min-height: 36px;
+    max-height: 36px;
+    margin: 0;
+    object-fit: contain;
+  }
+
+  html[data-platform="android"] .mobile-hub-item > span,
+  html[data-platform="android"] .settings-theme-row > span {
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .mobile-hub-item strong,
+  html[data-platform="android"] .mobile-hub-item small,
+  html[data-platform="android"] .settings-theme-row strong,
+  html[data-platform="android"] .settings-theme-row small {
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .mobile-hub-item b {
+    width: 20px;
+    line-height: 1;
+    text-align: center;
+  }
+
+  html[data-platform="android"] .settings-vocab-display,
+  html[data-platform="android"] .settings-hub-list,
+  html[data-platform="android"] .mobile-hub-list {
+    min-width: 0;
+  }
+}
+
+/* Android portrait UI system final pass.
+   This block is intentionally last: the project still contains older compact
+   breakpoints, so every interactive surface is normalized here. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] {
+    color-scheme: light;
+    --bg: #f3ecd9;
+    --surface: rgba(255, 252, 243, .94);
+    --surface-solid: #fffaf0;
+    --ink: #2c352f;
+    --muted: #69736b;
+    --line: rgba(94, 105, 95, .18);
+    --line-strong: rgba(75, 91, 79, .28);
+    --primary: #247d73;
+    --primary-hover: #196a62;
+    --primary-soft: #dceee8;
+    --primary-faint: #edf6f1;
+    --lavender: #e9e4f5;
+    --apricot: #f7dfc6;
+    --blue: #dcecf4;
+    --danger: #b54f46;
+    --danger-soft: #fae3dd;
+    --success: #34785a;
+    --focus: rgba(36, 125, 115, .3);
+    --shadow-sm: 0 4px 14px rgba(57, 66, 58, .075);
+    --shadow: 0 16px 42px rgba(57, 66, 58, .13);
+    --radius-sm: 9px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 22px;
+    --android-bottom-nav-height: calc(66px + env(safe-area-inset-bottom));
+    background-color: var(--bg);
+  }
+
+  html[data-platform="android"].dark {
+    color-scheme: dark;
+    --bg: #11172b;
+    --surface: rgba(25, 31, 53, .94);
+    --surface-solid: #1c233b;
+    --ink: #f3f0e8;
+    --muted: #b9bdcc;
+    --line: rgba(211, 216, 235, .15);
+    --line-strong: rgba(211, 216, 235, .25);
+    --primary: #7ccfc6;
+    --primary-hover: #96ddd5;
+    --primary-soft: #263f4b;
+    --primary-faint: #202f43;
+    --lavender: #38324f;
+    --apricot: #49382f;
+    --blue: #263c58;
+    --danger: #f0a097;
+    --danger-soft: #4c3038;
+    --success: #91d5ae;
+    --focus: rgba(124, 207, 198, .34);
+    --shadow-sm: 0 5px 17px rgba(0, 0, 0, .2);
+    --shadow: 0 18px 48px rgba(0, 0, 0, .3);
+  }
+
+  html[data-platform="android"] body {
+    min-width: 0;
+    overflow-x: hidden;
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(rgba(246, 240, 223, .58), rgba(246, 240, 223, .58)),
+      url("/assets/backgrounds/study-wallpaper-xuan-paper-light-v2.webp");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: cover;
+    background-attachment: fixed;
+  }
+
+  html[data-platform="android"].dark body {
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(rgba(11, 16, 35, .64), rgba(11, 16, 35, .64)),
+      url("/assets/backgrounds/study-wallpaper-starry-oil-dark-v2.webp");
+  }
+
+  html[data-platform="android"] .app-shell,
+  html[data-platform="android"] .main-content {
+    min-width: 0;
+    background: transparent;
+  }
+
+  html[data-platform="android"] .main-content {
+    overflow-x: clip;
+    padding-bottom: var(--android-bottom-nav-height);
+  }
+
+  html[data-platform="android"] .practice-shell .main-content,
+  html[data-platform="android"] .practice-page {
+    padding-bottom: 0;
+  }
+
+  html[data-platform="android"] .page:not(.practice-page),
+  html[data-platform="android"] .ai-assistant-page {
+    width: 100%;
+    max-width: 760px;
+    margin-inline: auto;
+  }
+
+  html[data-platform="android"] .page:not(.practice-page) {
+    padding: 15px 13px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .page-head {
+    min-width: 0;
+    margin-bottom: 14px;
+    gap: 9px;
+    align-items: flex-start;
+  }
+
+  html[data-platform="android"] .page-head > * {
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .page-head h1,
+  html[data-platform="android"] .compact-page-head h1 {
+    margin: 3px 0 5px;
+    font-family: "Segoe UI Variable Text", "Microsoft YaHei UI", sans-serif;
+    font-size: 25px;
+    font-weight: 720;
+    line-height: 1.22;
+    letter-spacing: 0;
+  }
+
+  html[data-platform="android"] .page-head .lead {
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  html[data-platform="android"] .eyebrow {
+    font-size: 9px;
+    letter-spacing: .11em;
+  }
+
+  html[data-platform="android"] .card,
+  html[data-platform="android"] .api-profile-card,
+  html[data-platform="android"] .portrait-paper-list,
+  html[data-platform="android"] .bank-switcher-main {
+    border-color: var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(15px) saturate(1.05);
+  }
+
+  html[data-platform="android"] .card {
+    padding: 15px;
+  }
+
+  html[data-platform="android"] .section-title {
+    margin: 20px 0 10px;
+  }
+
+  html[data-platform="android"] .section-title h2,
+  html[data-platform="android"] .section-title h3 {
+    font-size: 17px;
+  }
+
+  html[data-platform="android"] .button,
+  html[data-platform="android"] .button.compact {
+    width: auto;
+    min-width: 0;
+    min-height: 40px;
+    padding: 8px 12px;
+    gap: 6px;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.25;
+    white-space: normal;
+  }
+
+  html[data-platform="android"] .button svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+  }
+
+  html[data-platform="android"] .button.ghost {
+    border-color: transparent;
+  }
+
+  html[data-platform="android"] input,
+  html[data-platform="android"] select,
+  html[data-platform="android"] textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  html[data-platform="android"] .field {
+    min-width: 0;
+    gap: 5px;
+    margin-bottom: 13px;
+  }
+
+  html[data-platform="android"] .field input,
+  html[data-platform="android"] .field select,
+  html[data-platform="android"] .field textarea,
+  html[data-platform="android"] .vocab-edit input,
+  html[data-platform="android"] .vocab-edit textarea {
+    min-height: 44px;
+    padding: 10px 11px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--surface-solid) 97%, transparent);
+  }
+
+  html[data-platform="android"] input[type="file"] {
+    min-height: 50px;
+    padding: 8px;
+    overflow: hidden;
+    font-size: 11px;
+  }
+
+  html[data-platform="android"] .field-hint,
+  html[data-platform="android"] .field small {
+    overflow-wrap: anywhere;
+    font-size: 10px;
+    line-height: 1.55;
+  }
+
+  html[data-platform="android"] .check-row,
+  html[data-platform="android"] .default-profile-check {
+    min-width: 0;
+    min-height: 48px;
+    padding: 9px 10px;
+    align-items: flex-start;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    background: color-mix(in srgb, var(--surface-solid) 72%, transparent);
+  }
+
+  html[data-platform="android"] .check-row input,
+  html[data-platform="android"] .default-profile-check input {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    accent-color: var(--primary);
+  }
+
+  html[data-platform="android"] .check-row span,
+  html[data-platform="android"] .check-row small {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .grid,
+  html[data-platform="android"] .grid-2,
+  html[data-platform="android"] .grid-3,
+  html[data-platform="android"] .grid-4,
+  html[data-platform="android"] .import-source-grid,
+  html[data-platform="android"] .workspace-grid,
+  html[data-platform="android"] .update-check-grid,
+  html[data-platform="android"] .draft-meta-grid,
+  html[data-platform="android"] .option-editor-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 11px;
+  }
+
+  html[data-platform="android"] .warning,
+  html[data-platform="android"] .success-note,
+  html[data-platform="android"] .settings-success,
+  html[data-platform="android"] .unanswered-banner,
+  html[data-platform="android"] .import-progress {
+    max-width: 100%;
+    margin: 8px 0 11px;
+    padding: 10px 11px;
+    border-radius: 10px;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  html[data-platform="android"] .empty,
+  html[data-platform="android"] .diagnostic-empty,
+  html[data-platform="android"] .api-model-empty {
+    padding: 25px 14px;
+    border-radius: 13px;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  html[data-platform="android"] .toast,
+  html[data-platform="android"] .vocabulary-toast,
+  html[data-platform="android"] .import-publish-toast {
+    right: 12px;
+    bottom: calc(var(--android-bottom-nav-height) + 10px);
+    left: 12px;
+    width: auto;
+    max-width: none;
+    padding: 11px 13px;
+    border-radius: 11px;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+  }
+
+  /* Bottom navigation: compact, stable and shared by every non-practice page. */
+  html[data-platform="android"] .sidebar {
+    height: var(--android-bottom-nav-height);
+    min-height: 0;
+    padding: 5px 8px env(safe-area-inset-bottom);
+    border: 0;
+    border-top: 1px solid var(--line);
+    background: color-mix(in srgb, var(--surface-solid) 92%, transparent);
+    box-shadow: 0 -8px 26px rgba(45, 53, 47, .09);
+    backdrop-filter: blur(20px) saturate(1.14);
+  }
+
+  html[data-platform="android"] .sidebar .mobile-tab-nav {
+    height: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 3px;
+  }
+
+  html[data-platform="android"] .sidebar .mobile-tab-nav a {
+    min-width: 0;
+    min-height: 54px;
+    padding: 5px 2px 4px;
+    gap: 2px;
+    border-radius: 11px;
+    justify-content: center;
+    font-size: 10px;
+    line-height: 1.1;
+    box-shadow: none;
+  }
+
+  html[data-platform="android"] .sidebar .mobile-tab-nav a > img,
+  html[data-platform="android"] .sidebar .mobile-tab-nav a > svg {
+    width: 21px;
+    height: 21px;
+    flex: 0 0 21px;
+  }
+
+  html[data-platform="android"] .sidebar .mobile-tab-nav a.router-link-active {
+    background: var(--primary-soft);
+    box-shadow: none;
+  }
+
+  /* Home, notes and the settings hub. */
+  html[data-platform="android"] .dashboard-page {
+    padding-top: 12px !important;
+  }
+
+  html[data-platform="android"] .portrait-dashboard .bank-switcher-main {
+    padding: 9px 10px;
+    border-radius: 13px;
+  }
+
+  html[data-platform="android"] .portrait-dashboard .bank-switcher select {
+    min-height: 40px;
+    font-size: 14px;
+  }
+
+  html[data-platform="android"] .portrait-overview {
+    margin-bottom: 10px;
+    padding: 9px 4px;
+    border-radius: 13px;
+    background: var(--surface);
+  }
+
+  html[data-platform="android"] .portrait-overview strong {
+    font-size: 18px;
+  }
+
+  html[data-platform="android"] .portrait-practice-grid {
+    gap: 8px;
+    margin-bottom: 11px;
+  }
+
+  html[data-platform="android"] .portrait-practice-card {
+    min-height: 78px;
+    padding: 10px;
+    grid-template-columns: 39px minmax(0, 1fr) 15px;
+    gap: 8px;
+    border-radius: 13px;
+  }
+
+  html[data-platform="android"] .portrait-practice-card img {
+    width: 39px;
+    height: 39px;
+  }
+
+  html[data-platform="android"] .portrait-practice-card strong {
+    font-size: 14px;
+  }
+
+  html[data-platform="android"] .portrait-vocabulary {
+    margin-bottom: 11px;
+    padding: 12px;
+  }
+
+  html[data-platform="android"] .portrait-word-grid {
+    min-height: 100px;
+  }
+
+  html[data-platform="android"] .portrait-paper-list button {
+    min-height: 45px;
+    padding: 10px 12px;
+  }
+
+  html[data-platform="android"] .mobile-hub .page-head .lead {
+    display: none;
+  }
+
+  html[data-platform="android"] .mobile-hub-list,
+  html[data-platform="android"] .settings-hub-list {
+    gap: 8px;
+  }
+
+  html[data-platform="android"] .mobile-hub-item,
+  html[data-platform="android"] .settings-theme-row {
+    min-height: 72px;
+    padding: 11px 12px;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    gap: 10px;
+    border-radius: 13px;
+  }
+
+  html[data-platform="android"] .mobile-hub-item > img,
+  html[data-platform="android"] .settings-theme-row > img {
+    width: 36px;
+    height: 36px;
+  }
+
+  html[data-platform="android"] .mobile-hub-item strong,
+  html[data-platform="android"] .settings-theme-row strong {
+    font-size: 15px;
+  }
+
+  html[data-platform="android"] .mobile-hub-item small,
+  html[data-platform="android"] .settings-theme-row small {
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  html[data-platform="android"] .settings-vocab-display {
+    margin-bottom: 8px;
+  }
+
+  html[data-platform="android"] .settings-vocab-display-toggle {
+    min-height: 68px;
+    padding: 11px 12px;
+  }
+
+  html[data-platform="android"] .settings-vocab-display-options {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 8px 12px 12px;
+  }
+
+  /* Library and profile management. */
+  html[data-platform="android"] .bank-switcher-main {
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    padding: 9px;
+    gap: 7px;
+  }
+
+  html[data-platform="android"] .bank-switcher select {
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+  }
+
+  html[data-platform="android"] .bank-manager {
+    position: fixed;
+    z-index: 100;
+    top: auto;
+    right: 10px;
+    bottom: calc(var(--android-bottom-nav-height) + 10px);
+    left: 10px;
+    width: auto;
+    max-height: min(70dvh, 560px);
+    padding: 12px;
+    overflow-y: auto;
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+  }
+
+  html[data-platform="android"] .bank-manager-create {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px;
+  }
+
+  html[data-platform="android"] .bank-manager-create input {
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .bank-manager-row {
+    min-width: 0;
+    align-items: flex-start;
+    padding: 10px 0;
+    gap: 8px;
+  }
+
+  html[data-platform="android"] .bank-manager-row > span:first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .bank-manager-actions {
+    flex: 0 0 auto;
+    gap: 2px;
+  }
+
+  html[data-platform="android"] .batch-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 11px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+  }
+
+  html[data-platform="android"] .batch-toolbar > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  html[data-platform="android"] .paper-card {
+    min-width: 0;
+    padding: 14px;
+  }
+
+  html[data-platform="android"] .paper-card .paper-year {
+    margin: 12px 0 5px;
+    font-size: 25px;
+  }
+
+  html[data-platform="android"] .paper-card .button {
+    width: 100% !important;
+    margin-top: 13px !important;
+  }
+
+  /* Practice, listening, ordering and all practice dialogs. */
+  html[data-platform="android"] .practice-page {
+    --compact-practice-footer-height: 0px !important;
+    height: 100dvh;
+    min-height: 0;
+    max-height: 100dvh;
+    overflow: hidden;
+  }
+
+  html[data-platform="android"] .portrait-practice-top {
+    min-height: calc(64px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 8px 4px;
+    background: color-mix(in srgb, var(--surface-solid) 96%, transparent);
+    box-shadow: 0 5px 18px rgba(40, 48, 42, .08);
+    backdrop-filter: blur(18px);
+  }
+
+  html[data-platform="android"] .portrait-practice-actions {
+    min-height: 37px;
+    gap: 3px;
+  }
+
+  html[data-platform="android"] .portrait-icon-button {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    border-radius: 10px;
+  }
+
+  html[data-platform="android"] .portrait-icon-button svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill {
+    min-height: 36px;
+    padding: 4px 7px;
+    gap: 4px;
+    font-size: 11px;
+  }
+
+  html[data-platform="android"] .portrait-save-state {
+    max-width: 70px;
+    overflow: hidden;
+    font-size: 10px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  html[data-platform="android"] .portrait-practice-heading {
+    min-height: 19px;
+    padding: 0 3px;
+    overflow: hidden;
+    font-size: 10px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  html[data-platform="android"] .practice-layout,
+  html[data-platform="android"][data-window-mode="compact"] .practice-layout {
+    height: calc(100dvh - 64px - env(safe-area-inset-top));
+    padding-bottom: 0 !important;
+    grid-template-rows:
+      minmax(0, var(--portrait-passage-size, 50fr))
+      16px
+      minmax(0, var(--portrait-question-size, 50fr));
+  }
+
+  html[data-platform="android"] .portrait-pane-divider {
+    min-height: 16px;
+  }
+
+  html[data-platform="android"] .passage-pane,
+  html[data-platform="android"] .question-pane {
+    background: color-mix(in srgb, var(--surface-solid) 96%, transparent);
+  }
+
+  html[data-platform="android"] .passage-pane {
+    padding: 14px 14px 20px;
+  }
+
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    padding: 10px 11px calc(18px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(18px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .passage {
+    font-size: 16px;
+    line-height: 1.72;
+  }
+
+  html[data-platform="android"] .passage-pane h1 {
+    margin: 4px 0 9px;
+    font-size: 20px;
+  }
+
+  html[data-platform="android"] .question-card {
+    margin-bottom: 9px;
+    padding: 11px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--surface-solid) 98%, transparent);
+  }
+
+  html[data-platform="android"] .question-title {
+    margin-bottom: 8px;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  html[data-platform="android"] .option {
+    min-width: 0;
+    min-height: 44px;
+    margin: 6px 0;
+    padding: 9px 10px;
+    gap: 8px;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  html[data-platform="android"] .option-letter {
+    flex: 0 0 auto;
+  }
+
+  html[data-platform="android"] .option-content,
+  html[data-platform="android"] .question-title,
+  html[data-platform="android"] .passage,
+  html[data-platform="android"] .candidate-reference,
+  html[data-platform="android"] .ordering-paragraph-content {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .ordering-reference-sheet,
+  html[data-platform="android"] .candidate-bank {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  html[data-platform="android"] .ordering-paragraph,
+  html[data-platform="android"] .candidate-reference {
+    padding: 11px;
+    border-radius: 11px;
+  }
+
+  html[data-platform="android"] .ordering-paragraph-label {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+  }
+
+  html[data-platform="android"] .ordering-answer-row {
+    padding: 10px;
+    border-radius: 11px;
+  }
+
+  html[data-platform="android"] .ordering-choice-row,
+  html[data-platform="android"] .match-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  html[data-platform="android"] .ordering-choice,
+  html[data-platform="android"] .match-chip {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 7px;
+    border-radius: 9px;
+  }
+
+  html[data-platform="android"] .listening-console-pane {
+    padding: 10px 12px 15px;
+  }
+
+  html[data-platform="android"] .listening-heading {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  html[data-platform="android"] .listening-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  html[data-platform="android"] .player-surface {
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 8px 10px;
+    padding: 10px;
+    border-radius: 13px;
+  }
+
+  html[data-platform="android"] .main-play-button {
+    width: 52px;
+    height: 52px;
+  }
+
+  html[data-platform="android"] .secondary-controls button {
+    min-height: 40px;
+  }
+
+  html[data-platform="android"] .practice-footer,
+  html[data-platform="android"] .practice-footer.listening-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer.listening-footer {
+    display: none !important;
+    min-height: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+  }
+
+  html[data-platform="android"] .vocab-context-menu {
+    z-index: 130;
+    width: min(210px, calc(100vw - 24px));
+    padding: 6px;
+    border-radius: 12px;
+  }
+
+  html[data-platform="android"] .vocab-context-menu button {
+    min-height: 46px;
+    padding: 10px;
+  }
+
+  html[data-platform="android"] .answer-card-overlay {
+    z-index: 140;
+    align-items: flex-end;
+    padding: calc(36px + env(safe-area-inset-top)) 0 0;
+    background: rgba(15, 20, 27, .48);
+    backdrop-filter: blur(3px);
+  }
+
+  html[data-platform="android"] .answer-card-drawer {
+    width: 100%;
+    min-height: 42dvh;
+    max-height: calc(100dvh - 36px - env(safe-area-inset-top));
+    border-radius: 22px 22px 0 0;
+    border: 1px solid var(--line);
+    border-bottom: 0;
+    background: var(--surface-solid);
+    box-shadow: 0 -18px 50px rgba(0, 0, 0, .22);
+  }
+
+  html[data-platform="android"] .answer-card-drawer::before {
+    content: "";
+    width: 40px;
+    height: 4px;
+    margin: 8px auto 0;
+    border-radius: 999px;
+    background: var(--line-strong);
+  }
+
+  html[data-platform="android"] .answer-card-heading {
+    padding: 10px 14px 9px;
+  }
+
+  html[data-platform="android"] .answer-card-scroll {
+    min-height: 0;
+    padding: 4px 14px 13px;
+  }
+
+  html[data-platform="android"] .answer-number-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  html[data-platform="android"] .answer-number {
+    width: 100%;
+    min-width: 0;
+    aspect-ratio: 1;
+    min-height: 40px;
+  }
+
+  html[data-platform="android"] .answer-card-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    background: var(--surface-solid);
+  }
+
+  html[data-platform="android"] .answer-card-actions .button:only-child {
+    grid-column: 1 / -1;
+  }
+
+  html[data-platform="android"] .result-overlay,
+  html[data-platform="android"] .timer-overlay,
+  html[data-platform="android"] .modal-overlay,
+  html[data-platform="android"] .label-editor-overlay,
+  html[data-platform="android"] .review-overlay,
+  html[data-platform="android"] .installer-cleanup-overlay {
+    z-index: 150;
+    align-items: center;
+    padding: calc(12px + env(safe-area-inset-top)) 11px calc(12px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+
+  html[data-platform="android"] .result-dialog,
+  html[data-platform="android"] .timer-dialog,
+  html[data-platform="android"] .modal-card,
+  html[data-platform="android"] .label-editor-modal,
+  html[data-platform="android"] .import-assist-dialog,
+  html[data-platform="android"] .installer-cleanup-dialog {
+    width: min(100%, 520px);
+    max-width: 100%;
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    padding: 16px;
+    overflow-y: auto;
+    border-radius: 17px;
+  }
+
+  html[data-platform="android"] .timer-dialog-actions,
+  html[data-platform="android"] .result-dialog-actions,
+  html[data-platform="android"] .installer-cleanup-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  html[data-platform="android"] .timer-dialog-actions .button,
+  html[data-platform="android"] .result-dialog-actions .button,
+  html[data-platform="android"] .installer-cleanup-actions .button {
+    width: 100%;
+  }
+
+  html[data-platform="android"] .result-stat-grid,
+  html[data-platform="android"] .paper-result-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  html[data-platform="android"] .paper-result-counts span:last-child {
+    grid-column: 1 / -1;
+  }
+
+  /* Wrong-answer book. Year rows are navigation only; actions stay on units. */
+  html[data-platform="android"] .wrong-overview {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 9px;
+    margin-bottom: 11px;
+    padding: 12px;
+    border-radius: 13px;
+  }
+
+  html[data-platform="android"] .wrong-filter {
+    width: 100%;
+    min-height: 42px;
+    justify-content: flex-start;
+  }
+
+  html[data-platform="android"] .wrong-tree {
+    gap: 9px;
+  }
+
+  html[data-platform="android"] .wrong-year {
+    border-radius: 14px;
+  }
+
+  html[data-platform="android"] .wrong-level-row,
+  html[data-platform="android"] .wrong-unit-row {
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .wrong-year-row {
+    grid-template-columns: minmax(0, 1fr);
+    padding-right: 0;
+  }
+
+  html[data-platform="android"] .wrong-expand-button {
+    min-height: 68px;
+    grid-template-columns: 38px minmax(0, 1fr) auto 18px;
+    padding: 12px;
+    gap: 9px;
+  }
+
+  html[data-platform="android"] .wrong-level-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+  }
+
+  html[data-platform="android"] .wrong-level-copy strong {
+    font-size: 14px;
+  }
+
+  html[data-platform="android"] .wrong-level-stats span {
+    padding: 4px 6px;
+    font-size: 9px;
+  }
+
+  html[data-platform="android"] .wrong-units {
+    padding: 0 9px 9px;
+  }
+
+  html[data-platform="android"] .wrong-unit-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  html[data-platform="android"] .wrong-unit-row .wrong-level-stats,
+  html[data-platform="android"] .wrong-scope-actions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  html[data-platform="android"] .wrong-scope-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 6px;
+  }
+
+  html[data-platform="android"] .wrong-scope-actions .button {
+    width: 100%;
+  }
+
+  html[data-platform="android"] .wrong-analysis-categories {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  html[data-platform="android"] .ai-report {
+    overflow-wrap: anywhere;
+  }
+
+  /* Vocabulary list, detail editor and review session. */
+  html[data-platform="android"] .vocab-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin-bottom: 10px;
+  }
+
+  html[data-platform="android"] .vocab-stats button {
+    min-width: 0;
+    padding: 11px;
+    border-radius: 12px;
+  }
+
+  html[data-platform="android"] .vocab-stats button:last-child {
+    grid-column: 1 / -1;
+  }
+
+  html[data-platform="android"] .vocab-stats span {
+    font-size: 10px;
+  }
+
+  html[data-platform="android"] .vocab-stats strong {
+    margin-top: 3px;
+    font-size: 21px;
+  }
+
+  html[data-platform="android"] .vocab-filters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+    padding: 8px;
+  }
+
+  html[data-platform="android"] .search-field {
+    grid-column: 1 / -1;
+    margin-bottom: 2px;
+  }
+
+  html[data-platform="android"] .vocab-filters > button {
+    min-width: 0;
+    min-height: 40px;
+    padding: 7px 5px;
+    text-align: center;
+    font-size: 10px;
+  }
+
+  html[data-platform="android"] .vocab-list {
+    padding: 4px;
+  }
+
+  html[data-platform="android"] .vocab-list-item {
+    min-width: 0;
+    padding: 12px 10px;
+  }
+
+  html[data-platform="android"] .vocab-list-head strong {
+    font-size: 17px;
+  }
+
+  html[data-platform="android"] .vocab-list-head small {
+    flex: 0 0 auto;
+    font-size: 10px;
+  }
+
+  html[data-platform="android"] .portrait-vocab-detail {
+    padding: 13px 10px;
+  }
+
+  html[data-platform="android"] .portrait-vocab-detail .vocab-detail-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  html[data-platform="android"] .portrait-vocab-detail .vocab-tools {
+    justify-content: flex-start;
+  }
+
+  html[data-platform="android"] .detail-section,
+  html[data-platform="android"] .occurrence,
+  html[data-platform="android"] .vocab-pending-panel {
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .detail-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  html[data-platform="android"] .detail-actions .button {
+    width: 100%;
+  }
+
+  html[data-platform="android"] .review-overlay {
+    padding: 0;
+  }
+
+  html[data-platform="android"] .review-card {
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    background: var(--surface-solid);
+  }
+
+  html[data-platform="android"] .review-header {
+    min-height: calc(52px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 12px 7px;
+  }
+
+  html[data-platform="android"] .review-close {
+    width: 38px;
+    height: 38px;
+  }
+
+  html[data-platform="android"] .review-content {
+    min-height: 0;
+    padding: 16px 14px;
+    overflow-y: auto;
+  }
+
+  html[data-platform="android"] .review-term {
+    font-size: clamp(30px, 11vw, 46px);
+  }
+
+  html[data-platform="android"] .review-answer blockquote {
+    max-height: min(24dvh, 170px);
+    overflow-y: auto;
+  }
+
+  html[data-platform="android"] .review-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 9px 10px calc(9px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .review-actions .button {
+    min-height: 44px;
+    padding-inline: 5px;
+    font-size: 10px;
+  }
+
+  /* Import sources, history, field-level draft review and smart labeling. */
+  html[data-platform="android"] .import-source-card,
+  html[data-platform="android"] .review-card,
+  html[data-platform="android"] .history-panel {
+    min-width: 0;
+    padding: 13px;
+  }
+
+  html[data-platform="android"] .source-heading,
+  html[data-platform="android"] .review-head,
+  html[data-platform="android"] .unit-editor-head,
+  html[data-platform="android"] .question-editor-head,
+  html[data-platform="android"] .question-label-heading {
+    min-width: 0;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  html[data-platform="android"] .source-heading > div,
+  html[data-platform="android"] .review-head > div,
+  html[data-platform="android"] .unit-editor-head > div,
+  html[data-platform="android"] .question-editor-head > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .source-heading svg {
+    width: 19px;
+    height: 19px;
+    flex: 0 0 19px;
+  }
+
+  html[data-platform="android"] .source-heading h2,
+  html[data-platform="android"] .review-head h2 {
+    font-size: 16px;
+  }
+
+  html[data-platform="android"] .history-mini,
+  html[data-platform="android"] .history-panel {
+    max-height: none;
+  }
+
+  html[data-platform="android"] .review-head,
+  html[data-platform="android"] .unit-editor-head,
+  html[data-platform="android"] .question-editor-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  html[data-platform="android"] .review-head .button,
+  html[data-platform="android"] .unit-editor-head .button,
+  html[data-platform="android"] .question-editor-head .button {
+    justify-self: stretch;
+  }
+
+  html[data-platform="android"] .conflict-row,
+  html[data-platform="android"] .unit-editor,
+  html[data-platform="android"] .question-editor,
+  html[data-platform="android"] .option-editor,
+  html[data-platform="android"] .label-list,
+  html[data-platform="android"] .question-label-row {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .unit-editor-body,
+  html[data-platform="android"] .option-editor-grid,
+  html[data-platform="android"] .question-label-workspace {
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .question-label-controls,
+  html[data-platform="android"] .question-label-actions,
+  html[data-platform="android"] .label-overwrite,
+  html[data-platform="android"] .api-actions,
+  html[data-platform="android"] .api-create-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  html[data-platform="android"] .question-label-filter,
+  html[data-platform="android"] .label-search {
+    width: 100%;
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .label-editor-modal {
+    display: flex;
+    flex-direction: column;
+  }
+
+  html[data-platform="android"] .label-editor {
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  /* API/model settings, updates, diagnostics and recycle bin. */
+  html[data-platform="android"] .api-profile-list {
+    gap: 9px;
+  }
+
+  html[data-platform="android"] .api-profile-card {
+    border-radius: 14px;
+  }
+
+  html[data-platform="android"] .api-profile-heading {
+    min-height: 60px;
+    padding: 11px 12px;
+  }
+
+  html[data-platform="android"] .api-profile-summary {
+    grid-template-columns: minmax(0, 1fr) 48px;
+  }
+
+  html[data-platform="android"] .api-profile-expand {
+    min-height: 70px;
+    padding: 10px;
+    grid-template-columns: 38px minmax(0, 1fr) 18px;
+    gap: 8px;
+  }
+
+  html[data-platform="android"] .api-profile-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+  }
+
+  html[data-platform="android"] .api-profile-stats {
+    display: none;
+  }
+
+  html[data-platform="android"] .api-enable {
+    width: 42px;
+    height: 25px;
+  }
+
+  html[data-platform="android"] .api-profile-body {
+    padding: 12px;
+  }
+
+  html[data-platform="android"] .api-actions .button,
+  html[data-platform="android"] .api-create-actions .button {
+    flex: 1 1 128px;
+  }
+
+  html[data-platform="android"] .api-delete {
+    margin-left: 0;
+  }
+
+  html[data-platform="android"] .api-model-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  html[data-platform="android"] .api-model-list {
+    max-height: 46dvh;
+  }
+
+  html[data-platform="android"] .api-model-row {
+    min-width: 0;
+    min-height: 54px;
+    padding: 8px 9px;
+    gap: 7px;
+  }
+
+  html[data-platform="android"] .api-model-row > button {
+    min-width: 65px;
+  }
+
+  html[data-platform="android"] .update-source-card,
+  html[data-platform="android"] .diagnostic-card {
+    margin-bottom: 10px;
+    padding: 13px;
+  }
+
+  html[data-platform="android"] .update-source-heading,
+  html[data-platform="android"] .diagnostic-heading {
+    min-width: 0;
+    gap: 9px;
+  }
+
+  html[data-platform="android"] .update-source-heading > div,
+  html[data-platform="android"] .diagnostic-heading > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .diagnostic-heading {
+    flex-direction: column;
+  }
+
+  html[data-platform="android"] .diagnostic-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 6px;
+  }
+
+  html[data-platform="android"] .diagnostic-actions .button {
+    width: 100%;
+  }
+
+  html[data-platform="android"] .diagnostic-clear {
+    margin-left: 0;
+  }
+
+  html[data-platform="android"] .diagnostic-list summary {
+    min-width: 0;
+    min-height: 58px;
+    padding: 10px;
+    gap: 8px;
+  }
+
+  html[data-platform="android"] .diagnostic-list summary > span:first-child {
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .diagnostic-list summary strong,
+  html[data-platform="android"] .diagnostic-list summary small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  html[data-platform="android"] .diagnostic-detail {
+    padding: 0 10px 10px;
+  }
+
+  html[data-platform="android"] .diagnostic-detail dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  html[data-platform="android"] .trash-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 9px;
+    padding: 13px;
+  }
+
+  html[data-platform="android"] .trash-meta,
+  html[data-platform="android"] .trash-meta * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .trash-row > div:last-child {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  html[data-platform="android"] .trash-row .button {
+    width: 100%;
+  }
+
+  /* AI: a full-width conversation surface with stable avatars and composer. */
+  html[data-platform="android"] .ai-assistant-page {
+    height: calc(100dvh - var(--android-bottom-nav-height));
+    min-height: 0;
+    padding: 0;
+  }
+
+  html[data-platform="android"] .ai-page-head {
+    display: none;
+  }
+
+  html[data-platform="android"] .ai-workspace,
+  html[data-platform="android"] .ai-workspace.history-closed {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    background: color-mix(in srgb, var(--surface-solid) 97%, transparent);
+    box-shadow: none;
+  }
+
+  html[data-platform="android"] .ai-chat-panel {
+    min-width: 0;
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    overflow: hidden;
+  }
+
+  html[data-platform="android"] .ai-chat-toolbar {
+    min-width: 0;
+    min-height: calc(52px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 8px 5px;
+    gap: 6px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  html[data-platform="android"] .ai-chat-toolbar > * {
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .ai-chat-toolbar > div:first-child {
+    flex: 1 1 auto;
+  }
+
+  html[data-platform="android"] .ai-model-control {
+    flex: 0 1 48%;
+    width: auto;
+    max-width: 48%;
+  }
+
+  html[data-platform="android"] .ai-model-control select {
+    width: 100%;
+    height: 38px;
+    padding: 6px 24px 6px 8px;
+    font-size: 11px;
+    text-overflow: ellipsis;
+  }
+
+  html[data-platform="android"] .ai-messages {
+    min-width: 0;
+    min-height: 0;
+    padding: 10px 9px 7px;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  html[data-platform="android"] .ai-message {
+    min-width: 0;
+    max-width: 100%;
+    gap: 6px;
+  }
+
+  html[data-platform="android"] .ai-message-avatar {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    flex: 0 0 28px;
+  }
+
+  html[data-platform="android"] .ai-message > div {
+    min-width: 0;
+    max-width: calc(100% - 34px);
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .ai-composer {
+    width: calc(100% - 16px);
+    min-width: 0;
+    margin: 0 8px max(7px, env(safe-area-inset-bottom));
+    padding: 6px;
+    gap: 6px;
+    border-radius: 13px;
+  }
+
+  html[data-platform="android"] .ai-composer textarea {
+    min-width: 0;
+    min-height: 44px;
+    max-height: min(24dvh, 132px);
+    padding: 10px;
+    font-size: 14px;
+  }
+
+  html[data-platform="android"] .ai-send-button {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    flex: 0 0 40px;
+  }
+
+  html[data-platform="android"] .ai-inline-error {
+    margin: 0 8px 6px;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .ai-conversation-sidebar {
+    width: min(86vw, 330px);
+    max-width: calc(100vw - 44px);
+  }
+
+  html[data-platform="android"] .ai-history-list,
+  html[data-platform="android"] .ai-history-item {
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .ai-history-item * {
+    overflow-wrap: anywhere;
+  }
+
+  /* Rich imported material is allowed to scroll horizontally only inside its
+     own table wrapper, never at page level. */
+  html[data-platform="android"] .content-block-table {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  html[data-platform="android"] .content-block-table table {
+    min-width: 520px;
+  }
+
+  html[data-platform="android"] .content-block-media img,
+  html[data-platform="android"] .content-block-audio,
+  html[data-platform="android"] audio {
+    max-width: 100%;
+  }
+
+  html[data-platform="android"] .content-block-caption,
+  html[data-platform="android"] .content-block-text,
+  html[data-platform="android"] .content-block-table td {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 380px) {
+  html[data-platform="android"] .page:not(.practice-page) {
+    padding-inline: 10px;
+  }
+
+  html[data-platform="android"] .portrait-practice-card {
+    grid-template-columns: 34px minmax(0, 1fr) 14px;
+    padding: 8px;
+  }
+
+  html[data-platform="android"] .portrait-practice-card img {
+    width: 34px;
+    height: 34px;
+  }
+
+  html[data-platform="android"] .portrait-practice-card small,
+  html[data-platform="android"] .portrait-save-state {
+    display: none;
+  }
+
+  html[data-platform="android"] .answer-number-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  html[data-platform="android"] .wrong-level-stats {
+    display: none;
+  }
+
+  html[data-platform="android"] .review-actions .button {
+    font-size: 9px;
+  }
+}
+
+/* Final Android portrait width guard for the AI assistant. Keep every grid
+   and flex child shrinkable so avatars and composer actions stay on-screen. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .ai-assistant-page,
+  html[data-platform="android"] .ai-workspace,
+  html[data-platform="android"] .ai-workspace.history-closed,
+  html[data-platform="android"] .ai-chat-panel {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  html[data-platform="android"] .ai-assistant-page,
+  html[data-platform="android"] .ai-chat-panel,
+  html[data-platform="android"] .ai-messages,
+  html[data-platform="android"] .ai-composer {
+    overflow-x: hidden;
+  }
+
+  html[data-platform="android"] .ai-workspace,
+  html[data-platform="android"] .ai-workspace.history-closed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  html[data-platform="android"] .ai-chat-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  html[data-platform="android"] .ai-chat-toolbar,
+  html[data-platform="android"] .ai-chat-toolbar > *,
+  html[data-platform="android"] .ai-model-control,
+  html[data-platform="android"] .ai-messages,
+  html[data-platform="android"] .ai-message,
+  html[data-platform="android"] .ai-message > div,
+  html[data-platform="android"] .ai-composer,
+  html[data-platform="android"] .ai-composer > div,
+  html[data-platform="android"] .ai-composer textarea,
+  html[data-platform="android"] .ai-composer small {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  html[data-platform="android"] .ai-chat-toolbar {
+    width: 100%;
+  }
+
+  html[data-platform="android"] .ai-model-control {
+    flex: 1 1 auto;
+  }
+
+  html[data-platform="android"] .ai-message {
+    width: 100%;
+  }
+
+  html[data-platform="android"] .ai-message.user {
+    grid-template-columns: minmax(0, 1fr) 32px;
+  }
+
+  html[data-platform="android"] .ai-message-avatar {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+  }
+
+  html[data-platform="android"] .ai-composer {
+    width: 100%;
+    margin-right: 0;
+    margin-left: 0;
+  }
+
+  html[data-platform="android"] .ai-composer > div {
+    width: 100%;
+  }
+
+  html[data-platform="android"] .ai-composer textarea {
+    width: 100%;
+  }
+
+  html[data-platform="android"] .ai-composer small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  html[data-platform="android"] .ai-send-button {
+    width: 42px;
+    min-width: 42px;
+    max-width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+  }
+}
+
+/* Absolute last override: hidden portrait footer must not reserve any space. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .practice-page {
+    --compact-practice-footer-height: 0px !important;
+  }
+
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom)) !important;
+    scroll-padding-bottom: calc(24px + env(safe-area-inset-bottom)) !important;
+  }
+
+  html[data-platform="android"] .practice-footer,
+  html[data-platform="android"] .practice-footer.listening-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer.listening-footer {
+    display: none !important;
+    min-height: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+  }
+}
+
+/* Final Android portrait surface overrides.
+   Keep this block last so legacy tablet/compact rules cannot reintroduce the
+   old submit footer or the framed AI workspace. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .practice-page {
+    --compact-practice-footer-height: 0px !important;
+  }
+
+  html[data-platform="android"] .practice-footer,
+  html[data-platform="android"] .practice-footer.listening-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer.listening-footer {
+    display: none !important;
+    min-height: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+  }
+
+  html[data-platform="android"] .portrait-practice-top {
+    min-height: calc(52px + env(safe-area-inset-top)) !important;
+    height: calc(52px + env(safe-area-inset-top)) !important;
+    padding-top: env(safe-area-inset-top) !important;
+  }
+
+  html[data-platform="android"] .portrait-practice-actions {
+    min-height: 52px !important;
+    height: 52px !important;
+    padding: 4px 8px 3px !important;
+    gap: 6px !important;
+  }
+
+  html[data-platform="android"] .practice-layout,
+  html[data-platform="android"][data-window-mode="compact"] .practice-layout {
+    height: calc(100dvh - 52px - env(safe-area-inset-top)) !important;
+    padding-bottom: 0 !important;
+  }
+
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    padding-bottom: 18px !important;
+    scroll-padding-bottom: 18px !important;
+  }
+
+  html[data-platform="android"] .ai-assistant-page {
+    height: calc(100dvh - var(--android-bottom-nav-height)) !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: env(safe-area-inset-top) 0 0 !important;
+    overflow: hidden !important;
+  }
+
+  html[data-platform="android"] .ai-page-head {
+    display: none !important;
+  }
+
+  html[data-platform="android"] .ai-workspace,
+  html[data-platform="android"] .ai-workspace.history-closed {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: var(--surface-solid) !important;
+  }
+
+  html[data-platform="android"] .ai-chat-panel {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  html[data-platform="android"] .ai-chat-toolbar {
+    min-height: 48px !important;
+    padding: 6px 10px !important;
+    border-top: 0 !important;
+  }
+
+  html[data-platform="android"] .ai-messages {
+    min-height: 0 !important;
+    padding: 14px 12px 10px !important;
+  }
+
+  html[data-platform="android"] .ai-composer {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 7px 10px max(7px, env(safe-area-inset-bottom)) !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  html[data-platform="android"] .ai-composer:focus-within {
+    box-shadow: none !important;
+  }
+}
+
+/* Final Android phone-practice correction. Keep submission in the answer-card
+   drawer, remove legacy footer reservation, and compact the toolbar. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .practice-page {
+    --compact-practice-footer-height: 0px !important;
+  }
+
+  html[data-platform="android"] .practice-footer,
+  html[data-platform="android"] .practice-footer.listening-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer.listening-footer {
+    display: none !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+  }
+
+  html[data-platform="android"] .portrait-practice-top {
+    min-height: calc(52px + env(safe-area-inset-top)) !important;
+    display: flex;
+    align-items: center;
+    padding: calc(5px + env(safe-area-inset-top)) 8px 5px !important;
+    gap: 0;
+  }
+
+  html[data-platform="android"] .portrait-practice-actions {
+    width: 100%;
+    min-height: 34px !important;
+    padding: 0 !important;
+    gap: 4px;
+  }
+
+  html[data-platform="android"] .portrait-icon-button {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    border-radius: 8px;
+  }
+
+  html[data-platform="android"] .portrait-icon-button svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill {
+    min-height: 30px;
+    gap: 3px;
+    padding: 2px 7px 2px 2px;
+    border-radius: 8px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill button {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill strong {
+    min-width: 38px;
+    font-size: 12px;
+  }
+
+  html[data-platform="android"] .portrait-save-state {
+    padding: 3px 5px;
+    font-size: 11px;
+  }
+
+  html[data-platform="android"] .portrait-practice-heading {
+    display: none !important;
+  }
+
+  html[data-platform="android"] .practice-layout,
+  html[data-platform="android"][data-window-mode="compact"] .practice-layout {
+    height: calc(100dvh - 52px - env(safe-area-inset-top)) !important;
+    padding-bottom: 0 !important;
+  }
+
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    padding-bottom: 16px !important;
+    scroll-padding-bottom: 16px !important;
+  }
+
+  html[data-platform="android"] .unanswered-banner {
+    top: calc(60px + env(safe-area-inset-top));
+  }
+}
+
+/* Final Android phone-practice correction. Keep submission in the answer-card
+   drawer, remove legacy footer reservation, and compact the toolbar. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .practice-page {
+    --compact-practice-footer-height: 0px !important;
+  }
+
+  html[data-platform="android"] .practice-footer,
+  html[data-platform="android"] .practice-footer.listening-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer.listening-footer {
+    display: none !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+  }
+
+  html[data-platform="android"] .portrait-practice-top {
+    min-height: calc(52px + env(safe-area-inset-top)) !important;
+    display: flex;
+    align-items: center;
+    padding: calc(5px + env(safe-area-inset-top)) 8px 5px !important;
+    gap: 0;
+  }
+
+  html[data-platform="android"] .portrait-practice-actions {
+    width: 100%;
+    min-height: 34px !important;
+    padding: 0 !important;
+    gap: 4px;
+  }
+
+  html[data-platform="android"] .portrait-icon-button {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    border-radius: 8px;
+  }
+
+  html[data-platform="android"] .portrait-icon-button svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill {
+    min-height: 30px;
+    gap: 3px;
+    padding: 2px 7px 2px 2px;
+    border-radius: 8px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill button {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill strong {
+    min-width: 38px;
+    font-size: 12px;
+  }
+
+  html[data-platform="android"] .portrait-save-state {
+    padding: 3px 5px;
+    font-size: 11px;
+  }
+
+  html[data-platform="android"] .portrait-practice-heading {
+    display: none !important;
+  }
+
+  html[data-platform="android"] .practice-layout,
+  html[data-platform="android"][data-window-mode="compact"] .practice-layout {
+    height: calc(100dvh - 52px - env(safe-area-inset-top)) !important;
+    padding-bottom: 0 !important;
+  }
+
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    padding-bottom: 16px !important;
+    scroll-padding-bottom: 16px !important;
+  }
+
+  html[data-platform="android"] .unanswered-banner {
+    top: calc(60px + env(safe-area-inset-top));
+  }
+}
+
+/* Highest-priority Android phone practice correction. The answer-card drawer
+   is the only submission surface in portrait mode. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .practice-page {
+    --compact-practice-footer-height: 0px !important;
+  }
+
+  html[data-platform="android"] .practice-footer,
+  html[data-platform="android"] .practice-footer.listening-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer.listening-footer {
+    display: none !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+  }
+
+  html[data-platform="android"] .portrait-practice-top {
+    min-height: calc(52px + env(safe-area-inset-top)) !important;
+    display: flex;
+    align-items: center;
+    padding: calc(5px + env(safe-area-inset-top)) 8px 5px !important;
+    gap: 0;
+  }
+
+  html[data-platform="android"] .portrait-practice-actions {
+    width: 100%;
+    min-height: 34px !important;
+    padding: 0 !important;
+    gap: 4px;
+  }
+
+  html[data-platform="android"] .portrait-icon-button {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    border-radius: 8px;
+  }
+
+  html[data-platform="android"] .portrait-icon-button svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill {
+    min-height: 30px;
+    gap: 3px;
+    padding: 2px 7px 2px 2px;
+    border-radius: 8px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill button {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill strong {
+    min-width: 38px;
+    font-size: 12px;
+  }
+
+  html[data-platform="android"] .portrait-save-state {
+    padding: 3px 5px;
+    font-size: 11px;
+  }
+
+  html[data-platform="android"] .portrait-practice-heading {
+    display: none !important;
+  }
+
+  html[data-platform="android"] .practice-layout,
+  html[data-platform="android"][data-window-mode="compact"] .practice-layout {
+    height: calc(100dvh - 52px - env(safe-area-inset-top)) !important;
+    padding-bottom: 0 !important;
+  }
+
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    padding-bottom: 16px !important;
+    scroll-padding-bottom: 16px !important;
+  }
+
+  html[data-platform="android"] .unanswered-banner {
+    top: calc(60px + env(safe-area-inset-top));
+  }
+}
+
+/* Final phone-practice layout: submission lives in the answer-card drawer.
+   Keep no legacy footer or reserved space below the independently scrolling
+   options pane, and keep the toolbar to one compact functional row. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .practice-page {
+    --compact-practice-footer-height: 0px !important;
+  }
+
+  html[data-platform="android"] .practice-footer,
+  html[data-platform="android"] .practice-footer.listening-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer.listening-footer {
+    display: none !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+  }
+
+  html[data-platform="android"] .portrait-practice-top {
+    min-height: calc(52px + env(safe-area-inset-top)) !important;
+    display: flex;
+    align-items: center;
+    padding: calc(5px + env(safe-area-inset-top)) 8px 5px !important;
+    gap: 0;
+  }
+
+  html[data-platform="android"] .portrait-practice-actions {
+    width: 100%;
+    min-height: 34px !important;
+    padding: 0 !important;
+    gap: 4px;
+  }
+
+  html[data-platform="android"] .portrait-icon-button {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    border-radius: 8px;
+  }
+
+  html[data-platform="android"] .portrait-icon-button svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill {
+    min-height: 30px;
+    gap: 3px;
+    padding: 2px 7px 2px 2px;
+    border-radius: 8px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill button {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+  }
+
+  html[data-platform="android"] .portrait-timer-pill strong {
+    min-width: 38px;
+    font-size: 12px;
+  }
+
+  html[data-platform="android"] .portrait-save-state {
+    padding: 3px 5px;
+    font-size: 11px;
+  }
+
+  html[data-platform="android"] .portrait-practice-heading {
+    display: none !important;
+  }
+
+  html[data-platform="android"] .practice-layout,
+  html[data-platform="android"][data-window-mode="compact"] .practice-layout {
+    height: calc(100dvh - 52px - env(safe-area-inset-top)) !important;
+    padding-bottom: 0 !important;
+  }
+
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    padding-bottom: 16px !important;
+    scroll-padding-bottom: 16px !important;
+  }
+
+  html[data-platform="android"] .unanswered-banner {
+    top: calc(60px + env(safe-area-inset-top));
+  }
 }
 
 /* Android portrait practice and review surfaces. Desktop and landscape keep the established layout. */
@@ -1607,6 +4547,116 @@ html[data-platform="android"][data-window-mode="compact"] .practice-submit-actio
 }
 .bank-switcher { position: relative; margin: 0 0 18px; }
 .bank-switcher-main { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+
+/* Canonical Android portrait practice layout.
+   Keep this override last: older phone/tablet rules above intentionally remain
+   for reference, but this block is the single source of truth for the active
+   portrait practice surface. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] .practice-page {
+    --portrait-practice-top-height: 64px;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    min-height: 0;
+    max-height: 100dvh;
+    overflow: hidden;
+  }
+
+  html[data-platform="android"] .default-practice-top {
+    display: none;
+  }
+
+  html[data-platform="android"] .portrait-practice-top {
+    position: relative;
+    top: auto;
+    flex: 0 0 auto;
+    min-height: calc(var(--portrait-practice-top-height) + env(safe-area-inset-top));
+    height: auto;
+    padding-top: env(safe-area-inset-top);
+  }
+
+  html[data-platform="android"] .practice-layout,
+  html[data-platform="android"][data-window-mode="compact"] .practice-layout {
+    display: grid;
+    flex: 1 1 auto;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    padding: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows:
+      minmax(0, var(--portrait-passage-size, 50fr))
+      18px
+      minmax(0, var(--portrait-question-size, 50fr));
+    overflow: hidden;
+  }
+
+  html[data-platform="android"] .passage-pane,
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .passage-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    display: block;
+    min-width: 0;
+    min-height: 0;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  html[data-platform="android"] .passage-pane {
+    padding: 14px 14px 20px;
+    border-right: 0;
+  }
+
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    padding: 12px 12px calc(24px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+
+  /* Submit actions live in the answer-card drawer. The legacy fixed footer
+     must not reserve or paint space in the portrait practice view. */
+  html[data-platform="android"] .practice-footer,
+  html[data-platform="android"] .practice-footer.listening-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer.listening-footer {
+    display: none !important;
+    position: static !important;
+    width: 0 !important;
+    min-height: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  html[data-platform="android"] .answer-card-overlay {
+    display: flex;
+    z-index: 100;
+    padding-top: calc(36px + env(safe-area-inset-top));
+  }
+
+  html[data-platform="android"] .answer-card-drawer {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-height: calc(100dvh - 36px - env(safe-area-inset-top));
+    min-height: min(72dvh, 580px);
+  }
+
+  html[data-platform="android"] .answer-card-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  html[data-platform="android"] .answer-card-actions {
+    flex: 0 0 auto;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+}
 .bank-switcher select { min-width:190px; padding:9px 34px 9px 12px; border:1px solid var(--line, #d9dfd7); border-radius:12px; background:var(--surface, #fff); color:inherit; }
 .button.compact { min-height:36px; padding:7px 11px; }
 .button.ghost { background:transparent; color:inherit; border:1px solid var(--line, #d9dfd7); }
@@ -1944,7 +4994,10 @@ html[data-platform="android"][data-orientation="portrait"] .portrait-paper-list 
   width: 100%;
   min-height: 47px;
   padding: 11px 13px;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   border: 0;
   border-top: 1px solid var(--line);
   color: var(--ink);
@@ -1958,6 +5011,8 @@ html[data-platform="android"][data-orientation="portrait"] .portrait-paper-list 
 
 html[data-platform="android"][data-orientation="portrait"] .portrait-paper-list strong {
   display: block;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   font-size: 13px;
   font-weight: 600;
@@ -2707,5 +5762,324 @@ html[data-platform="android"] .import-publish-toast {
     padding: 6px 3px;
     gap: 3px;
     border-radius: 10px;
+  }
+}
+
+/* Last-mile Android portrait overrides: these rules intentionally stay at EOF
+   so they win over legacy compact/tablet media queries above. */
+@media (orientation: portrait) and (max-width: 840px) {
+  html[data-platform="android"] {
+    --android-bottom-nav-height: calc(68px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] body {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  html[data-platform="android"] .main-content {
+    min-width: 0;
+    overflow-x: clip;
+    padding-bottom: var(--android-bottom-nav-height);
+  }
+
+  html[data-platform="android"] .page {
+    min-width: 0;
+    padding: 18px 14px calc(26px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .page-head {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  html[data-platform="android"] .page-head h1 {
+    min-width: 0;
+    font-size: 27px;
+    line-height: 1.2;
+  }
+
+  html[data-platform="android"] .grid-2,
+  html[data-platform="android"] .grid-3,
+  html[data-platform="android"] .grid-4,
+  html[data-platform="android"] .import-source-grid,
+  html[data-platform="android"] .workspace-grid,
+  html[data-platform="android"] .update-check-grid,
+  html[data-platform="android"] .draft-meta-grid,
+  html[data-platform="android"] .option-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  html[data-platform="android"] .paper-card,
+  html[data-platform="android"] .trash-row {
+    width: 100%;
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .trash-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 11px;
+  }
+
+  html[data-platform="android"] .trash-row .button {
+    width: 100%;
+  }
+
+  html[data-platform="android"] .history-panel {
+    position: static;
+  }
+
+  html[data-platform="android"] .diagnostic-detail dl {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  html[data-platform="android"] .diagnostic-detail dt {
+    margin-top: 8px;
+  }
+
+  html[data-platform="android"] .diagnostic-detail dd {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  html[data-platform="android"] .content-block-table {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  html[data-platform="android"] .content-block-table table {
+    min-width: 520px;
+  }
+
+  html[data-platform="android"] .content-block-table td {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-platform="android"] .content-block-media img {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+  }
+
+  html[data-platform="android"] .modal-overlay {
+    align-items: flex-start;
+    padding: calc(16px + env(safe-area-inset-top)) 12px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .modal-card {
+    max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+
+  /* Practice keeps passage and questions independently scrollable. */
+  html[data-platform="android"] .practice-page {
+    height: 100dvh;
+    min-height: 0;
+    padding-top: 0;
+    overflow: hidden;
+  }
+
+  html[data-platform="android"] .portrait-practice-top {
+    flex: none;
+    min-height: calc(76px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+  }
+
+  html[data-platform="android"] .practice-layout,
+  html[data-platform="android"][data-window-mode="compact"] .practice-layout {
+    height: calc(100dvh - 76px - env(safe-area-inset-top));
+    min-height: 0;
+    grid-template-rows:
+      minmax(0, var(--portrait-passage-size, 50fr))
+      18px
+      minmax(0, var(--portrait-question-size, 50fr));
+  }
+
+  html[data-platform="android"] .passage-pane,
+  html[data-platform="android"] .question-pane,
+  html[data-platform="android"][data-window-mode="compact"] .passage-pane,
+  html[data-platform="android"][data-window-mode="compact"] .question-pane {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  html[data-platform="android"] .passage-pane {
+    padding: 20px 16px 28px;
+    border-right: 0;
+  }
+
+  html[data-platform="android"] .question-pane {
+    padding: 16px 12px calc(24px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .passage-pane h1 {
+    margin-top: 5px;
+    font-size: 22px;
+    line-height: 1.35;
+  }
+
+  html[data-platform="android"] .passage-pane .lead {
+    margin-bottom: 16px !important;
+    font-size: 14px;
+    line-height: 1.65;
+  }
+
+  html[data-platform="android"] .passage,
+  html[data-platform="android"] .question-card,
+  html[data-platform="android"] .candidate-card,
+  html[data-platform="android"] .candidate-reference {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  html[data-platform="android"] .question-card {
+    margin-bottom: 12px;
+    padding: 13px;
+  }
+
+  html[data-platform="android"] .option {
+    min-height: 44px;
+    padding: 10px 11px;
+    gap: 9px;
+  }
+
+  html[data-platform="android"] .listening-console-pane .listening-player,
+  html[data-platform="android"] .listening-console-pane audio {
+    max-width: 100%;
+  }
+
+  /* Submission lives in the answer-card drawer on portrait screens. Keep the
+     legacy footer out of layout entirely so it cannot leave a blank box or
+     cover the last options. */
+  html[data-platform="android"] .practice-footer,
+  html[data-platform="android"] .practice-footer.listening-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer,
+  html[data-platform="android"][data-window-mode="compact"] .practice-footer.listening-footer {
+    display: none !important;
+  }
+
+  html[data-platform="android"] .practice-submit-actions,
+  html[data-platform="android"] .practice-submit-actions .button {
+    min-width: 0;
+  }
+
+  html[data-platform="android"] .answer-card-overlay {
+    padding-top: calc(42px + env(safe-area-inset-top));
+  }
+
+  html[data-platform="android"] .answer-card-drawer {
+    max-height: calc(100dvh - 42px - env(safe-area-inset-top));
+    min-height: 42dvh;
+  }
+
+  /* Vocabulary review fixes the chrome and gives the answer body the scroll. */
+  html[data-platform="android"] .review-card {
+    height: 100dvh;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  html[data-platform="android"] .review-header,
+  html[data-platform="android"] .review-actions {
+    flex: 0 0 auto;
+  }
+
+  html[data-platform="android"] .review-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 20px 16px;
+  }
+
+  html[data-platform="android"] .review-actions {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .review-answer blockquote {
+    max-height: min(25dvh, 190px);
+    overflow-y: auto;
+  }
+
+  /* AI keeps history/messages scrollable and leaves the composer above the IME. */
+  html[data-platform="android"] .ai-assistant-page {
+    height: calc(100dvh - var(--android-bottom-nav-height));
+    min-height: 0;
+    padding: 12px 10px 8px;
+  }
+
+  html[data-platform="android"] .ai-workspace,
+  html[data-platform="android"] .ai-workspace.history-closed,
+  html[data-platform="android"] .ai-chat-panel {
+    min-height: 0;
+  }
+
+  html[data-platform="android"] .ai-chat-panel {
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
+
+  html[data-platform="android"] .ai-model-control {
+    min-width: 0;
+    max-width: 62%;
+  }
+
+  html[data-platform="android"] .ai-model-control select {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  html[data-platform="android"] .ai-messages {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  html[data-platform="android"] .ai-message > div {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  html[data-platform="android"] .ai-composer {
+    width: calc(100% - 16px);
+    margin-bottom: 0;
+    padding-bottom: max(7px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (orientation: portrait) and (max-width: 840px) and (max-height: 680px) {
+  html[data-platform="android"] .portrait-practice-top {
+    min-height: calc(68px + env(safe-area-inset-top));
+  }
+
+  html[data-platform="android"] .practice-layout {
+    height: calc(100dvh - 68px - env(safe-area-inset-top));
+  }
+
+  html[data-platform="android"] .passage-pane {
+    padding-top: 13px;
+    padding-bottom: 18px;
+  }
+
+  html[data-platform="android"] .question-pane {
+    padding-top: 10px;
+  }
+
+  html[data-platform="android"] .practice-footer {
+    min-height: calc(68px + env(safe-area-inset-bottom));
+  }
+
+  html[data-platform="android"] .practice-submit-actions .button {
+    min-height: 38px;
+    padding-top: 6px;
+    padding-bottom: 6px;
   }
 }

@@ -28,6 +28,7 @@ const visibleWords = computed(() =>
 const publishedPapers = computed(() => papers.value.filter(
   paper => paper.status === 'published' && Number(paper.question_count || 0) > 0,
 ))
+const resumeSession = computed(() => data.value?.resume_session || null)
 const hasListening = computed(() => Number(data.value?.paper_type_counts?.listening || 0) > 0)
 const hasPracticeType = (type: string) => Number(data.value?.unit_type_counts?.[type] || 0) > 0
 const hasAnyPractice = computed(() => ['cloze', 'reading', 'part_b', 'listening'].some(hasPracticeType))
@@ -57,6 +58,10 @@ function wait(milliseconds: number) {
   return new Promise(resolve => window.setTimeout(resolve, milliseconds))
 }
 
+function reloadAfterAndroidStartup() {
+  void loadHome()
+}
+
 async function loadHome() {
   error.value = ''
   const embedded = (window as any).__LINJIAN_STARTUP__
@@ -82,10 +87,12 @@ async function loadHome() {
 }
 
 onMounted(async () => {
+  window.addEventListener('android-startup-prepared', reloadAfterAndroidStartup)
   await loadHome()
   startVocabularyRotation()
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('android-startup-prepared', reloadAfterAndroidStartup)
   if (vocabularyTimer !== null) window.clearInterval(vocabularyTimer)
 })
 
@@ -114,6 +121,16 @@ async function startPaper(paperId: number) {
     router.push(`/practice/${session.id}`)
   } catch (cause) { error.value = String(cause) }
 }
+
+function scoreText(paper: any) {
+  const fmt = (value: number) => (Number.isFinite(value) && Number.isInteger(value) ? String(value) : value.toFixed(1))
+  return `${fmt(Number(paper.last_score) || 0)}/${fmt(Number(paper.last_max_score) || 0)}`
+}
+
+function resumePractice() {
+  const session = resumeSession.value
+  if (session?.id) router.push(`/practice/${session.id}`)
+}
 </script>
 
 <template>
@@ -129,6 +146,13 @@ async function startPaper(paperId: number) {
       </div>
       <QuestionBankSwitcher @changed="loadHome" />
       <div v-if="error" class="warning">{{ error }}</div>
+      <button v-if="resumeSession" class="resume-practice card" type="button" @click="resumePractice">
+        <span class="resume-icon"><ChevronRight :size="18" /></span>
+        <span class="resume-copy">
+          <small>继续上次未完成练习</small>
+          <strong>{{ resumeSession.year ? `${resumeSession.year} 年` : '随机练习' }}</strong>
+        </span>
+      </button>
       <section v-if="vocabulary.length" class="vocabulary-ticker card" @mouseenter="tickerPaused=true" @mouseleave="tickerPaused=false">
         <div class="ticker-heading"><div><span class="eyebrow">VOCABULARY REVIEW</span><h3>词汇回顾</h3></div><RouterLink to="/vocabulary">查看单词本 →</RouterLink></div>
         <div class="ticker-window"><Transition name="vocabulary-flip" mode="out-in"><div :key="vocabularyPage" class="ticker-group">
@@ -159,6 +183,14 @@ async function startPaper(paperId: number) {
       <QuestionBankSwitcher @changed="loadHome" />
       <div v-if="error" class="warning">{{ error }}</div>
 
+      <button v-if="resumeSession" class="resume-practice card" type="button" @click="resumePractice">
+        <span class="resume-icon"><ChevronRight :size="18" /></span>
+        <span class="resume-copy">
+          <small>继续上次未完成练习</small>
+          <strong>{{ resumeSession.year ? `${resumeSession.year} 年` : '随机练习' }}</strong>
+        </span>
+      </button>
+
       <section v-if="data" class="portrait-overview" aria-label="学习概览">
         <div><strong>{{ data.paper_count }}</strong><span>试卷</span></div>
         <div><strong>{{ data.unit_count }}</strong><span>篇目</span></div>
@@ -184,7 +216,7 @@ async function startPaper(paperId: number) {
       <section class="portrait-paper-section">
         <div class="portrait-section-head"><h2>真题试卷</h2><span>{{ publishedPapers.length }} 套</span></div>
         <div v-if="publishedPapers.length" class="portrait-paper-list">
-          <button v-for="paper in publishedPapers" :key="paper.id" type="button" @click="startPaper(paper.id)"><strong>{{ paper.title }}</strong></button>
+          <button v-for="paper in publishedPapers" :key="paper.id" type="button" @click="startPaper(paper.id)"><strong>{{ paper.title }}</strong><span v-if="paper.active_session_id" class="pill">进行中 · 已做 {{ paper.active_done }}/{{ paper.unit_count }} 篇</span><span v-else-if="paper.last_score != null" class="pill">{{ scoreText(paper) }}</span></button>
         </div>
         <div v-else class="card empty">当前题库还没有可练习试卷。</div>
       </section>

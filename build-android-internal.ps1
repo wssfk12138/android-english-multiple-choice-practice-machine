@@ -2,8 +2,7 @@ param(
     [int]$VersionCode = 5,
     [string]$VersionName = '0.1.0-alpha.5',
     [string]$AppUpdateManifestUrl = '',
-    [string]$QuestionBankCatalogUrl = '',
-    [string]$DiagnosticReceiverUrl = ''
+    [string]$QuestionBankCatalogUrl = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,11 +65,9 @@ $env:ANDROID_HOME = $sdkRoot
 $env:JAVA_HOME = @($jdkCandidates)[0]
 $previousAppManifest = $env:VITE_APP_UPDATE_MANIFEST_URL
 $previousBankCatalog = $env:VITE_QUESTION_BANK_CATALOG_URL
-$previousDiagnosticReceiver = $env:VITE_DIAGNOSTIC_RECEIVER_URL
 $previousBundledBank = $env:VITE_BUNDLED_QUESTION_BANK
 $env:VITE_APP_UPDATE_MANIFEST_URL = $AppUpdateManifestUrl.Trim()
 $env:VITE_QUESTION_BANK_CATALOG_URL = $QuestionBankCatalogUrl.Trim()
-$env:VITE_DIAGNOSTIC_RECEIVER_URL = $DiagnosticReceiverUrl.Trim()
 $env:VITE_BUNDLED_QUESTION_BANK = '1'
 
 function Invoke-Checked {
@@ -110,7 +107,6 @@ try {
     Remove-Item -LiteralPath $bundledBankTarget -Force -ErrorAction SilentlyContinue
     $env:VITE_APP_UPDATE_MANIFEST_URL = $previousAppManifest
     $env:VITE_QUESTION_BANK_CATALOG_URL = $previousBankCatalog
-    $env:VITE_DIAGNOSTIC_RECEIVER_URL = $previousDiagnosticReceiver
     $env:VITE_BUNDLED_QUESTION_BANK = $previousBundledBank
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, Eye } from 'lucide-vue-next'
+import { BookOpen, ChevronDown, ExternalLink, Eye } from 'lucide-vue-next'
 import { onMounted, ref } from 'vue'
 
 const dark = ref(false)
@@ -84,5 +84,15 @@ onMounted(() => {
       <RouterLink class="card mobile-hub-item" to="/android-updates"><img src="/assets/icons/update.png" alt=""><span><strong>更新与日志</strong><small>检查内测更新、查看或发送脱敏日志。</small></span><b aria-hidden="true">›</b></RouterLink>
       <RouterLink class="card mobile-hub-item" to="/trash"><img src="/assets/icons/diagnostics.png" alt=""><span><strong>回收站</strong><small>七天内恢复删除的试卷与题库配置。</small></span><b aria-hidden="true">›</b></RouterLink>
     </div>
+    <section class="settings-about card" aria-labelledby="mobile-settings-about-title">
+      <div class="settings-about-heading">
+        <span class="settings-about-icon"><BookOpen :size="20" /></span>
+        <div><span class="eyebrow">HELP &amp; FEEDBACK</span><h2 id="mobile-settings-about-title">帮助与关于</h2><p>离线查看功能说明与常见问题，遇到问题可直接反馈。</p></div>
+      </div>
+      <div class="settings-about-actions">
+        <RouterLink class="button secondary" to="/help"><BookOpen :size="16" />使用帮助</RouterLink>
+        <a class="button ghost" href="https://xiaoheihe.cn/creator/content_management/detail/187311918" target="_blank" rel="noopener noreferrer"><ExternalLink :size="16" />问题反馈</a>
+      </div>
+    </section>
   </div>
 </template>

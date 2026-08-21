@@ -2,6 +2,8 @@ import { secureStore } from '../secure-store'
 import { row, rows, run, transaction } from './database'
 import { LocalApiError } from './errors'
 import { nativeJson } from './native-http'
+import { tombstoneAiProfile } from './lan-sync'
+import { notifyLocalChange } from './sync-scheduler'
 
 type JsonRecord = Record<string, any>
 
@@ -85,6 +87,7 @@ export async function createProfile(body: JsonRecord): Promise<JsonRecord> {
       [id, body.default_model, body.default_model],
     )
   }
+  notifyLocalChange()
   return (await listProfiles()).find(profile => profile.id === id)!
 }
 
@@ -120,17 +123,20 @@ export async function updateProfile(id: number, body: JsonRecord): Promise<JsonR
     )
   }
   await ensureDefault()
+  notifyLocalChange()
   return (await listProfiles()).find(profile => profile.id === id)!
 }
 
 export async function deleteProfile(id: number): Promise<{ ok: true }> {
   const count = await row<{ total: number }>('SELECT COUNT(*) AS total FROM ai_profiles')
   if (Number(count?.total || 0) <= 1) throw new LocalApiError(409, '至少保留一个 API 配置')
-  await profileOr404(id)
+  const profile = await profileOr404(id)
+  await tombstoneAiProfile(String(profile.name || ''))
   await run('DELETE FROM ai_profile_models WHERE profile_id = ?', [id])
   await run('DELETE FROM ai_profiles WHERE id = ?', [id])
   await secureStore.remove(keyName(id))
   await ensureDefault()
+  notifyLocalChange()
   return { ok: true }
 }
 

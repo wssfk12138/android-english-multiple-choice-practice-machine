@@ -3,6 +3,7 @@ import { androidDatabase, row, rows, run, transaction } from './database'
 import { esqFormatName, paperExamMetadata, validateEsqManifest } from './esq-format'
 import { LocalApiError } from './errors'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
+import { orderingFixedSlotsForPaperUnit } from './ordering-fixed-slots'
 
 type JsonRecord = Record<string, any>
 
@@ -213,8 +214,25 @@ export async function createEsqImportFromBytes(
   )
 }
 
-export async function installBundledQuestionBank(): Promise<JsonRecord> {
-  const response = await fetch('/internal-question-bank.esq', { cache: 'no-store' })
+async function bundledProfileId(subject: string): Promise<number> {
+  const name = subject.includes('英语二') ? '考研英语二' : '考研英语一'
+  const existing = await row<{ id: number }>(
+    'SELECT id FROM question_bank_profiles WHERE name = ? COLLATE NOCASE AND deleted_at IS NULL LIMIT 1',
+    [name],
+  )
+  if (existing) return Number(existing.id)
+  const created = await run(
+    'INSERT INTO question_bank_profiles(name, description, is_default) VALUES (?, ?, 0)',
+    [name, `公测版内置${name}题库`],
+  )
+  return Number(created.lastId)
+}
+
+export async function installBundledQuestionBank(
+  assetPath = 'internal-question-bank.esq',
+  profileId?: number,
+): Promise<JsonRecord> {
+  const response = await fetch(`/${assetPath.replace(/^\/+/, '')}`, { cache: 'no-store' })
   if (response.status === 404) return { available: false, installed: false }
   if (!response.ok) throw new LocalApiError(400, `内置题库读取失败：${response.status}`)
   const data = new Uint8Array(await response.arrayBuffer())
@@ -228,12 +246,12 @@ export async function installBundledQuestionBank(): Promise<JsonRecord> {
     [packageId, contentVersion],
   )
   if (installed) return { available: true, installed: false, alreadyInstalled: true }
-  const profileId = await activeQuestionBankProfileId()
-  const preview = await buildPreview(pkg, profileId)
+  const targetProfileId = profileId || await activeQuestionBankProfileId()
+  const preview = await buildPreview(pkg, targetProfileId)
   if (preview.conflicts.some((item: JsonRecord) => item.existing)) {
     return { available: true, installed: false, conflicts: true }
   }
-  const created = await createParsedEsqImport('internal-question-bank.esq', pkg, data, profileId)
+  const created = await createParsedEsqImport(assetPath, pkg, data, targetProfileId)
   await publishEsqImport(created.id, { resolutions: [] })
   return {
     available: true,
@@ -242,6 +260,19 @@ export async function installBundledQuestionBank(): Promise<JsonRecord> {
     contentVersion,
     totals: preview.totals,
   }
+}
+
+export async function installBundledQuestionBanks(): Promise<JsonRecord> {
+  const assets = [
+    { path: 'internal-question-bank.esq', subject: '考研英语一' },
+    { path: 'internal-question-bank-english-two.esq', subject: '考研英语二' },
+  ]
+  const results: JsonRecord[] = []
+  for (const asset of assets) {
+    const profileId = await bundledProfileId(asset.subject)
+    results.push({ asset: asset.path, ...(await installBundledQuestionBank(asset.path, profileId)) })
+  }
+  return { available: results.some(item => item.available), results }
 }
 
 export async function listEsqImports(): Promise<JsonRecord[]> {
@@ -348,6 +379,7 @@ async function upsertPaper(
   for (let unitIndex = 0; unitIndex < paper.units.length; unitIndex++) {
     const unit = paper.units[unitIndex]
     const blocks = unit.passage?.blocks || []
+    const fixedSlots = orderingFixedSlotsForPaperUnit(paper, unit)
     const existingUnit = await db.query(
       `SELECT id FROM units
        WHERE paper_id = ? AND (external_key = ? OR sequence = ?)
@@ -371,6 +403,7 @@ async function upsertPaper(
             candidate.content,
           ]),
         ),
+        ...(fixedSlots.length ? { fixed_slots: fixedSlots } : {}),
       }),
     ]
     if (unitId) {
@@ -578,7 +611,22 @@ export async function listPapers(): Promise<JsonRecord[]> {
   return rows(
     `SELECT p.*,
        COUNT(DISTINCT u.id) AS unit_count,
-       COUNT(q.id) AS question_count
+       COUNT(q.id) AS question_count,
+       (SELECT ps.id FROM practice_sessions ps
+        WHERE ps.paper_id = p.id AND ps.status = 'active' AND ps.mode = 'paper'
+        ORDER BY ps.id DESC LIMIT 1) AS active_session_id,
+       (SELECT COUNT(*) FROM practice_unit_submissions pus
+        WHERE pus.session_id = (
+          SELECT id FROM practice_sessions
+          WHERE paper_id = p.id AND status = 'active' AND mode = 'paper'
+          ORDER BY id DESC LIMIT 1
+        )) AS active_done,
+       (SELECT ps.score FROM practice_sessions ps
+        WHERE ps.paper_id = p.id AND ps.status = 'submitted' AND ps.mode = 'paper'
+        ORDER BY ps.id DESC LIMIT 1) AS last_score,
+       (SELECT ps.max_score FROM practice_sessions ps
+        WHERE ps.paper_id = p.id AND ps.status = 'submitted' AND ps.mode = 'paper'
+        ORDER BY ps.id DESC LIMIT 1) AS last_max_score
      FROM papers p
      LEFT JOIN units u ON u.paper_id = p.id
      LEFT JOIN questions q ON q.unit_id = u.id

@@ -16,6 +16,7 @@ function typeLabel(type: string) {
     paper: '试卷',
     document_import: 'Word/PDF 导入草稿',
     esq_import: 'ESQ 导入草稿',
+    wrong_archive: '错题记录',
   } as Record<string, string>)[type] || type
 }
 

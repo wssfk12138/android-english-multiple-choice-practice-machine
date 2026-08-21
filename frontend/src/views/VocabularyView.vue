@@ -15,9 +15,14 @@ const notice = ref('')
 const editing = ref(false)
 const editForm = reactive<any>({})
 const reviewMode = ref(false)
+const reviewKind = ref<'scheduled' | 'reinforcement'>('scheduled')
+const reinforcementSize = ref(10)
 const reveal = ref(false)
 const reviewIndex = ref(0)
-const reviewItems = computed(() => items.value.filter(item => item.translation_status === 'ready' && item.study_status !== 'mastered'))
+const reviewItems = computed(() => {
+  const ready = items.value.filter(item => item.translation_status === 'ready')
+  return reviewKind.value === 'reinforcement' ? ready.slice(0, reinforcementSize.value) : ready
+})
 const reviewWord = computed(() => reviewItems.value[reviewIndex.value])
 const DISPLAY_DEFAULTS: Record<string, boolean> = {
   common_meaning: true,
@@ -41,14 +46,14 @@ const expandedAll = ref(false)
 
 function isAndroidPortrait() {
   return document.documentElement.dataset.platform === 'android'
-    && window.matchMedia('(orientation: portrait) and (max-width: 840px)').matches
+    && document.documentElement.dataset.orientation === 'portrait'
 }
 
 function translationStatusText(status: string, detail = false) {
   if (status === 'translating') return detail ? '模型正在后台翻译' : '正在后台翻译…'
   if (status === 'queued') return detail ? '已提交后台翻译' : '正在等待后台翻译…'
   if (status === 'failed') return detail ? '翻译失败，可重新尝试' : '翻译失败，可重试'
-  return detail ? '正在准备后台翻译' : '正在准备翻译…'
+  return detail ? '退出答题界面后开始后台翻译' : '等待后台翻译…'
 }
 
 let translationRefreshTimer = 0
@@ -156,18 +161,34 @@ async function retryTranslation() {
 
 async function rate(rating: string) {
   if (!reviewWord.value) return
-  await post(`/vocabulary/${reviewWord.value.id}/review`, { rating })
+  await post(`/vocabulary/${reviewWord.value.id}/review`, { rating, mode: reviewKind.value })
   reveal.value = false
   await load()
-  if (reviewIndex.value >= reviewItems.value.length) reviewIndex.value = 0
+  if (reviewKind.value === 'reinforcement') reviewIndex.value += 1
+  if (!reviewItems.value.length || reviewIndex.value >= reviewItems.value.length) {
+    reviewMode.value = false
+    reviewIndex.value = 0
+    notice.value = reviewKind.value === 'scheduled' ? '今日到期复习已完成' : '本轮额外巩固已完成'
+  }
 }
 
-function startReview() {
+async function startReview() {
   filter.value = 'review'
-  reviewMode.value = true
+  reviewKind.value = 'scheduled'
   reveal.value = false
   reviewIndex.value = 0
-  load()
+  await load()
+  reviewMode.value = true
+}
+
+async function startReinforcement(size: number) {
+  reinforcementSize.value = size
+  reviewKind.value = 'reinforcement'
+  reveal.value = false
+  reviewIndex.value = 0
+  filter.value = 'all'
+  await load()
+  reviewMode.value = true
 }
 
 let searchTimer = 0
@@ -185,7 +206,7 @@ onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
     <div class="page-head">
       <div><span class="eyebrow">VOCABULARY BOOK</span><h1>我的单词本</h1><p class="lead">从真题语境中收集、理解并复习真正困扰你的词。</p></div>
       <div style="display:flex;gap:8px;align-items:center">
-        <button class="button" @click="startReview"><BookOpen :size="17" />开始今日复习</button>
+        <button class="button" @click="startReview"><BookOpen :size="17" />今日到期 {{ counts.review || 0 }}</button>
       </div>
     </div>
     <div v-if="error" class="warning">{{ error }}</div>
@@ -193,15 +214,22 @@ onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
     <div class="vocab-stats">
       <button class="card" @click="filter='all'"><span>全部单词</span><strong>{{ counts.total || 0 }}</strong></button>
       <button class="card amber" @click="filter='frequent'"><span>🌟 高频生词</span><strong>{{ counts.frequent || 0 }}</strong></button>
-      <button class="card" @click="filter='review'"><span>今日待复习</span><strong>{{ counts.review || 0 }}</strong></button>
+      <button class="card" @click="filter='review'"><span>今日到期</span><strong>{{ counts.review || 0 }}</strong></button>
       <button class="card" @click="filter='mastered'"><span>已掌握</span><strong>{{ counts.mastered || 0 }}</strong></button>
       <button class="card" @click="filter='pending'"><span>等待翻译</span><strong>{{ counts.pending || 0 }}</strong></button>
     </div>
 
+    <section v-if="!reviewMode" class="vocab-reinforcement card">
+      <div><strong>额外巩固</strong><span>不改变正式复习计划，可反复练习</span></div>
+      <div class="vocab-reinforcement-actions">
+        <button v-for="size in [5, 10, 20]" :key="size" class="button secondary compact" type="button" @click="startReinforcement(size)">{{ size }} 词</button>
+      </div>
+    </section>
+
     <section v-if="reviewMode" class="review-overlay">
       <div class="review-card" v-if="reviewWord">
         <header class="review-header">
-          <strong>今日复习 <span>{{ String(reviewIndex + 1).padStart(2, '0') }} / {{ String(reviewItems.length).padStart(2, '0') }}</span></strong>
+          <strong>{{ reviewKind === 'scheduled' ? '到期复习' : '额外巩固' }} <span>{{ String(reviewIndex + 1).padStart(2, '0') }} / {{ String(reviewItems.length).padStart(2, '0') }}</span></strong>
           <button class="review-close" type="button" title="退出复习" aria-label="退出复习" @click="reviewMode=false">×</button>
         </header>
         <div class="review-content">
@@ -224,9 +252,10 @@ onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
           </div>
         </div>
         <footer v-if="reveal" class="review-actions">
-          <button class="button danger" @click="rate('again')">不认识</button>
-          <button class="button secondary" @click="rate('hard')">有点印象</button>
-          <button class="button" @click="rate('mastered')">已掌握</button>
+          <button class="button danger" @click="rate('again')">再来一次</button>
+          <button class="button secondary" @click="rate('hard')">困难</button>
+          <button class="button secondary" @click="rate('know')">认识</button>
+          <button class="button" @click="rate('fluent')">熟练</button>
         </footer>
       </div>
       <div v-else class="card empty">今天没有待复习的单词。</div>
@@ -336,3 +365,45 @@ onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
     </div>
   </div>
 </template>
+
+<style scoped>
+.vocab-reinforcement {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vocab-reinforcement > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.vocab-reinforcement span {
+  color: var(--muted);
+  font-size: .84rem;
+}
+
+.vocab-reinforcement-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+@media (max-width: 720px) {
+  .vocab-reinforcement {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .vocab-reinforcement-actions,
+  .vocab-reinforcement-actions .button {
+    width: 100%;
+  }
+
+  .vocab-reinforcement-actions .button {
+    flex: 1 1 72px;
+  }
+}
+</style>

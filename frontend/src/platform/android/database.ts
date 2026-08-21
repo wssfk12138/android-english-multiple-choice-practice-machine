@@ -4,6 +4,7 @@ import {
   type SQLiteDBConnection,
 } from '@capacitor-community/sqlite'
 import { createSerialQueue } from './serial-queue'
+import { orderingFixedSlotsForPaperUnit } from './ordering-fixed-slots'
 
 const DB_NAME = 'english_practice_machine'
 const DB_VERSION = 1
@@ -135,6 +136,43 @@ CREATE TABLE IF NOT EXISTS wrong_stats (
   last_wrong_at TEXT,
   last_attempt_at TEXT
 );
+CREATE TABLE IF NOT EXISTS wrong_retry_rounds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  unit_id INTEGER NOT NULL,
+  session_id INTEGER NOT NULL,
+  round_number INTEGER NOT NULL,
+  question_count INTEGER NOT NULL DEFAULT 0,
+  correct_count INTEGER NOT NULL DEFAULT 0,
+  wrong_count INTEGER NOT NULL DEFAULT 0,
+  submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TEXT,
+  FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE,
+  FOREIGN KEY (session_id) REFERENCES practice_sessions(id) ON DELETE CASCADE,
+  UNIQUE (unit_id, round_number)
+);
+CREATE TABLE IF NOT EXISTS wrong_retry_round_questions (
+  round_id INTEGER NOT NULL,
+  question_id INTEGER NOT NULL,
+  user_answer TEXT NOT NULL DEFAULT '',
+  is_correct INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (round_id, question_id),
+  FOREIGN KEY (round_id) REFERENCES wrong_retry_rounds(id) ON DELETE CASCADE,
+  FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS wrong_current_questions (
+  unit_id INTEGER NOT NULL,
+  question_id INTEGER NOT NULL,
+  since_round_id INTEGER,
+  deleted_at TEXT,
+  PRIMARY KEY (unit_id, question_id),
+  FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE,
+  FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE,
+  FOREIGN KEY (since_round_id) REFERENCES wrong_retry_rounds(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS app_migrations (
+  migration_key TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS wrong_analysis_reports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   scope_key TEXT NOT NULL DEFAULT '',
@@ -173,6 +211,9 @@ CREATE TABLE IF NOT EXISTS vocabulary_entries (
   study_status TEXT NOT NULL DEFAULT 'learning',
   manually_frequent INTEGER NOT NULL DEFAULT 0,
   user_edited INTEGER NOT NULL DEFAULT 0,
+  review_stage INTEGER NOT NULL DEFAULT 0,
+  last_result TEXT NOT NULL DEFAULT '',
+  lapse_count INTEGER NOT NULL DEFAULT 0,
   next_review_at TEXT,
   last_reviewed_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -198,6 +239,7 @@ CREATE TABLE IF NOT EXISTS vocabulary_reviews (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   entry_id INTEGER NOT NULL,
   rating TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'scheduled',
   reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   next_review_at TEXT
 );
@@ -329,6 +371,13 @@ CREATE INDEX IF NOT EXISTS idx_answers_session ON practice_answers(session_id);
 CREATE INDEX IF NOT EXISTS idx_wrong_count ON wrong_stats(wrong_count DESC);
 CREATE INDEX IF NOT EXISTS idx_vocab_priority ON vocabulary_entries(encounter_count DESC, last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trash_purge ON trash_entries(purge_after, restored_at);
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+  table_name TEXT NOT NULL,
+  object_key TEXT NOT NULL,
+  profile_name TEXT NOT NULL DEFAULT '',
+  deleted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (table_name, object_key, profile_name)
+);
 INSERT OR IGNORE INTO schema_version(version) VALUES (1);
 `
 
@@ -344,6 +393,101 @@ async function ensureColumn(
   const result = await db.query(`PRAGMA table_info(${table})`)
   if (!(result.values || []).some(item => item.name === column)) {
     await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`)
+  }
+}
+
+async function tableNames(db: SQLiteDBConnection): Promise<string[]> {
+  const result = await db.query(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+  )
+  return (result.values || []).map(item => String(item.name))
+}
+
+async function tableReferences(db: SQLiteDBConnection, tableName: string): Promise<string[]> {
+  const references: string[] = []
+  for (const name of await tableNames(db)) {
+    const keys = await db.query(`PRAGMA foreign_key_list("${name.replaceAll('"', '""')}")`)
+    if ((keys.values || []).some(item => String(item.table || '').toLowerCase() === tableName.toLowerCase())) {
+      references.push(name)
+    }
+  }
+  return references
+}
+
+async function tableRowCount(db: SQLiteDBConnection, tableName: string): Promise<number> {
+  const result = await db.query(`SELECT COUNT(*) AS count FROM "${tableName.replaceAll('"', '""')}"`)
+  return Number(result.values?.[0]?.count || 0)
+}
+
+async function recoverInterruptedPaperTable(db: SQLiteDBConnection) {
+  const names = new Set(await tableNames(db))
+  const recoveryCandidates = ['papers_rebuild_tmp_papers', 'papers_rebuild']
+
+  if (names.has('papers')) {
+    const papersCount = await tableRowCount(db, 'papers')
+    if (papersCount > 0) return
+
+    const populatedCandidate = await (async () => {
+      for (const candidate of recoveryCandidates) {
+        if (names.has(candidate) && await tableRowCount(db, candidate) > 0) return candidate
+      }
+      return ''
+    })()
+    if (!populatedCandidate) return
+
+    await db.execute('PRAGMA foreign_keys = OFF', false)
+    try {
+      await db.execute('DROP TABLE papers', false)
+      await db.execute(`ALTER TABLE ${populatedCandidate} RENAME TO papers`, false)
+    } finally {
+      await db.execute('PRAGMA foreign_keys = ON', false)
+    }
+    return
+  }
+
+  // The temporary table is the complete source of the old migration. The
+  // replacement table may still be empty or only partially populated when an
+  // upgrade is interrupted, so use it only when the source no longer exists.
+  for (const candidate of recoveryCandidates) {
+    if (names.has(candidate)) {
+      await db.execute(`ALTER TABLE ${candidate} RENAME TO papers`)
+      return
+    }
+  }
+}
+
+async function restorePaperMigrationSnapshots(db: SQLiteDBConnection) {
+  const snapshotPrefix = 'papers_rebuild_snapshot_'
+  const names = new Set(await tableNames(db))
+  for (const snapshot of [...names].filter(name => name.startsWith(snapshotPrefix))) {
+    const target = snapshot.slice(snapshotPrefix.length)
+    if (!names.has(target)) continue
+    const snapshotColumns = (await db.query(`PRAGMA table_info("${snapshot.replaceAll('"', '""')}")`)).values || []
+    const targetColumns = (await db.query(`PRAGMA table_info("${target.replaceAll('"', '""')}")`)).values || []
+    const targetNames = new Set(targetColumns.map(item => String(item.name)))
+    const shared = snapshotColumns
+      .map(item => String(item.name))
+      .filter(name => targetNames.has(name))
+    if (shared.length) {
+      const columnList = shared.map(name => `"${name.replaceAll('"', '""')}"`).join(', ')
+      await db.execute(
+        `INSERT OR IGNORE INTO "${target.replaceAll('"', '""')}" (${columnList})
+         SELECT ${columnList} FROM "${snapshot.replaceAll('"', '""')}"`,
+      )
+    }
+    await db.execute(`DROP TABLE "${snapshot.replaceAll('"', '""')}"`)
+  }
+}
+
+async function cleanupInterruptedPaperMigration(db: SQLiteDBConnection) {
+  const names = new Set(await tableNames(db))
+  if (!names.has('papers')) return
+  for (const temporary of ['papers_rebuild', 'papers_rebuild_tmp_papers']) {
+    if (!names.has(temporary)) continue
+    const refs = await tableReferences(db, temporary)
+    if (!refs.length) {
+      await db.execute(`DROP TABLE IF EXISTS "${temporary}"`)
+    }
   }
 }
 
@@ -663,6 +807,41 @@ async function createQuestionBankProfileIndexes(db: SQLiteDBConnection) {
   `)
 }
 
+/**
+ * Older bundled/ESQ packages did not carry the fixed-position metadata for
+ * English I Part B ordering questions. Backfill only the contextual hint so
+ * existing user answers, labels and passages remain untouched.
+ */
+async function backfillEnglishOneOrderingFixedSlots(db: SQLiteDBConnection) {
+  const result = await db.query(`
+    SELECT units.id, units.unit_type, units.subtype, units.shared_data,
+           papers.year, papers.subject, papers.title, papers.external_key
+    FROM units
+    INNER JOIN papers ON papers.id = units.paper_id
+    WHERE units.unit_type = 'part_b'
+      AND units.subtype = 'paragraph_reordering'
+      AND papers.year IN (2010, 2011, 2014, 2017, 2018, 2019, 2023)
+      AND papers.deleted_at IS NULL
+  `)
+  for (const row of result.values || []) {
+    let sharedData: Record<string, any> = {}
+    try {
+      const parsed = JSON.parse(String(row.shared_data || '{}'))
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) sharedData = parsed
+    } catch {
+      continue
+    }
+    if (Array.isArray(sharedData.fixed_slots) && sharedData.fixed_slots.length) continue
+    const fixedSlots = orderingFixedSlotsForPaperUnit(row, row)
+    if (!fixedSlots.length) continue
+    await db.run(
+      'UPDATE units SET shared_data = ? WHERE id = ?',
+      [JSON.stringify({ ...sharedData, fixed_slots: fixedSlots }), Number(row.id)],
+      false,
+    )
+  }
+}
+
 export async function androidDatabase(): Promise<SQLiteDBConnection> {
   if (!connectionPromise) {
     connectionPromise = (async () => {
@@ -675,11 +854,15 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
         db = await manager.createConnection(DB_NAME, false, 'no-encryption', DB_VERSION, false)
       }
       if (!(await db.isDBOpen()).result) await db.open()
+      await recoverInterruptedPaperTable(db)
       await db.execute(SCHEMA)
+      await restorePaperMigrationSnapshots(db)
       await migratePaperExamMetadata(db)
       await migrateQuestionBankProfiles(db)
       await repairStalePaperForeignKey(db)
+      await cleanupInterruptedPaperMigration(db)
       await createQuestionBankProfileIndexes(db)
+      await backfillEnglishOneOrderingFixedSlots(db)
       const questionColumns = await db.query('PRAGMA table_info(questions)')
       if (!(questionColumns.values || []).some(column => column.name === 'content_hash')) {
         await db.execute("ALTER TABLE questions ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''")
@@ -693,6 +876,25 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       if (!vocabNames.has('synonyms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN synonyms TEXT NOT NULL DEFAULT '[]'")
       if (!vocabNames.has('antonyms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN antonyms TEXT NOT NULL DEFAULT '[]'")
       if (!vocabNames.has('similar_forms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN similar_forms TEXT NOT NULL DEFAULT '[]'")
+      if (!vocabNames.has('review_stage')) await db.execute('ALTER TABLE vocabulary_entries ADD COLUMN review_stage INTEGER NOT NULL DEFAULT 0')
+      if (!vocabNames.has('last_result')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN last_result TEXT NOT NULL DEFAULT ''")
+      if (!vocabNames.has('lapse_count')) await db.execute('ALTER TABLE vocabulary_entries ADD COLUMN lapse_count INTEGER NOT NULL DEFAULT 0')
+      const reviewColumns = await db.query('PRAGMA table_info(vocabulary_reviews)')
+      const reviewNames = new Set((reviewColumns.values || []).map(column => column.name))
+      if (!reviewNames.has('mode')) await db.execute("ALTER TABLE vocabulary_reviews ADD COLUMN mode TEXT NOT NULL DEFAULT 'scheduled'")
+      const wrongPoolMigration = await db.query(
+        "SELECT migration_key FROM app_migrations WHERE migration_key = 'wrong-current-pool-v1' LIMIT 1",
+      )
+      if (!(wrongPoolMigration.values || []).length) {
+        await db.execute(`
+          INSERT OR IGNORE INTO wrong_current_questions (unit_id, question_id)
+          SELECT q.unit_id, w.question_id
+          FROM wrong_stats w
+          JOIN questions q ON q.id = w.question_id
+          WHERE w.wrong_count > 0;
+          INSERT INTO app_migrations (migration_key) VALUES ('wrong-current-pool-v1');
+        `)
+      }
       const labelColumns = await db.query('PRAGMA table_info(question_ai_labels)')
       const labelNames = new Set((labelColumns.values || []).map(column => column.name))
       if (!labelNames.has('user_edited')) await db.execute("ALTER TABLE question_ai_labels ADD COLUMN user_edited INTEGER NOT NULL DEFAULT 0")
@@ -701,6 +903,62 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
         await db.execute("ALTER TABLE question_ai_labels ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
         await db.execute("UPDATE question_ai_labels SET updated_at = CURRENT_TIMESTAMP WHERE updated_at = ''")
       }
+      for (const table of [
+        'practice_sessions',
+        'practice_answers',
+        'practice_answer_events',
+        'practice_unit_submissions',
+        'wrong_retry_rounds',
+        'wrong_retry_round_questions',
+        'wrong_current_questions',
+        'vocabulary_occurrences',
+        'vocabulary_reviews',
+      ]) {
+        const syncColumns = await db.query(`PRAGMA table_info(${table})`)
+        const names = new Set((syncColumns.values || []).map(column => column.name))
+        if (!names.has('sync_id')) {
+          await db.execute(`ALTER TABLE ${table} ADD COLUMN sync_id TEXT`)
+        }
+        if (!names.has('updated_at')) {
+          await db.execute(`ALTER TABLE ${table} ADD COLUMN updated_at TEXT`)
+        }
+      }
+      for (const table of ['wrong_stats']) {
+        const syncColumns = await db.query(`PRAGMA table_info(${table})`)
+        const names = new Set((syncColumns.values || []).map(column => column.name))
+        if (!names.has('updated_at')) {
+          await db.execute(`ALTER TABLE ${table} ADD COLUMN updated_at TEXT`)
+        }
+      }
+      // LAN sync stable keys: backfill sync_id / updated_at for rows that
+      // predate the sync columns, so incremental comparisons and deletes work.
+      for (const table of [
+        'practice_sessions',
+        'practice_answers',
+        'practice_answer_events',
+        'practice_unit_submissions',
+        'wrong_retry_rounds',
+        'wrong_retry_round_questions',
+        'wrong_current_questions',
+        'vocabulary_occurrences',
+        'vocabulary_reviews',
+      ]) {
+        await db.run(
+          `UPDATE ${table} SET sync_id = lower(hex(randomblob(16))) WHERE sync_id IS NULL OR sync_id = ''`,
+          [],
+          false,
+        )
+        await db.run(
+          `UPDATE ${table} SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL OR updated_at = ''`,
+          [],
+          false,
+        )
+      }
+      await db.run(
+        `UPDATE wrong_stats SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL OR updated_at = ''`,
+        [],
+        false,
+      )
       return db
     })()
   }
@@ -741,15 +999,23 @@ export async function transaction<T>(operation: (db: SQLiteDBConnection) => Prom
   return runTransactionSerially(async () => {
     const db = await androidDatabase()
     const active = await db.isTransactionActive()
-    if (active.result) await db.rollbackTransaction()
-    await db.beginTransaction()
+    if (active.result) {
+      throw new Error('检测到未清理的 SQLite 活动事务，已拒绝嵌套写入')
+    }
+    let started = false
     try {
+      await db.beginTransaction()
+      started = true
       const result = await operation(db)
+      if (!(await db.isTransactionActive()).result) {
+        throw new Error('SQLite 事务在提交前意外结束')
+      }
       await db.commitTransaction()
+      started = false
       return result
     } catch (error) {
       try {
-        if ((await db.isTransactionActive()).result) await db.rollbackTransaction()
+        if (started && (await db.isTransactionActive()).result) await db.rollbackTransaction()
       } catch {
         // Preserve the original operation error.
       }
