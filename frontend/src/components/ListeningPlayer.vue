@@ -2,6 +2,7 @@
 import {
   FastForward,
   Headphones,
+  LocateFixed,
   LockKeyhole,
   Pause,
   Play,
@@ -22,11 +23,22 @@ const props = withDefaults(defineProps<{
   tracks?: AudioTrack[]
   seekable?: boolean
   timerPaused?: boolean
+  currentQuestionNumber?: number | null
+  answeredCount?: number
+  questionCount?: number
 }>(), {
   tracks: () => [],
   seekable: true,
   timerPaused: false,
+  currentQuestionNumber: null,
+  answeredCount: 0,
+  questionCount: 0,
 })
+
+const emit = defineEmits<{
+  locateQuestion: []
+  playbackStart: []
+}>()
 
 const audio = ref<HTMLAudioElement | null>(null)
 const selectedIndex = ref(0)
@@ -168,6 +180,12 @@ function onTimeUpdate() {
   if (loadedTrackKey.value) progressByTrack.set(loadedTrackKey.value, value)
 }
 
+function onPlay() {
+  playing.value = true
+  failed.value = false
+  emit('playbackStart')
+}
+
 function preventTimedSeeking() {
   const player = audio.value
   if (!player || props.seekable) return
@@ -209,7 +227,6 @@ defineExpose({ pause })
     <div class="listening-heading">
       <span class="listening-icon" aria-hidden="true"><Headphones :size="28" /></span>
       <div>
-        <span class="eyebrow">Listening practice</span>
         <h1>听力练习</h1>
         <p>不显示听力原文，请按照完整音频完成本段题目。</p>
       </div>
@@ -242,13 +259,24 @@ defineExpose({ pause })
           @loadstart="loading=true"
           @loadedmetadata="onLoadedMetadata"
           @canplay="onCanPlay"
-          @play="playing=true;failed=false"
+          @play="onPlay"
           @pause="playing=false"
           @ended="playing=false"
           @timeupdate="onTimeUpdate"
           @seeking="preventTimedSeeking"
           @error="failed=true;loading=false;playing=false"
         />
+
+        <div class="listening-question-status" aria-live="polite">
+          <div>
+            <span>当前进度</span>
+            <strong>{{ currentQuestionNumber ? '第 ' + currentQuestionNumber + ' 题' : '等待开始' }}</strong>
+            <small>{{ answeredCount }} / {{ questionCount }} 已完成</small>
+          </div>
+          <button type="button" :disabled="!currentQuestionNumber" @click="emit('locateQuestion')">
+            <LocateFixed :size="18" /><span>定位题目</span>
+          </button>
+        </div>
 
         <button
           class="main-play-button"
@@ -317,12 +345,18 @@ defineExpose({ pause })
 .player-surface { padding:26px; display:grid; justify-items:center; gap:22px; border:1px solid color-mix(in srgb,var(--primary) 20%,var(--line)); border-radius:26px; background:linear-gradient(155deg,color-mix(in srgb,var(--surface-solid) 96%,var(--primary-soft)),var(--surface-solid)); box-shadow:var(--shadow); }
 .main-play-button { width:84px; height:84px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; color:white; background:var(--primary); box-shadow:0 12px 28px color-mix(in srgb,var(--primary) 32%,transparent); transition:background-color .2s ease,box-shadow .2s ease,opacity .2s ease; }
 .main-play-button:hover:not(:disabled) { background:color-mix(in srgb,var(--primary) 86%,black); box-shadow:0 14px 32px color-mix(in srgb,var(--primary) 40%,transparent); }
-.main-play-button:focus-visible,.secondary-controls button:focus-visible,.track-picker select:focus-visible,.audio-progress:focus-visible { outline:3px solid color-mix(in srgb,var(--primary) 42%,transparent); outline-offset:3px; }
+.main-play-button:focus-visible,.secondary-controls button:focus-visible,.listening-question-status button:focus-visible,.track-picker select:focus-visible,.audio-progress:focus-visible { outline:3px solid color-mix(in srgb,var(--primary) 42%,transparent); outline-offset:3px; }
 .main-play-button:disabled { opacity:.42; cursor:not-allowed; }
 .timeline { width:100%; display:grid; gap:9px; }
 .time-row { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
 .audio-progress { width:100%; min-height:28px; accent-color:var(--primary); cursor:pointer; }
 .audio-progress:disabled { opacity:.48; cursor:not-allowed; }
+.listening-question-status { width:100%; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 16px; border:1px solid var(--line); border-radius:16px; background:var(--surface-solid); }
+.listening-question-status>div { min-width:0; display:grid; gap:2px; }
+.listening-question-status span,.listening-question-status small { color:var(--muted); font-size:12px; }
+.listening-question-status strong { color:var(--ink); font-size:18px; font-variant-numeric:tabular-nums; }
+.listening-question-status button { min-width:112px; min-height:48px; display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:0 14px; border:1px solid var(--line); border-radius:13px; color:var(--primary); background:var(--primary-soft); font-size:13px; font-weight:750; }
+.listening-question-status button:disabled { opacity:.42; cursor:not-allowed; }
 .secondary-controls { width:100%; display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
 .secondary-controls button { min-height:52px; display:flex; align-items:center; justify-content:center; gap:6px; padding:8px; border:1px solid var(--line); border-radius:14px; background:var(--surface-solid); color:var(--ink); font-size:12px; font-weight:700; transition:background-color .18s ease,border-color .18s ease,opacity .18s ease; }
 .secondary-controls button:hover:not(:disabled) { border-color:var(--primary); background:var(--primary-soft); }
@@ -336,6 +370,8 @@ defineExpose({ pause })
   .listening-heading { grid-template-columns:48px 1fr; }
   .listening-icon { width:48px; height:48px; border-radius:15px; }
   .listening-heading h1 { font-size:25px; }
+  .listening-question-status { align-items:stretch; flex-direction:column; }
+  .listening-question-status button { width:100%; }
 }
 @media (prefers-reduced-motion:reduce) {
   .main-play-button,.secondary-controls button { transition:none; }

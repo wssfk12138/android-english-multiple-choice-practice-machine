@@ -28,8 +28,13 @@ const visibleWords = computed(() =>
 const publishedPapers = computed(() => papers.value.filter(
   paper => paper.status === 'published' && Number(paper.question_count || 0) > 0,
 ))
-const hasListening = computed(() => Number(data.value?.paper_type_counts?.listening || 0) > 0)
-const hasPracticeType = (type: string) => Number(data.value?.unit_type_counts?.[type] || 0) > 0
+const practiceTypeCount = (type: string) => Number(
+  type === 'listening'
+    ? data.value?.paper_type_counts?.listening || 0
+    : data.value?.unit_type_counts?.[type] || 0,
+)
+const hasPracticeType = (type: string) => practiceTypeCount(type) > 0
+const hasListening = computed(() => hasPracticeType('listening'))
 const hasAnyPractice = computed(() => ['cloze', 'reading', 'part_b', 'listening'].some(hasPracticeType))
 const practiceGridClass = computed(() => {
   const count = ['cloze', 'reading', 'part_b', 'listening'].filter(hasPracticeType).length
@@ -127,7 +132,6 @@ async function startPaper(paperId: number) {
     <div class="desktop-dashboard">
       <div class="page-head study-hero">
         <div class="study-hero-copy">
-          <span class="eyebrow">YOUR QUIET STUDY SPACE</span>
           <h1>今天想练些什么？</h1>
           <p class="lead">选一篇文章，留一点安静的时间给自己。</p>
           <RouterLink class="button" to="/library"><BookOpen :size="17" />查看全部题库<ArrowRight :size="16" /></RouterLink>
@@ -136,7 +140,7 @@ async function startPaper(paperId: number) {
       <QuestionBankSwitcher @changed="loadHome" />
       <div v-if="error" class="warning">{{ error }}</div>
       <section v-if="vocabulary.length" class="vocabulary-ticker card" @mouseenter="tickerPaused=true" @mouseleave="tickerPaused=false">
-        <div class="ticker-heading"><div><span class="eyebrow">VOCABULARY REVIEW</span><h3>词汇回顾</h3></div><RouterLink to="/vocabulary">查看单词本 →</RouterLink></div>
+        <div class="ticker-heading"><div><h3>词汇回顾</h3></div><RouterLink to="/vocabulary">查看单词本 →</RouterLink></div>
         <div class="ticker-window"><Transition name="vocabulary-flip" mode="out-in"><div :key="vocabularyPage" class="ticker-group">
           <RouterLink v-for="word in visibleWords" :key="word.id" :to="`/vocabulary?word=${word.id}`" class="ticker-word">
             <Star v-if="word.is_frequent" class="vocab-star" :size="15" fill="currentColor" aria-label="高频词" />
@@ -148,7 +152,7 @@ async function startPaper(paperId: number) {
         <button v-if="hasPracticeType('cloze')" class="card action-card" type="button" @click="randomPractice('cloze')"><span class="feature-icon orange"><img src="/assets/icons/cloze.png" alt="" /></span><span class="action-copy"><small>整篇提交</small><h3>完型填空</h3><p>随机抽取一整篇，在完整语境中完成练习。</p></span><ArrowRight class="action-arrow" :size="19" /></button>
         <button v-if="hasPracticeType('reading')" class="card action-card" type="button" @click="randomPractice('reading')"><span class="feature-icon sage"><img src="/assets/icons/reading.png" alt="" /></span><span class="action-copy"><small>一篇文章</small><h3>阅读理解</h3><p>按文章完整练习，专注理解论证与细节。</p></span><ArrowRight class="action-arrow" :size="19" /></button>
         <button v-if="hasPracticeType('part_b')" class="card action-card" type="button" @click="randomPractice('part_b')"><span class="feature-icon blue"><img src="/assets/icons/part-b.png" alt="" /></span><span class="action-copy"><small>排序 · 填入 · 匹配</small><h3>阅读 Part B</h3><p>辨认结构、衔接与观点。</p></span><ArrowRight class="action-arrow" :size="19" /></button>
-        <button v-if="hasListening" class="card action-card" type="button" @click="randomPractice('listening')"><span class="feature-icon purple"><img src="/assets/icons/listening.png" alt="" /></span><span class="action-copy"><small>随机一套</small><h3>听力单刷</h3><p>完成一套试卷的完整听力部分。</p></span><ArrowRight class="action-arrow" :size="19" /></button>
+        <button v-if="hasListening" class="card action-card listening-action" type="button" @click="randomPractice('listening')"><span class="feature-icon purple"><img src="/assets/icons/listening.png" alt="" /></span><span class="action-copy"><small>随机一套</small><h3>听力单刷</h3><p>完成一套试卷的完整听力部分。</p></span><ArrowRight class="action-arrow" :size="19" /></button>
       </div>
       <div class="section-title"><h2>学习概览</h2></div>
       <div v-if="data" class="grid grid-4">

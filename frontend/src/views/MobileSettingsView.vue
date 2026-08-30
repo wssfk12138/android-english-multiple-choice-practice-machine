@@ -56,7 +56,7 @@ onMounted(() => {
 <template>
   <div class="page mobile-hub settings-hub">
     <div class="page-head compact-page-head">
-      <div><span class="eyebrow">SETTINGS</span><h1>设置</h1><p class="lead">集中管理题库、模型、外观与设备更新。</p></div>
+      <div><h1>设置</h1><p class="lead">集中管理题库、模型、外观与设备更新。</p></div>
     </div>
     <section class="settings-theme-row card">
       <img src="/assets/icons/theme.png" alt="">
@@ -87,7 +87,7 @@ onMounted(() => {
     <section class="settings-about card" aria-labelledby="mobile-settings-about-title">
       <div class="settings-about-heading">
         <span class="settings-about-icon"><BookOpen :size="20" /></span>
-        <div><span class="eyebrow">HELP &amp; FEEDBACK</span><h2 id="mobile-settings-about-title">帮助与关于</h2><p>离线查看功能说明与常见问题，遇到问题可直接反馈。</p></div>
+        <div><h2 id="mobile-settings-about-title">帮助与关于</h2><p>离线查看功能说明与常见问题，遇到问题可直接反馈。</p></div>
       </div>
       <div class="settings-about-actions">
         <RouterLink class="button secondary" to="/help"><BookOpen :size="16" />使用帮助</RouterLink>

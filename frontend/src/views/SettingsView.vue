@@ -384,7 +384,6 @@ onMounted(() => {
   <div class="page ai-settings-page">
     <div class="page-head">
       <div>
-        <span class="eyebrow">MODEL WORKSPACE</span>
         <h1>模型与 API</h1>
         <p class="lead">像工作区一样管理多个接口；只有启用的 API 和可见模型会出现在左侧助手中。</p>
       </div>
@@ -400,7 +399,6 @@ onMounted(() => {
       <div class="question-label-heading">
         <span class="api-profile-icon"><LibraryBig :size="21" /></span>
         <div>
-          <span class="eyebrow">QUESTION INTELLIGENCE</span>
           <h2 id="question-label-title">题库智能标注</h2>
           <p>模型按整篇材料预先标注每道题的考点、干扰项类型与注意事项。分析错题时复用这些标签，减少重复输出。</p>
         </div>
@@ -438,7 +436,7 @@ onMounted(() => {
           <span :style="{ width: `${labelStatus.percentage}%` }" />
         </div>
         <small>
-          {{ labelStatus.locked }} 道标签已锁定；人工校正后会默认锁定，不会被批量任务覆盖。
+          {{ labelStatus.locked }} 道标签已锁定；模型成功标注和人工校正结果都会自动锁定，只有明确解除锁定后才允许重新标注。
           <template v-if="labelStatus.review_pending">
             其中 {{ labelStatus.review_pending }} 道原题结构待校正，错题分析会暂时忽略其预标注。
           </template>
@@ -474,7 +472,7 @@ onMounted(() => {
     <div v-if="editingLabel" class="label-editor-overlay" role="presentation" @click.self="editingLabel=null">
       <section class="label-editor card" role="dialog" aria-modal="true" aria-labelledby="label-editor-title">
         <header>
-          <div><span class="eyebrow">MANUAL REVIEW</span><h2 id="label-editor-title">{{ editingLabel.year }} 年第 {{ editingLabel.number }} 题</h2></div>
+          <div><h2 id="label-editor-title">{{ editingLabel.year }} 年第 {{ editingLabel.number }} 题</h2></div>
           <button class="button ghost compact" type="button" @click="editingLabel=null">取消</button>
         </header>
         <div class="field"><label>主要考点</label><input v-model.trim="editingLabel.primary_skill"></div>
@@ -502,7 +500,7 @@ onMounted(() => {
     <section v-if="creating" class="api-profile-card new-profile">
       <div class="api-profile-heading">
         <span class="api-profile-icon"><CirclePlus :size="20" /></span>
-        <div><span class="eyebrow">NEW CONNECTION</span><h2>添加新的 API</h2></div>
+        <div><h2>添加新的 API</h2></div>
       </div>
       <div class="api-profile-body">
         <div class="grid grid-2">
@@ -631,7 +629,7 @@ onMounted(() => {
     <section class="settings-about card" aria-labelledby="settings-about-title">
       <div class="settings-about-heading">
         <span class="api-profile-icon"><BookOpen :size="20" /></span>
-        <div><span class="eyebrow">HELP &amp; FEEDBACK</span><h2 id="settings-about-title">帮助与关于</h2><p>查看离线使用帮助，或提交使用中遇到的问题。</p></div>
+        <div><h2 id="settings-about-title">帮助与关于</h2><p>查看离线使用帮助，或提交使用中遇到的问题。</p></div>
       </div>
       <div class="settings-about-actions">
         <RouterLink class="button secondary" to="/help"><BookOpen :size="16" />使用帮助</RouterLink>

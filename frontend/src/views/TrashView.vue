@@ -46,7 +46,7 @@ onMounted(load)
 <template>
   <div class="page">
     <div class="page-head">
-      <div><span class="eyebrow">RECYCLE BIN</span><h1>回收站</h1><p class="lead">重要内容保留七天，可以恢复或提前永久删除。</p></div>
+      <div><h1>回收站</h1><p class="lead">重要内容保留七天，可以恢复或提前永久删除。</p></div>
     </div>
     <div v-if="error" class="warning">{{ error }}</div>
     <div v-if="items.length" class="trash-list">

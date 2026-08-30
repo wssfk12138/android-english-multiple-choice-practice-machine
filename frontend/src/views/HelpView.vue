@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import DOMPurify from 'dompurify'
-import { ArrowLeft, BookOpen, ExternalLink, List, Search, X } from 'lucide-vue-next'
+import { ArrowLeft, BookOpen, ClipboardCopy, ExternalLink, List, Search, X } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { marked } from 'marked'
 import { useRouter } from 'vue-router'
 import { platformRuntime } from '../platform/runtime'
+import { copyIssueReportTemplate } from '../platform/android/diagnostics'
 import helpMarkdown from '../../../docs/帮助文档.md?raw'
 
 type Section = { id: string; title: string; level: number; text: string }
@@ -13,6 +14,7 @@ const router = useRouter()
 const query = ref('')
 const mobileTocOpen = ref(false)
 const content = ref<HTMLElement | null>(null)
+const notice = ref('')
 
 function slugify(value: string, index: number) {
   const slug = value.toLowerCase().trim().replace(/[^\u4e00-\u9fa5a-z0-9]+/gi, '-').replace(/^-|-$/g, '')
@@ -72,6 +74,15 @@ function enhanceHeadings() {
   })
 }
 
+async function copyReportTemplate() {
+  try {
+    await copyIssueReportTemplate()
+    notice.value = '问题报告模板已复制'
+  } catch {
+    notice.value = '复制失败，请在更新与远程题库页面重试'
+  }
+}
+
 onMounted(enhanceHeadings)
 </script>
 
@@ -79,7 +90,7 @@ onMounted(enhanceHeadings)
   <main class="page help-page">
     <header class="help-toolbar">
       <button class="icon-button" type="button" aria-label="返回" @click="closeAndBack"><ArrowLeft :size="20" /></button>
-      <div class="help-title"><BookOpen :size="20" /><div><span class="eyebrow">DOCUMENTATION</span><h1>使用帮助</h1></div></div>
+      <div class="help-title"><BookOpen :size="20" /><div><h1>使用帮助</h1></div></div>
       <div class="help-toolbar-actions">
         <label class="help-search"><Search :size="16" /><span class="sr-only">搜索帮助内容</span><input v-model="query" type="search" placeholder="搜索帮助内容" aria-label="搜索帮助内容"></label>
         <button class="icon-button help-toc-toggle" type="button" aria-label="打开目录" :aria-expanded="mobileTocOpen" @click="mobileTocOpen=!mobileTocOpen"><List :size="20" /></button>
@@ -96,6 +107,14 @@ onMounted(enhanceHeadings)
       <article ref="content" class="help-content markdown-body" v-html="rendered" />
     </div>
 
-    <a class="help-feedback" href="https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&amp;h_src=YXBwX3NoYXJl&amp;link_id=0ad4723fda0b" target="_blank" rel="noopener noreferrer"><ExternalLink :size="16" />问题反馈</a>
+    <div class="help-feedback-actions">
+      <span v-if="notice" role="status">{{ notice }}</span>
+      <button class="help-feedback" type="button" @click="copyReportTemplate"><ClipboardCopy :size="16" />复制问题模板</button>
+      <a class="help-feedback" href="https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&amp;h_src=YXBwX3NoYXJl&amp;link_id=0ad4723fda0b" target="_blank" rel="noopener noreferrer"><ExternalLink :size="16" />问题反馈</a>
+    </div>
   </main>
 </template>
+
+<style scoped>
+.help-feedback-actions{position:fixed;right:20px;bottom:18px;z-index:12;display:flex;align-items:center;gap:8px}.help-feedback-actions .help-feedback{position:static}.help-feedback-actions>span{padding:8px 10px;border-radius:8px;color:var(--primary);background:var(--surface-solid);box-shadow:var(--shadow-sm);font-size:12px}@media(max-width:720px){.help-feedback-actions{right:14px;bottom:calc(14px + env(safe-area-inset-bottom));flex-wrap:wrap;justify-content:flex-end}.help-feedback-actions>span{width:100%;text-align:right}}
+</style>

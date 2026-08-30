@@ -154,7 +154,6 @@ onBeforeUnmount(() => {
       <div class="installer-cleanup-dialog card">
         <span class="installer-cleanup-icon"><PackageCheck :size="28" /></span>
         <div>
-          <span class="eyebrow">UPDATE COMPLETE</span>
           <h2 id="installer-cleanup-title">是否删除安装包？</h2>
           <p class="lead">
             {{ installerCleanup.versionName ? `${installerCleanup.versionName} 已完成更新。` : '应用已完成更新。' }}
