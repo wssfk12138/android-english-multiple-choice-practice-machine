@@ -77,7 +77,7 @@ These screenshots come from the current Android portrait build and cover the mai
 ### Question banks and import
 
 - English I and English II postgraduate objective-question ESQ banks are bundled for offline first use.
-- Import, preview, validate, conflict-check, export, and share ESQ 1.0/1.1 packages.
+- Import, preview, validate, and conflict-check ESQ 1.0/1.1 packages.
 - Import DOC, DOCX, text-based PDF question/answer files, and MP3/M4A/WAV/OGG listening tracks.
 - Optional model assistance aligns question boundaries, numbers, and answer keys. The model edits a structured draft only; the user reviews fields and explicitly approves publication.
 - After publication, run AI labeling for this import, a year, or the whole bank. Listening questions are excluded from labeling.
@@ -120,8 +120,8 @@ These screenshots come from the current Android portrait build and cover the mai
 
 | Bank | File | SHA-256 |
 | --- | --- | --- |
-| Postgraduate English I, 2010–2026 | `frontend/public/internal-question-bank.esq` | `ede30fae65f2fbab53c830ba39ef618e5e82f0fa7ebc789d363093c5c1b47075` |
-| Postgraduate English II, 2010–2025 | `frontend/public/internal-question-bank-english-two.esq` | `d25ac946fa0543a61beb88eb02664d1e3a55eb819632667603268a6346fe2e83` |
+| Postgraduate English I, 2002 & 2010–2026 (v1.1.0) | `frontend/public/internal-question-bank.esq` | `faebfd9c415d889054b530598f4184f44c17981eaf52bdd0238068b6111d59ba` |
+| Postgraduate English II, 2010–2025 (v1.1.2) | `frontend/public/internal-question-bank-english-two.esq` | `9fbf271a5243c8dd0042f9c501dd74e6865ce6639f458460982fe30c326e34c8` |
 
 Both packages are candidate-recollection/local-export content and are not official exam publications. Question text, answers, and AI labels do not automatically inherit the code GPL; consult each package's `manifest.json` and [the bundled-bank notes](docs/bundled-question-banks.md) before redistribution.
 

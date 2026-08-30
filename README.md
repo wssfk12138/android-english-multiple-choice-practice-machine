@@ -16,6 +16,8 @@
   </p>
 </div>
 
+> 如果你正在寻找稳定、实惠的 AI 模型中转服务，可以试试 [FastAiToken](https://www.fastaitoken.com/register?aff=BF9KNKFHX725)，也可以先阅读[中转站新手帮助文档](https://github.com/wssfk12138/fastaitoken-beginner-guide)了解中转站、倍率、计费和使用方式。你在 FastAiToken 中的每一笔消费都会让作者获得一定数量的返利，我会把它转化为 Token，继续开发更多新项目并上传至 GitHub。当前所有项目均使用了 FastAiToken 提供的 5.6 Sol 模型参与开发。**注册后点击右上角用户头像前往QQ客服群@群主可领3刀试用金（需提供用户id，暗号：GitHub来的）。** <a href="https://www.fastaitoken.com/register?aff=BF9KNKFHX725" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/badge/FastAI-%E7%82%B9%E5%87%BB%E6%B3%A8%E5%86%8C-4F7CFF.svg?logo=data%3Aimage%2Fpng%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAABYlAAAWJQFJUiTwAAABmUlEQVRYw%2B2Vv0tbURTHP%2BfmvcS8lx%2BYKrZ16modFbQiKrgWuujQpZtgqV3s0rGT4N9Q6NJBM0nWUoe6uSj4BxQKUnBSSPISk3tPB1%2BhS42JFqHcD1wuXM79fs89HM4Fj8fjuWdk4Jubl9PEUiEC4nSV0r0cQATkgBIHjEvzbzLBIN7mrd11JVkBoJgeZgSMghGw%2Bjv0kHEzc61W3%2B7r3Zcuk5oDNP8oogKamlvp0O6u95LrrwKvtYDRbQRoiSWrX7DawoniABVQFVTbtOwn5rJHd5uA7c6SMd8QA44aH8zO%2FTThG30sea1qzCMKQCFtwBJIkZ8ayxJT0rmJ1EBNSKAf1fCMDCAComn5QRP7noWgc2OpnhFrGrKM45in1NsJJtxgSBYIFIQGqidYFIslcXs8D6p9vaVnxESjwlk8ghAR5baARbKaJycK3Re8C7%2FepgeuT6CaPMENhZzbScZkngszSaB5ALLuM5u3M%2B89B1bz36%2FMkn0i84BRflDGMkyN0Gz8%2B1FcrT%2Fkst3EVoq8klP%2Fc3k8Hs9%2FyS8IrHi9DaVvuAAAAABJRU5ErkJggg%3D%3D" alt="fastai 点击注册"></a>
+
 英语刷题机 Android 是 Windows 版英语刷题机的独立发行项目。它的核心卖点是：用户可以导入和分享自己的题库，接入自己选择的大模型，并通过打乱选项、整篇练习和错题重做，让有限的真题保持“自由刷题”的新鲜感，而不是反复背答案。
 
 ## Android 版的重点：为竖屏和大屏重新设计
@@ -78,7 +80,7 @@ Android 版不是把桌面页面缩小到手机上，而是根据窗口宽度切
 ### 题库与导入
 
 - 默认内置考研英语（一）和考研英语（二）客观题 ESQ 题库，可离线开始练习。
-- 支持 ESQ 1.0/1.1 导入、预览、校验、冲突确认和导出分享。
+- 支持 ESQ 1.0/1.1 导入、预览、校验和冲突确认。
 - 支持 DOC、DOCX、文本型 PDF 题目与答案附件，以及 MP3/M4A/WAV/OGG 听力音频。
 - 导入页支持模型辅助定位题目、题号和答案；模型只修改结构化草稿，用户逐字段校对并批准后才入库。
 - 批准入库后可按本次导入、年份或全部题库执行智能标注；听力题不发送给标注模型。
@@ -107,6 +109,7 @@ Android 版不是把桌面页面缩小到手机上，而是根据窗口宽度切
 - 保存多个 API 配置，设置 Base URL、API Key、默认模型、Temperature、启用状态和模型选择器显示状态。
 - 自动拉取可用模型并支持模型切换；兼容 OpenAI-compatible、Ollama、LM Studio 等服务。
 - AI 可用于学习问答、单词翻译、错题建议、题库导入校正和题目考点标注。
+- AI 学习助手支持添加最多 4 张图片附件，自动压缩后随消息发送，仅保存在本机对话记录中；模型不支持图片时会明确提示，不会静默失败。
 - API Key 仅通过 Android Keystore/AES-GCM 安全存储；未启用 AI 时基础刷题和判分完全离线可用。
 
 ### 更新与隐私
@@ -121,8 +124,8 @@ Android 版不是把桌面页面缩小到手机上，而是根据窗口宽度切
 
 | 题库 | 文件 | SHA-256 |
 | --- | --- | --- |
-| 考研英语（一）2010–2026 | `frontend/public/internal-question-bank.esq` | `ede30fae65f2fbab53c830ba39ef618e5e82f0fa7ebc789d363093c5c1b47075` |
-| 考研英语（二）2010–2025 | `frontend/public/internal-question-bank-english-two.esq` | `d25ac946fa0543a61beb88eb02664d1e3a55eb819632667603268a6346fe2e83` |
+| 考研英语（一）2002、2010–2026（v1.1.0） | `frontend/public/internal-question-bank.esq` | `faebfd9c415d889054b530598f4184f44c17981eaf52bdd0238068b6111d59ba` |
+| 考研英语（二）2010–2025（v1.1.2） | `frontend/public/internal-question-bank-english-two.esq` | `9fbf271a5243c8dd0042f9c501dd74e6865ce6639f458460982fe30c326e34c8` |
 
 两份题库均为考生回忆整理/本地导出内容，不代表官方试题发布。题库内容、答案和 AI 标签不自动继承程序代码的 GPL 许可，来源和传播权限以包内 `manifest.json` 为准，详情见 [默认题库清单](docs/bundled-question-banks.md)。
 

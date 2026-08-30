@@ -1,4 +1,4 @@
-# 英语刷题机 ESQ 1.0 题库格式
+# 英语刷题机 ESQ 1.0/1.1 题库格式
 
 ESQ（English Study Question bank）是英语刷题机的公开题库交换格式。
 `.esq` 文件本质上是 ZIP，所有 JSON 文件使用 UTF-8 编码。
@@ -26,7 +26,7 @@ question-bank.esq
 
 ## 版本与稳定标识
 
-- `schemaVersion`：格式版本，ESQ 1.0 固定为 `"1.0"`。
+- `schemaVersion`：格式版本，支持 `"1.0"` 与 `"1.1"`。1.1 在 1.0 基础上增加四六级考试类型 `examType`、`examMonth`、`setNumber` 和听力轨道元数据，其余结构与 1.0 完全一致。
 - `packageId`：题库包的稳定标识，发布后不改变。
 - `contentVersion`：内容版本，使用语义化版本号。
 - `paperKey`、`unitKey`、`questionKey`：跨电脑稳定标识，不能使用本地 SQLite ID。
@@ -41,7 +41,7 @@ cn.exam.english1.2026.q21
 
 ## 内容块
 
-文章使用 `blocks` 保存，ESQ 1.0 支持：
+文章使用 `blocks` 保存，ESQ 1.0/1.1 支持：
 
 - `paragraph`
 - `quote`
@@ -54,6 +54,20 @@ cn.exam.english1.2026.q21
 `assets/index.json` 声明的 `assetId`。
 
 完形填空用 `{{blank:1}}` 表示第 1 个空。
+
+## 资产声明
+
+`assets/index.json` 声明包内媒体文件，每个条目包含：
+
+- `assetId`：包内唯一标识，正文 blocks 通过它引用；
+- `path`：包内相对路径；
+- `mediaType`：MIME 类型（图片或音频）；
+- `sha256`：文件内容的 SHA-256；
+- `size`：文件字节数（**权威字段**，导入端据此逐字节核对）；
+- `originalName`、`label`：可选。
+
+历史兼容：早期 Windows 导出曾把字节数写作 `bytes`。Android 导入端
+同时接受 `size` 与 `bytes`，`size` 优先；新导出一律使用 `size`。
 
 ## 标准答案
 
@@ -82,9 +96,18 @@ AI 标签不能修改文章、题干、选项或标准答案。
 
 ## 安全限制
 
-- 压缩包最大 100 MiB；
-- 解压后总大小最大 300 MiB；
-- 文件数量最大 1,000；
+Android 端（原生远程下载与本地导入一致采用以下上限）：
+
+- 压缩包最大 2 GiB；远程导入由 Android 原生层流式下载并校验，不把完整压缩包送入 WebView；
+- 解压后总大小最大 8 GiB，单个 JSON 最大 64 MiB，全部 JSON 合计最大 256 MiB；
+- 文件数量最大 10,000，ZIP 压缩比最大 250:1。
+
+Windows 端本地导入上限更严格（单包 100 MiB、1000 个文件、
+压缩比 100:1、单个 JSON 20 MiB）。**跨平台互导安全区间**：要让同一个
+`.esq` 包能被所有平台的全部导入路径接受，请控制在
+包 100 MiB、1000 个文件、单个 JSON 20 MiB、压缩比 100:1 之内；
+超出安全区间的包可能只被 Android 端接受。
+
 - 禁止绝对路径、`..`、符号链接和加密 ZIP；
 - 禁止 EXE、DLL、脚本、HTML 和带宏 Office 文件；
 - 媒体必须通过文件头、大小和 SHA-256 校验；

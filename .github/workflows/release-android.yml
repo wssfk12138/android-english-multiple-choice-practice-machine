@@ -1,0 +1,139 @@
+name: Android Release
+
+# 手动触发的发布流水线：构建带正式签名的 release APK，生成
+# android-update.json 并创建 GitHub Release（含 APK 与更新清单）。
+# 前置条件：仓库 Secrets 中已配置
+#   ANDROID_KEYSTORE_B64      —— release jks 的 base64（certutil/base64 编码）
+#   ANDROID_KEYSTORE_PASSWORD —— keystore 口令
+#   ANDROID_KEY_PASSWORD      —— key 口令
+# 缺少任一 Secret 时本工作流会直接失败，不会产出未签名包。
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release 标签（例如 v0.1.0-beta.4）"
+        required: true
+      version_name:
+        description: "versionName（例如 0.1.0-beta.4）"
+        required: true
+      version_code:
+        description: "versionCode（必须大于所有已发布版本）"
+        required: true
+      release_notes:
+        description: "更新说明（写入 android-update.json）"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify signing secrets present
+        env:
+          HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          HAS_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          HAS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$HAS_KEYSTORE" ] || [ -z "$HAS_STORE_PASSWORD" ] || [ -z "$HAS_KEY_PASSWORD" ]; then
+            echo "::error::缺少签名 Secrets（ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_PASSWORD），拒绝发布未签名包。"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Build web assets and sync
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+          npx cap sync android
+
+      - name: Restore keystore and signing properties
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: frontend/android
+        run: |
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > release-ci.jks
+          {
+            echo "storeFile=release-ci.jks"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=english-practice-machine"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+          } > signing.properties
+
+      - name: Build signed release APK
+        working-directory: frontend/android
+        run: |
+          ./gradlew :app:assembleRelease \
+            -PappVersionCode=${{ inputs.version_code }} \
+            -PappVersionName=${{ inputs.version_name }} \
+            --console=plain -q
+
+      - name: Verify signature and rename APK
+        working-directory: frontend/android
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools"
+          APKSIGNER=$(ls "$BUILD_TOOLS"/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs "$APK"
+          OUT="english-practice-machine-android-${{ inputs.version_name }}.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/$OUT"
+          echo "APK_PATH=$OUT" >> "$GITHUB_ENV"
+
+      - name: Generate update manifest
+        env:
+          TAG: ${{ inputs.tag }}
+          VERSION_NAME: ${{ inputs.version_name }}
+          VERSION_CODE: ${{ inputs.version_code }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          APK_PATH="$GITHUB_WORKSPACE/${{ env.APK_PATH }}"
+          SIZE=$(stat -c %s "$APK_PATH")
+          SHA=$(sha256sum "$APK_PATH" | cut -d' ' -f1)
+          REPO="${{ github.repository }}"
+          {
+            echo '{'
+            echo '  "schemaVersion": 1,'
+            echo '  "channel": "beta",'
+            echo "  \"versionName\": \"$VERSION_NAME\","
+            echo "  \"versionCode\": $VERSION_CODE,"
+            echo "  \"apkUrl\": \"https://github.com/$REPO/releases/download/$TAG/${{ env.APK_PATH }}\","
+            echo "  \"apkSha256\": \"$SHA\","
+            echo "  \"apkSize\": $SIZE,"
+            echo "  \"releaseNotes\": \"$RELEASE_NOTES\""
+            echo '}'
+          } > android-update.json
+          python3 -m json.tool android-update.json > /dev/null
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          VERSION_NAME: ${{ inputs.version_name }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          NOTES="${{ inputs.release_notes }}"
+          if [ -z "$NOTES" ]; then NOTES="英语刷题机 Android $VERSION_NAME"; fi
+          gh release create "$TAG" \
+            "$GITHUB_WORKSPACE/${{ env.APK_PATH }}" \
+            android-update.json \
+            --title "英语刷题机 Android $VERSION_NAME" \
+            --notes "$NOTES"

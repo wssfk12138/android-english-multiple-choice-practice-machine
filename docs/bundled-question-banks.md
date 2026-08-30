@@ -4,8 +4,8 @@ Android GitHub 公共版首次启动会尝试安装以下两个 ESQ 题库。安
 
 | 名称 | 文件 | 内容版本 | 大小 | SHA-256 |
 | --- | --- | --- | ---: | --- |
-| 考研英语（一）客观题题库（2010–2026） | `frontend/public/internal-question-bank.esq` | 1.0.0 | 322,335 bytes | `ede30fae65f2fbab53c830ba39ef618e5e82f0fa7ebc789d363093c5c1b47075` |
-| 考研英语（二）客观题题库（2010–2025） | `frontend/public/internal-question-bank-english-two.esq` | 1.1.1 | 293,191 bytes | `d25ac946fa0543a61beb88eb02664d1e3a55eb819632667603268a6346fe2e83` |
+| 考研英语（一）客观题题库（2002、2010–2026） | `frontend/public/internal-question-bank.esq` | 1.1.0 | 338,288 bytes | `faebfd9c415d889054b530598f4184f44c17981eaf52bdd0238068b6111d59ba` |
+| 考研英语（二）客观题题库（2010–2025，含已锁定智能标注） | `frontend/public/internal-question-bank-english-two.esq` | 1.1.2 | 294,673 bytes | `9fbf271a5243c8dd0042f9c501dd74e6865ce6639f458460982fe30c326e34c8` |
 
 ## 来源与许可边界
 
