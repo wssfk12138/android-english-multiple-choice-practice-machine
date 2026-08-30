@@ -9,62 +9,47 @@ export type DiagnosticCategory =
   | 'startup'
 
 export interface DiagnosticLogEntry {
-  id: string
   createdAt: string
-  category: DiagnosticCategory
-  stage: string
-  errorCode: string
-  message: string
-  technicalMessage: string
+  event: string
+  module: DiagnosticCategory
   appVersion: string
-  appVersionCode: string
-  platform: string
-  androidVersion: string
-  deviceModel: string
-  fileName?: string
-  fileExtension?: string
-  fileSize?: number
-  schemaVersion?: string
-  stack?: string
+  errorCategory: string
+  symptom: string
 }
 
-type DiagnosticContext = {
-  fileName?: string
-  fileSize?: number
-  schemaVersion?: string
-}
+type DiagnosticContext = Record<string, unknown>
+type JsonRecord = Record<string, unknown>
 
 interface DiagnosticNativePlugin {
-  getDeviceInfo(): Promise<{ androidVersion?: string, deviceModel?: string }>
   shareText(options: { text: string, fileName: string, title: string }): Promise<{ launched: boolean }>
 }
 
 const DiagnosticNative = registerPlugin<DiagnosticNativePlugin>('DiagnosticLog')
 const STORAGE_KEY = 'diagnostic_logs_v1'
 const MAX_ENTRIES = 50
-const MAX_MESSAGE_LENGTH = 1000
-const MAX_TECHNICAL_LENGTH = 2000
-const MAX_STACK_LENGTH = 6000
+const MAX_EXPORT_BYTES = 1024 * 1024
+const MAX_EVENT_LENGTH = 80
+const MAX_VERSION_LENGTH = 40
+const MAX_ERROR_CATEGORY_LENGTH = 64
+const MAX_SYMPTOM_LENGTH = 240
+const ALLOWED_EVENTS = new Set([
+  'local_esq_read_and_validate',
+  'android_document_extract_and_parse',
+  'model_assisted_proofreading',
+  'document_database_publish',
+  'database_publish_transaction',
+  'manifest_fetch_and_validate',
+  'apk_download_verify_and_install',
+  'catalog_fetch_and_validate',
+  'download_hash_and_import_preview',
+  'bundled_question_bank_install',
+])
 
 function truncate(value: string, limit: number): string {
-  return value.length > limit ? `${value.slice(0, limit)}…` : value
+  return value.length > limit ? `${value.slice(0, Math.max(0, limit - 1))}…` : value
 }
 
-function basename(value: string): string {
-  const segments = value.replaceAll('\\', '/').split('/')
-  return segments.at(-1) || ''
-}
-
-function sanitizeUrl(raw: string): string {
-  try {
-    const url = new URL(raw)
-    return `${url.protocol}//${url.host}${url.pathname}`
-  } catch {
-    return raw
-  }
-}
-
-export function sanitizeDiagnosticValue(value: unknown, limit = MAX_TECHNICAL_LENGTH): string {
+export function sanitizeDiagnosticValue(value: unknown, limit = MAX_SYMPTOM_LENGTH): string {
   let text = typeof value === 'string'
     ? value
     : value instanceof Error
@@ -73,150 +58,167 @@ export function sanitizeDiagnosticValue(value: unknown, limit = MAX_TECHNICAL_LE
 
   text = text
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [已隐藏]')
-    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[API Key 已隐藏]')
-    .replace(/((?:api[-_ ]?key|authorization|access[-_ ]?token|secret)\s*[:=]\s*)[^\s,;}\]]+/gi, '$1[已隐藏]')
-    .replace(/([?&](?:key|api_key|apikey|token|access_token|secret)=)[^&#\s]+/gi, '$1[已隐藏]')
-    .replace(/https?:\/\/[^\s"'<>]+/gi, match => sanitizeUrl(match))
-    .replace(/[A-Za-z]:\\(?:[^\\\r\n]+\\)+([^\\\r\n]+)/g, '[本机路径]/$1')
-    .replace(/\/(?:storage|data|sdcard|mnt)\/[^\s"'<>]+/gi, match => `[设备路径]/${basename(match)}`)
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gi, '[API Key 已隐藏]')
+    .replace(/((?:api[-_ ]?key|authorization|access[-_ ]?token|refresh[-_ ]?token|secret|password)\s*[:=]\s*)[^\s,;}\]]+/gi, '$1[已隐藏]')
+    .replace(/https?:\/\/[^\s\"'<>]+/gi, '[URL 已隐藏]')
+    .replace(/[A-Za-z]:\\(?:[^\\\r\n]+\\)+[^\\\r\n]*/g, '[完整路径已隐藏]')
+    .replace(/\/(?:home|Users|storage|data|sdcard|mnt|var|tmp)\/[^\s\"'<>]*/gi, '[完整路径已隐藏]')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[IP 已隐藏]')
+    .replace(/\b(?:[A-F0-9]{0,4}:){2,7}[A-F0-9]{0,4}\b/gi, '[IP 已隐藏]')
+    .replace(/((?:android[-_ ]?id|device[-_ ]?id|fingerprint|imei|serial)\s*[:=]\s*)[^\s,;}\]]+/gi, '$1[设备标识已隐藏]')
+    .replace(/((?:question|题目|题库正文|answer|答案正文|chat|聊天内容|learning[-_ ]?record|学习记录)\s*[:=：]\s*)[^\r\n;}]*/gi, '$1[内容已隐藏]')
     .replace(/\s+/g, ' ')
     .trim()
 
   return truncate(text, limit)
 }
 
-function safeFileName(value?: string): string | undefined {
-  if (!value) return undefined
-  return truncate(sanitizeDiagnosticValue(basename(value), 180), 180)
+function safeIdentifier(value: unknown, fallback: string, limit: number): string {
+  const candidate = sanitizeDiagnosticValue(value, limit)
+  return /^[A-Za-z0-9_.-]+$/.test(candidate) ? candidate : fallback
 }
 
-function errorCode(cause: unknown): string {
+function safeAppVersion(value: unknown): string {
+  const candidate = sanitizeDiagnosticValue(value, MAX_VERSION_LENGTH)
+  return /^(?:unknown|v?\d+(?:\.\d+){1,3}(?:[-+][A-Za-z0-9.-]+)?(?: \([A-Za-z0-9_.-]+\))?)$/.test(candidate)
+    ? candidate
+    : 'unknown'
+}
+
+function safeEvent(value: unknown): string {
+  const candidate = safeIdentifier(value, 'unknown_event', MAX_EVENT_LENGTH)
+  return ALLOWED_EVENTS.has(candidate) ? candidate : 'unknown_event'
+}
+
+function isDiagnosticCategory(value: unknown): value is DiagnosticCategory {
+  return ['question_bank_import', 'remote_question_bank', 'app_update', 'startup'].includes(String(value))
+}
+
+function safeTimestamp(value: unknown): string {
+  const parsed = new Date(String(value ?? ''))
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString()
+}
+
+export function safeErrorCategory(cause: unknown): string {
   const candidate = cause as { status?: unknown, code?: unknown, name?: unknown }
-  if (candidate?.code) return sanitizeDiagnosticValue(candidate.code, 80)
-  if (candidate?.status) return `HTTP_${sanitizeDiagnosticValue(candidate.status, 24)}`
-  if (candidate?.name) return sanitizeDiagnosticValue(candidate.name, 80)
+  if (candidate?.code) return safeIdentifier(candidate.code, 'UNKNOWN_ERROR', MAX_ERROR_CATEGORY_LENGTH)
+  if (candidate?.status) return safeIdentifier(`HTTP_${candidate.status}`, 'UNKNOWN_ERROR', MAX_ERROR_CATEGORY_LENGTH)
+  const message = cause instanceof Error ? cause.message : String(cause ?? '')
+  const installerCategories: Array<[RegExp, string]> = [
+    [/APK .*?(?:SHA-256|校验失败)/i, 'APK_HASH_MISMATCH'],
+    [/APK 文件大小|大小与清单声明不一致/i, 'APK_SIZE_MISMATCH'],
+    [/APK 下载失败/i, 'APK_DOWNLOAD_FAILED'],
+    [/缓存目录不可用/i, 'CACHE_UNAVAILABLE'],
+    [/保存安装包清理状态/i, 'CLEANUP_STATE_WRITE_FAILED'],
+    [/打开系统安装界面/i, 'INSTALLER_LAUNCH_FAILED'],
+    [/确认当前应用版本/i, 'VERSION_CHECK_FAILED'],
+    [/更新地址|下载地址/i, 'INVALID_UPDATE_SOURCE'],
+  ]
+  for (const [pattern, category] of installerCategories) {
+    if (pattern.test(message)) return category
+  }
+  if (candidate?.name) return safeIdentifier(candidate.name, 'UNKNOWN_ERROR', MAX_ERROR_CATEGORY_LENGTH)
   return 'UNKNOWN_ERROR'
+}
+
+function genericSymptom(errorCategory: string): string {
+  return `操作未完成（${errorCategory}），请重试；如仍失败，可主动导出此诊断。`
+}
+
+function projectEntry(value: unknown): DiagnosticLogEntry | null {
+  if (!value || typeof value !== 'object') return null
+  const source = value as Record<string, unknown>
+  const module = isDiagnosticCategory(source.module)
+    ? source.module
+    : isDiagnosticCategory(source.category)
+      ? source.category
+      : null
+  if (!module) return null
+  const version = [source.appVersion, source.appVersionCode].filter(Boolean).join(' (')
+  const errorCategory = safeIdentifier(source.errorCategory ?? source.errorCode, 'UNKNOWN_ERROR', MAX_ERROR_CATEGORY_LENGTH)
+  return {
+    createdAt: safeTimestamp(source.createdAt),
+    event: safeEvent(source.event ?? source.stage),
+    module,
+    appVersion: safeAppVersion(version ? `${version}${source.appVersionCode ? ')' : ''}` : 'unknown'),
+    errorCategory,
+    symptom: genericSymptom(errorCategory),
+  }
+}
+
+export function projectDiagnosticEntries(values: unknown): DiagnosticLogEntry[] {
+  if (!Array.isArray(values)) return []
+  return values.map(projectEntry).filter((entry): entry is DiagnosticLogEntry => entry !== null).slice(0, MAX_ENTRIES)
 }
 
 async function readEntries(): Promise<DiagnosticLogEntry[]> {
   try {
     const stored = await Preferences.get({ key: STORAGE_KEY })
-    if (!stored.value) return []
-    const parsed: unknown = JSON.parse(stored.value)
-    return Array.isArray(parsed) ? parsed.slice(0, MAX_ENTRIES) as DiagnosticLogEntry[] : []
+    return stored.value ? projectDiagnosticEntries(JSON.parse(stored.value)) : []
   } catch {
     return []
   }
 }
 
 async function writeEntries(entries: DiagnosticLogEntry[]): Promise<void> {
-  await Preferences.set({
-    key: STORAGE_KEY,
-    value: JSON.stringify(entries.slice(0, MAX_ENTRIES)),
-  })
+  await Preferences.set({ key: STORAGE_KEY, value: JSON.stringify(projectDiagnosticEntries(entries)) })
 }
 
-async function runtimeInfo() {
-  let appVersion = 'unknown'
-  let appVersionCode = 'unknown'
-  let androidVersion = ''
-  let deviceModel = ''
+async function appVersion(): Promise<string> {
   try {
     const info = await App.getInfo()
-    appVersion = info.version
-    appVersionCode = info.build
+    return safeAppVersion(`${info.version} (${info.build})`)
   } catch {
-    // Browser preview or unavailable native bridge.
+    return 'unknown'
   }
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const device = await DiagnosticNative.getDeviceInfo()
-      androidVersion = sanitizeDiagnosticValue(device.androidVersion || '', 80)
-      deviceModel = sanitizeDiagnosticValue(device.deviceModel || '', 120)
-    } catch {
-      // Device metadata is helpful but never required for saving an error.
-    }
-  }
-  return { appVersion, appVersionCode, androidVersion, deviceModel }
 }
 
 export async function recordDiagnosticError(
   category: DiagnosticCategory,
   stage: string,
   cause: unknown,
-  context: DiagnosticContext = {},
+  _context: DiagnosticContext = {},
 ): Promise<DiagnosticLogEntry> {
-  const details = cause as { message?: unknown, detail?: unknown, stack?: unknown }
-  const message = sanitizeDiagnosticValue(details?.message ?? cause, MAX_MESSAGE_LENGTH)
-  const technical = details?.detail != null && details.detail !== details.message
-    ? sanitizeDiagnosticValue(details.detail, MAX_TECHNICAL_LENGTH)
-    : message
-  const fileName = safeFileName(context.fileName)
-  const runtime = await runtimeInfo()
+  const errorCategory = safeErrorCategory(cause)
   const entry: DiagnosticLogEntry = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     createdAt: new Date().toISOString(),
-    category,
-    stage: sanitizeDiagnosticValue(stage, 100),
-    errorCode: errorCode(cause),
-    message,
-    technicalMessage: technical,
-    appVersion: runtime.appVersion,
-    appVersionCode: runtime.appVersionCode,
-    platform: Capacitor.getPlatform(),
-    androidVersion: runtime.androidVersion,
-    deviceModel: runtime.deviceModel,
-    ...(fileName ? {
-      fileName,
-      fileExtension: fileName.includes('.') ? `.${fileName.split('.').at(-1)!.toLowerCase()}` : '',
-    } : {}),
-    ...(Number.isFinite(context.fileSize) ? { fileSize: Number(context.fileSize) } : {}),
-    ...(context.schemaVersion
-      ? { schemaVersion: sanitizeDiagnosticValue(context.schemaVersion, 40) }
-      : {}),
-    ...(details?.stack
-      ? { stack: sanitizeDiagnosticValue(details.stack, MAX_STACK_LENGTH) }
-      : {}),
+    event: safeEvent(stage),
+    module: category,
+    appVersion: await appVersion(),
+    errorCategory,
+    symptom: genericSymptom(errorCategory),
   }
-  const entries = await readEntries()
-  await writeEntries([entry, ...entries])
+  await writeEntries([entry, ...await readEntries()])
   return entry
 }
 
-export async function listDiagnosticLogs(): Promise<DiagnosticLogEntry[]> {
-  return readEntries()
-}
+export async function listDiagnosticLogs(): Promise<DiagnosticLogEntry[]> { return readEntries() }
+export async function clearDiagnosticLogs(): Promise<void> { await Preferences.remove({ key: STORAGE_KEY }) }
 
-export async function clearDiagnosticLogs(): Promise<void> {
-  await Preferences.remove({ key: STORAGE_KEY })
-}
-
-function exportPayload(entries: DiagnosticLogEntry[]): string {
-  return JSON.stringify({
-    format: 'english-practice-machine-diagnostics',
-    schemaVersion: 1,
-    exportedAt: new Date().toISOString(),
-    privacyNotice: '日志已过滤密钥、请求参数、题库正文、答案正文、个人学习记录和本机完整路径。',
-    entries,
-  }, null, 2)
-}
-
-export function diagnosticPayload(entries: DiagnosticLogEntry[]): JsonRecord {
+export function diagnosticPayload(entries: unknown): JsonRecord {
   return {
     format: 'english-practice-machine-diagnostics',
-    schemaVersion: 1,
+    schemaVersion: 2,
     exportedAt: new Date().toISOString(),
-    privacyNotice: '日志已过滤密钥、请求参数、题库正文、答案正文、个人学习记录和本机完整路径。',
-    entries,
+    privacyNotice: '仅包含事件、模块、应用版本、时间、错误类别和短症状；不含题库、答案、聊天或学习记录。',
+    entries: projectDiagnosticEntries(entries),
   }
 }
 
-type JsonRecord = Record<string, unknown>
+export function serializeDiagnosticPayload(entries: unknown): string {
+  const projected = projectDiagnosticEntries(entries)
+  while (projected.length) {
+    const text = JSON.stringify(diagnosticPayload(projected), null, 2)
+    if (new TextEncoder().encode(text).byteLength <= MAX_EXPORT_BYTES) return text
+    projected.pop()
+  }
+  return JSON.stringify(diagnosticPayload([]), null, 2)
+}
 
-export async function copyDiagnosticLogs(): Promise<number> {
-  const entries = await readEntries()
-  if (!entries.length) return 0
-  const text = exportPayload(entries)
+export async function copyDiagnosticText(text: string): Promise<void> {
+  if (new TextEncoder().encode(text).byteLength > MAX_EXPORT_BYTES) {
+    throw new Error('诊断包超过 1 MiB 上限')
+  }
   try {
     await navigator.clipboard.writeText(text)
   } catch {
@@ -230,6 +232,29 @@ export async function copyDiagnosticLogs(): Promise<number> {
     textarea.remove()
     if (!copied) throw new Error('系统剪贴板不可用')
   }
+}
+
+export async function copyIssueReportTemplate(): Promise<void> {
+  const version = await appVersion()
+  await copyDiagnosticText([
+    '# 英语刷题机公测问题报告',
+    `应用版本：${version}`,
+    '问题发生时间：',
+    '所在功能：',
+    '复现步骤：',
+    '预期结果：',
+    '实际结果：',
+    '是否每次出现：',
+    '补充说明：',
+    '',
+    '请勿填写 API Key、题库或答案正文、聊天内容、学习记录及完整文件路径。',
+  ].join('\n'))
+}
+
+export async function copyDiagnosticLogs(): Promise<number> {
+  const entries = await readEntries()
+  if (!entries.length) return 0
+  await copyDiagnosticText(serializeDiagnosticPayload(entries))
   return entries.length
 }
 
@@ -238,13 +263,17 @@ export async function shareDiagnosticLogs(): Promise<number> {
   if (!entries.length) return 0
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   const fileName = `english-practice-diagnostics-${timestamp}.json`
-  const text = exportPayload(entries)
+  const text = serializeDiagnosticPayload(entries)
+  await shareDiagnosticText(text, fileName, '分享英语刷题机脱敏诊断')
+  return entries.length
+}
+
+export async function shareDiagnosticText(text: string, fileName: string, title: string): Promise<void> {
+  if (new TextEncoder().encode(text).byteLength > MAX_EXPORT_BYTES) {
+    throw new Error('诊断包超过 1 MiB 上限')
+  }
   if (Capacitor.isNativePlatform()) {
-    await DiagnosticNative.shareText({
-      text,
-      fileName,
-      title: '分享英语刷题机诊断日志',
-    })
+    await DiagnosticNative.shareText({ text, fileName, title })
   } else {
     const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
     const anchor = document.createElement('a')
@@ -253,5 +282,4 @@ export async function shareDiagnosticLogs(): Promise<number> {
     anchor.click()
     URL.revokeObjectURL(url)
   }
-  return entries.length
 }
