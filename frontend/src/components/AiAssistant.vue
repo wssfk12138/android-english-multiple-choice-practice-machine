@@ -2,6 +2,7 @@
 import {
   Bot,
   History,
+  ImageOff,
   LoaderCircle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -11,6 +12,7 @@ import {
   Square,
   Trash2,
   UserRound,
+  X,
 } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -36,9 +38,17 @@ type ChatMessage = {
   id?: number
   role: 'user' | 'assistant'
   content: string
+  attachments?: Array<{ name: string; dataUrl: string }>
   profile_id?: number
   model_id?: string
   error?: boolean
+}
+
+type Attachment = {
+  id: number
+  name: string
+  size: number
+  dataUrl: string
 }
 
 const router = useRouter()
@@ -55,6 +65,86 @@ const historyOpen = ref(true)
 const error = ref('')
 const messageList = ref<HTMLElement | null>(null)
 let controller: AbortController | null = null
+
+const attachments = ref<Attachment[]>([])
+const noVisionModels = ref(new Set<string>())
+const visionError = ref('')
+const fileInput = ref<HTMLInputElement | null>(null)
+let attachmentSeq = 0
+const MAX_ATTACHMENTS = 4
+// data URL 为 ASCII base64，长度近似字节数；后端会做同样的上限校验。
+const MAX_ATTACHMENT_DATA_URL_CHARS = 8 * 1024 * 1024
+
+const VISION_ERROR_PATTERN = /(image|vision|multimodal|multi-modal|unsupported|invalid content|content part|does not support|not support)/i
+
+function modelIdentity(selection: NonNullable<typeof activeModel.value>) {
+  return `${selection.profile_id}:${selection.model_id}`
+}
+
+const attachDisabled = computed(() =>
+  Boolean(activeModel.value && noVisionModels.value.has(modelIdentity(activeModel.value))),
+)
+
+function triggerAttach() {
+  if (!attachDisabled.value) fileInput.value?.click()
+}
+
+function onFilesChosen(event: Event) {
+  const inputEl = event.target as HTMLInputElement
+  const files = Array.from(inputEl.files || [])
+  inputEl.value = ''
+  for (const file of files) {
+    if (attachments.value.length >= MAX_ATTACHMENTS) break
+    if (!file.type.startsWith('image/')) continue
+    const captured = ++attachmentSeq
+    compressImage(file)
+      .then(dataUrl => {
+        if (dataUrl.length > MAX_ATTACHMENT_DATA_URL_CHARS) {
+          error.value = '单张图片附件过大（超过 8 MiB），请裁剪或压缩后再试'
+          return
+        }
+        attachments.value.push({ id: captured, name: file.name, size: file.size, dataUrl })
+      })
+      .catch(() => undefined)
+  }
+}
+
+function removeAttachment(id: number) {
+  attachments.value = attachments.value.filter(item => item.id !== id)
+}
+
+function compressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('read-failed'))
+    reader.onload = () => {
+      const image = new Image()
+      image.onerror = () => reject(new Error('decode-failed'))
+      image.onload = () => {
+        const maxEdge = 1600
+        const scale = Math.min(1, maxEdge / Math.max(image.width || 1, image.height || 1))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.max(1, Math.round((image.width || 1) * scale))
+        canvas.height = Math.max(1, Math.round((image.height || 1) * scale))
+        const context = canvas.getContext('2d')
+        if (!context) {
+          reject(new Error('canvas-unavailable'))
+          return
+        }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height)
+        resolve(canvas.toDataURL('image/jpeg', 0.85))
+      }
+      image.src = String(reader.result)
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+function formatSize(bytes: number) {
+  return bytes > 1048576
+    ? `${(bytes / 1048576).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`
+}
 
 function modelValue(item: SelectorModel) {
   return `${item.profile_id}:${encodeURIComponent(item.model_id)}`
@@ -189,10 +279,19 @@ async function removeConversation(id: number) {
 async function sendMessage() {
   const text = input.value.trim()
   const selection = activeModel.value
-  if (!text || !selection || loading.value) return
+  const currentAttachments = attachments.value
+  if ((!text && !currentAttachments.length) || !selection || loading.value) return
+  const attachmentPayload = currentAttachments.map(item => ({ name: item.name, dataUrl: item.dataUrl }))
 
-  messages.value.push({ role: 'user', content: text })
+  messages.value.push({
+    role: 'user',
+    content: text || '(图片)',
+    ...(currentAttachments.length
+      ? { attachments: currentAttachments.map(({ name, dataUrl }) => ({ name, dataUrl })) }
+      : {}),
+  })
   input.value = ''
+  attachments.value = []
   error.value = ''
   loading.value = true
   controller = new AbortController()
@@ -208,6 +307,7 @@ async function sendMessage() {
         profile_id: selection.profile_id,
         model: selection.model_id,
         message: text,
+        ...(attachmentPayload.length ? { attachments: attachmentPayload } : {}),
       }),
       signal: controller.signal,
     })
@@ -222,11 +322,20 @@ async function sendMessage() {
         error: true,
       })
     } else {
-      messages.value.push({
-        role: 'assistant',
-        content: `暂时无法回答：${String(cause)}`,
-        error: true,
-      })
+      const description = String(cause?.message || cause)
+      if (attachmentPayload.length && VISION_ERROR_PATTERN.test(description)) {
+        noVisionModels.value.add(modelIdentity(selection))
+        visionError.value = '当前模型不支持视觉识别，请更换模型后再次尝试。'
+        input.value = text
+        attachments.value = currentAttachments
+        messages.value.pop()
+      } else {
+        messages.value.push({
+          role: 'assistant',
+          content: `暂时无法回答：${String(cause)}`,
+          error: true,
+        })
+      }
     }
   } finally {
     loading.value = false
@@ -274,7 +383,6 @@ onBeforeUnmount(() => {
   <div class="ai-assistant-page">
     <header class="ai-page-head">
       <div>
-        <span class="eyebrow">AI STUDY COMPANION</span>
         <h1>AI 学习助手</h1>
         <p class="lead">长难句、选项辨析、词义和学习方法，都可以在这里随时提问。</p>
       </div>
@@ -363,7 +471,17 @@ onBeforeUnmount(() => {
               <UserRound v-if="message.role==='user'" :size="15" />
               <Bot v-else :size="15" />
             </span>
-            <div>{{ message.content }}</div>
+            <div>
+              <div v-if="message.attachments?.length" class="ai-message-attachments">
+                <img
+                  v-for="(item, itemIndex) in message.attachments"
+                  :key="itemIndex"
+                  :src="item.dataUrl"
+                  alt=""
+                >
+              </div>
+              <div v-if="message.content">{{ message.content }}</div>
+            </div>
           </article>
           <article v-if="loading" class="ai-message assistant">
             <span class="ai-message-avatar"><Bot :size="15" /></span>
@@ -374,6 +492,18 @@ onBeforeUnmount(() => {
         <div v-if="error" class="ai-inline-error" role="alert">{{ error }}</div>
 
         <form class="ai-composer" @submit.prevent="sendMessage">
+          <div v-if="attachments.length" class="ai-attachment-strip">
+            <span v-for="item in attachments" :key="item.id" class="ai-attachment-chip">
+              <img :src="item.dataUrl" alt="">
+              <span class="ai-attachment-meta">
+                <strong>{{ item.name }}</strong>
+                <small>{{ formatSize(item.size) }}</small>
+              </span>
+              <button type="button" aria-label="移除附件" @click="removeAttachment(item.id)">
+                <X :size="14" />
+              </button>
+            </span>
+          </div>
           <textarea
             v-model="input"
             rows="3"
@@ -383,7 +513,25 @@ onBeforeUnmount(() => {
             aria-label="向 AI 学习助手提问"
             @keydown="handleInputKey"
           />
+          <input
+            ref="fileInput"
+            class="ai-file-input"
+            type="file"
+            accept="image/*"
+            multiple
+            @change="onFilesChosen"
+          >
           <div class="ai-composer-actions">
+            <button
+              class="ai-attach-button"
+              type="button"
+              :disabled="loading || attachDisabled"
+              :title="attachDisabled ? '该模型此前拒绝图片输入，请更换模型后再上传' : '添加图片'"
+              aria-label="添加图片"
+              @click="triggerAttach"
+            >
+              <Plus :size="18" />
+            </button>
             <div class="ai-model-control">
               <label class="sr-only" for="assistant-model">对话模型</label>
               <select
@@ -420,6 +568,21 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </form>
+      </div>
+
+      <div
+        v-if="visionError"
+        class="ai-vision-overlay"
+        role="alertdialog"
+        aria-modal="true"
+        @click.self="visionError = ''"
+      >
+        <div class="ai-vision-dialog card">
+          <span class="ai-vision-dialog-icon"><ImageOff :size="22" /></span>
+          <strong>{{ visionError }}</strong>
+          <p>换一个支持图片输入的模型后，重新发送即可。</p>
+          <button class="button" type="button" @click="visionError = ''">知道了</button>
+        </div>
       </div>
     </section>
   </div>

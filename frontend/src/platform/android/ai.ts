@@ -271,7 +271,10 @@ async function conversation(id: number): Promise<JsonRecord> {
   if (!current) throw new LocalApiError(404, '对话不存在')
   return {
     ...current,
-    messages: await rows('SELECT * FROM ai_messages WHERE conversation_id = ? ORDER BY id', [id]),
+    messages: (await rows('SELECT * FROM ai_messages WHERE conversation_id = ? ORDER BY id', [id])).map((item: JsonRecord) => ({
+      ...item,
+      attachments: parseAttachments(item.attachments),
+    })),
   }
 }
 
@@ -284,6 +287,36 @@ export async function deleteConversation(id: number): Promise<{ ok: true }> {
   await run('DELETE FROM ai_messages WHERE conversation_id = ?', [id])
   await run('DELETE FROM ai_conversations WHERE id = ?', [id])
   return { ok: true }
+}
+
+// data URL 为 ASCII base64，长度近似字节数；与前端附件条的上限保持一致。
+const MAX_ATTACHMENT_DATA_URL_CHARS = 8 * 1024 * 1024
+
+function normalizeAttachments(value: unknown): Array<{ name: string; dataUrl: string }> {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => (typeof item === 'object' && item !== null ? item as JsonRecord : {}))
+    .filter(item => typeof item.dataUrl === 'string' && item.dataUrl.startsWith('data:image/'))
+    .slice(0, 4)
+    .map(item => ({
+      name: String(item.name || '图片').slice(0, 80),
+      dataUrl: String(item.dataUrl),
+    }))
+    .filter(item => {
+      if (item.dataUrl.length > MAX_ATTACHMENT_DATA_URL_CHARS) {
+        throw new LocalApiError(422, '单张图片附件过大（超过 8 MiB），请裁剪或压缩后再试')
+      }
+      return true
+    })
+}
+
+function parseAttachments(value: unknown): Array<{ name: string; dataUrl: string }> {
+  if (typeof value !== 'string' || !value) return []
+  try {
+    return normalizeAttachments(JSON.parse(value))
+  } catch {
+    return []
+  }
 }
 
 export async function sendChat(body: JsonRecord): Promise<JsonRecord> {
@@ -307,19 +340,33 @@ export async function sendChat(body: JsonRecord): Promise<JsonRecord> {
     '除非用户明确要求，不要主动泄露题库中的标准答案。',
     String(profile.system_prompt || ''),
   ].filter(Boolean).join('\n')
+  const attachments = normalizeAttachments(body.attachments)
+  const userText = String(body.message || '').trim()
+  const userContent = attachments.length
+    ? [
+        ...(userText ? [{ type: 'text', text: userText }] : []),
+        ...attachments.map(item => ({ type: 'image_url', image_url: { url: item.dataUrl } })),
+      ]
+    : userText
   const content = await chatCompletion(
     profile.id,
     String(body.model),
     [
       { role: 'system', content: system },
       ...history,
-      { role: 'user', content: String(body.message || '').trim() },
+      { role: 'user', content: userContent },
     ],
   )
   await run(
-    `INSERT INTO ai_messages (conversation_id, role, content, profile_id, model_id)
-     VALUES (?, 'user', ?, ?, ?)`,
-    [conversationId, String(body.message).trim(), profile.id, body.model],
+    `INSERT INTO ai_messages (conversation_id, role, content, attachments, profile_id, model_id)
+     VALUES (?, 'user', ?, ?, ?, ?, ?)`,
+    [
+      conversationId,
+      userText || '(图片)',
+      attachments.length ? JSON.stringify(attachments) : null,
+      profile.id,
+      body.model,
+    ],
   )
   await run(
     `INSERT INTO ai_messages (conversation_id, role, content, profile_id, model_id)
@@ -328,7 +375,7 @@ export async function sendChat(body: JsonRecord): Promise<JsonRecord> {
   )
   const current = await row<{ title: string }>('SELECT title FROM ai_conversations WHERE id = ?', [conversationId])
   const title = current?.title === '新对话'
-    ? String(body.message).trim().replace(/\n/g, ' ').slice(0, 28) || '新对话'
+    ? userText.replace(/\n/g, ' ').slice(0, 28) || '图片提问'
     : current?.title || '新对话'
   await run(
     'UPDATE ai_conversations SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',

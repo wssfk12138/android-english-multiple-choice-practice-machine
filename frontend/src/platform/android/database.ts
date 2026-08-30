@@ -278,6 +278,7 @@ CREATE TABLE IF NOT EXISTS ai_messages (
   conversation_id INTEGER NOT NULL,
   role TEXT NOT NULL,
   content TEXT NOT NULL,
+  attachments TEXT,
   profile_id INTEGER,
   model_id TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -302,6 +303,20 @@ CREATE TABLE IF NOT EXISTS question_label_run_items (
   run_id TEXT NOT NULL,
   question_id INTEGER NOT NULL,
   PRIMARY KEY (run_id, question_id)
+);
+CREATE TABLE IF NOT EXISTS question_label_runs (
+  run_id TEXT PRIMARY KEY,
+  question_bank_profile_id INTEGER NOT NULL,
+  scope_kind TEXT NOT NULL DEFAULT 'all',
+  year INTEGER,
+  paper_ids TEXT NOT NULL DEFAULT '[]',
+  overwrite_unlocked INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'running',
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at TEXT,
+  last_error TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY (question_bank_profile_id) REFERENCES question_bank_profiles(id)
 );
 CREATE TABLE IF NOT EXISTS document_import_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -855,6 +870,12 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       await repairStalePaperForeignKey(db)
       await cleanupInterruptedPaperMigration(db)
       await createQuestionBankProfileIndexes(db)
+      await db.execute(`
+        CREATE INDEX IF NOT EXISTS idx_question_label_run_items_question
+          ON question_label_run_items(question_id, run_id);
+        CREATE INDEX IF NOT EXISTS idx_question_label_runs_profile_status
+          ON question_label_runs(question_bank_profile_id, status, updated_at DESC);
+      `)
       await backfillEnglishOneOrderingFixedSlots(db)
       const questionColumns = await db.query('PRAGMA table_info(questions)')
       if (!(questionColumns.values || []).some(column => column.name === 'content_hash')) {
@@ -863,6 +884,10 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       const stateColumns = await db.query('PRAGMA table_info(wrong_analysis_states)')
       if ((stateColumns.values || []).length && !(stateColumns.values || []).some(column => column.name === 'analyzed_session_id')) {
         await db.execute('ALTER TABLE wrong_analysis_states ADD COLUMN analyzed_session_id INTEGER NOT NULL DEFAULT 0')
+      }
+      const aiMessageColumns = await db.query('PRAGMA table_info(ai_messages)')
+      if ((aiMessageColumns.values || []).length && !(aiMessageColumns.values || []).some(column => column.name === 'attachments')) {
+        await db.execute('ALTER TABLE ai_messages ADD COLUMN attachments TEXT')
       }
       const vocabColumns = await db.query('PRAGMA table_info(vocabulary_entries)')
       const vocabNames = new Set((vocabColumns.values || []).map(column => column.name))
@@ -895,6 +920,27 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       if (!labelNames.has('updated_at')) {
         await db.execute("ALTER TABLE question_ai_labels ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
         await db.execute("UPDATE question_ai_labels SET updated_at = CURRENT_TIMESTAMP WHERE updated_at = ''")
+      }
+      const labelLockMigration = await db.query(
+        "SELECT 1 FROM app_migrations WHERE migration_key = 'question-label-auto-lock-v1' LIMIT 1",
+      )
+      if (!(labelLockMigration.values || []).length) {
+        await db.run(
+          `UPDATE question_ai_labels
+           SET locked = 1, updated_at = CURRENT_TIMESTAMP
+           WHERE locked = 0
+             AND EXISTS (SELECT 1 FROM questions WHERE questions.id = question_ai_labels.question_id)
+             AND (TRIM(COALESCE(primary_skill, '')) <> ''
+                  OR TRIM(COALESCE(model_name, '')) <> ''
+                  OR user_edited = 1)`,
+          [],
+          false,
+        )
+        await db.run(
+          "INSERT INTO app_migrations (migration_key) VALUES ('question-label-auto-lock-v1')",
+          [],
+          false,
+        )
       }
       return db
     })()
