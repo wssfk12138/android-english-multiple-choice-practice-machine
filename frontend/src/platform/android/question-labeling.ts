@@ -1,6 +1,7 @@
 import { chatCompletion } from './ai'
 import { row, rows, run, transaction } from './database'
 import { LocalApiError } from './errors'
+import { activeQuestionBankProfileId } from './question-bank-profiles'
 
 type JsonRecord = Record<string, any>
 
@@ -9,9 +10,22 @@ function ids(value: unknown): number[] {
   return [...new Set(raw.map(Number).filter(item => Number.isInteger(item) && item > 0))]
 }
 
-function scopeWhere(year: number | null, paperIds: number[], alias = 'p') {
+type LabelRunContext = {
+  run_id: string
+  question_bank_profile_id: number
+  scope_kind: 'all' | 'year' | 'papers'
+  year: number | null
+  paper_ids: number[]
+  overwrite_unlocked: boolean
+  status: string
+}
+
+function scopeWhere(year: number | null, paperIds: number[], profileId: number, alias = 'p') {
   const conditions: string[] = []
   const values: unknown[] = []
+  conditions.push(alias + '.profile_id = ?', alias + '.deleted_at IS NULL')
+  values.push(profileId)
+  if (alias === 'p') conditions.push("u.unit_type <> 'listening'")
   if (year != null && Number.isFinite(year)) {
     conditions.push(`${alias}.year = ?`)
     values.push(year)
@@ -26,11 +40,110 @@ function scopeWhere(year: number | null, paperIds: number[], alias = 'p') {
   }
 }
 
+function profileValue(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+async function resolveProfileId(value: unknown): Promise<number> {
+  const profileId = profileValue(value) ?? await activeQuestionBankProfileId()
+  const exists = await row('SELECT id FROM question_bank_profiles WHERE id = ? AND deleted_at IS NULL', [profileId])
+  if (!exists) throw new LocalApiError(400, '题库配置不存在或已在回收站')
+  return profileId
+}
+
+async function loadRunContext(runId: string): Promise<LabelRunContext | null> {
+  if (!runId.trim()) return null
+  const found = await row<JsonRecord>('SELECT * FROM question_label_runs WHERE run_id = ?', [runId.trim().slice(0, 80)])
+  if (!found) return null
+  let paperIds: number[] = []
+  try { paperIds = ids(JSON.parse(String(found.paper_ids || '[]'))) } catch { paperIds = [] }
+  return {
+    run_id: String(found.run_id),
+    question_bank_profile_id: Number(found.question_bank_profile_id),
+    scope_kind: String(found.scope_kind || 'all') as LabelRunContext['scope_kind'],
+    year: found.year == null ? null : Number(found.year),
+    paper_ids: paperIds,
+    overwrite_unlocked: Number(found.overwrite_unlocked) === 1 || String(found.overwrite_unlocked).toLowerCase() === 'true',
+    status: String(found.status || 'running'),
+  }
+}
+
+async function ensureRunContext(body: JsonRecord): Promise<{ runId: string; context: LabelRunContext }> {
+  const runId = String(body.run_id || crypto.randomUUID()).trim().slice(0, 80)
+  const existing = await loadRunContext(runId)
+  if (existing) {
+    if (existing.status === 'paused' || existing.status === 'failed') {
+      await run(
+        "UPDATE question_label_runs SET status = 'running', last_error = '', updated_at = CURRENT_TIMESTAMP, finished_at = NULL WHERE run_id = ?",
+        [runId],
+      )
+      existing.status = 'running'
+    }
+    return { runId, context: existing }
+  }
+  const profileId = await resolveProfileId(body.question_bank_profile_id)
+  const yearValue = body.year == null || body.year === '' ? null : Number(body.year)
+  const year = yearValue == null || Number.isFinite(yearValue) ? yearValue : null
+  const paperIds = ids(body.paper_ids)
+  if (paperIds.length) {
+    const placeholders = paperIds.map(() => '?').join(',')
+    const count = await row<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM papers WHERE id IN (' + placeholders + ') AND profile_id = ? AND deleted_at IS NULL',
+      [...paperIds, profileId],
+    )
+    if (Number(count?.count || 0) !== paperIds.length) {
+      throw new LocalApiError(400, '标注试卷不属于当前绑定的题库配置')
+    }
+  }
+  const scopeKind = paperIds.length ? 'papers' : year != null ? 'year' : 'all'
+  await run(
+    'INSERT OR IGNORE INTO question_label_runs ' +
+      '(run_id, question_bank_profile_id, scope_kind, year, paper_ids, overwrite_unlocked, status) ' +
+      "VALUES (?, ?, ?, ?, ?, ?, 'running')",
+    [runId, profileId, scopeKind, year, JSON.stringify(paperIds), body.overwrite_unlocked ? 1 : 0],
+  )
+  const context = await loadRunContext(runId)
+  if (!context) throw new LocalApiError(500, '无法创建智能标注运行上下文')
+  return { runId, context }
+}
+
+async function updateRunStatus(runId: string, status: 'running' | 'paused' | 'done' | 'failed' | 'cancelled', error = '') {
+  await run(
+    'UPDATE question_label_runs SET status = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP, ' +
+      "finished_at = CASE WHEN ? IN ('done', 'failed', 'cancelled') THEN CURRENT_TIMESTAMP ELSE NULL END WHERE run_id = ?",
+    [status, error.slice(0, 1000), status, runId],
+  )
+}
+
+export async function pauseLabelRun(runId: string): Promise<JsonRecord> {
+  const context = await loadRunContext(runId)
+  if (!context) throw new LocalApiError(404, '智能标注运行不存在')
+  await updateRunStatus(context.run_id, 'paused')
+  return { run_id: context.run_id, status: 'paused' }
+}
+
+export async function failLabelRun(runId: string, error: unknown): Promise<void> {
+  if (runId.trim()) await updateRunStatus(runId.trim().slice(0, 80), 'failed', String(error))
+}
+
 export async function labelingStatus(search: URLSearchParams | JsonRecord): Promise<JsonRecord> {
   const yearValue = search instanceof URLSearchParams ? search.get('year') : search.year
-  const year = yearValue == null || yearValue === '' ? null : Number(yearValue)
-  const paperIds = ids(search instanceof URLSearchParams ? search.get('paper_ids') : search.paper_ids)
-  const scope = scopeWhere(year, paperIds)
+  let year = yearValue == null || yearValue === '' ? null : Number(yearValue)
+  let paperIds = ids(search instanceof URLSearchParams ? search.get('paper_ids') : search.paper_ids)
+  const requestedRunId = String(search instanceof URLSearchParams ? search.get('run_id') || '' : search.run_id || '')
+  const runContext = await loadRunContext(requestedRunId)
+  const profileInput = search instanceof URLSearchParams
+    ? search.get('question_bank_profile_id')
+    : search.question_bank_profile_id
+  let profileId = await resolveProfileId(profileInput)
+  if (runContext) {
+    year = runContext.year
+    paperIds = runContext.paper_ids
+    profileId = runContext.question_bank_profile_id
+  }
+  const scope = scopeWhere(year, paperIds, profileId)
   const status = await row<JsonRecord>(
     `SELECT COUNT(q.id) AS total,
        SUM(CASE WHEN l.question_id IS NOT NULL THEN 1 ELSE 0 END) AS labeled,
@@ -47,13 +160,18 @@ export async function labelingStatus(search: URLSearchParams | JsonRecord): Prom
   return {
     year,
     paper_ids: paperIds,
-    years: (await rows<{ year: number }>('SELECT DISTINCT year FROM papers ORDER BY year DESC')).map(item => item.year),
+    years: (await rows<{ year: number }>(
+      'SELECT DISTINCT year FROM papers WHERE profile_id = ? AND deleted_at IS NULL ORDER BY year DESC',
+      [profileId],
+    )).map(item => item.year),
     total,
     labeled,
     locked: Number(status?.locked || 0),
     review_pending: Number(status?.review_pending || 0),
     remaining: Math.max(0, total - labeled),
     percentage: total ? Math.round(labeled * 100 / total) : 0,
+    question_bank_profile_id: profileId,
+    ...(requestedRunId ? { run_id: requestedRunId } : {}),
   }
 }
 
@@ -61,10 +179,13 @@ export async function listQuestionLabels(search: URLSearchParams): Promise<JsonR
   const yearValue = search.get('year')
   const year = yearValue ? Number(yearValue) : null
   const paperIds = ids(search.get('paper_ids'))
+  const profileId = await resolveProfileId(search.get('question_bank_profile_id'))
   const query = String(search.get('search') || '').trim()
   const limit = Math.min(200, Math.max(1, Number(search.get('limit') || 120)))
   const conditions: string[] = []
   const values: unknown[] = []
+  conditions.push('p.profile_id = ?', 'p.deleted_at IS NULL', "u.unit_type <> 'listening'")
+  values.push(profileId)
   if (year != null) { conditions.push('p.year = ?'); values.push(year) }
   if (paperIds.length) {
     conditions.push(`p.id IN (${paperIds.map(() => '?').join(',')})`)
@@ -171,15 +292,20 @@ function list(value: unknown): string[] {
 }
 
 export async function labelNextUnit(body: JsonRecord): Promise<JsonRecord> {
-  const year = body.year == null ? null : Number(body.year)
-  const paperIds = ids(body.paper_ids)
-  const overwrite = Boolean(body.overwrite_unlocked)
-  const runId = String(body.run_id || crypto.randomUUID()).slice(0, 80)
+  const ensured = await ensureRunContext(body)
+  const runId = ensured.runId
+  const context = ensured.context
+  const year = context.year
+  const paperIds = context.paper_ids
+  const overwrite = context.overwrite_unlocked
   const conditions = [
     overwrite ? '(l.question_id IS NULL OR l.locked = 0)' : 'l.question_id IS NULL',
     'ri.question_id IS NULL',
+    'p.profile_id = ?',
+    'p.deleted_at IS NULL',
+    "u.unit_type <> 'listening'",
   ]
-  const values: unknown[] = [runId]
+  const values: unknown[] = [runId, context.question_bank_profile_id]
   if (year != null) { conditions.push('p.year = ?'); values.push(year) }
   if (paperIds.length) {
     conditions.push(`p.id IN (${paperIds.map(() => '?').join(',')})`)
@@ -195,7 +321,16 @@ export async function labelNextUnit(body: JsonRecord): Promise<JsonRecord> {
      GROUP BY u.id ORDER BY p.year DESC, u.sequence LIMIT 1`,
     values,
   )
-  if (!unit) return { done: true, processed: 0, run_id: runId, ...await labelingStatus({ year, paper_ids: paperIds }) }
+  if (!unit) {
+    await updateRunStatus(runId, 'done')
+    return {
+      done: true,
+      processed: 0,
+      run_id: runId,
+      question_bank_profile_id: context.question_bank_profile_id,
+      ...await labelingStatus({ year, paper_ids: paperIds, question_bank_profile_id: context.question_bank_profile_id, run_id: runId }),
+    }
+  }
   const questionRows = await rows<JsonRecord>(
     `SELECT q.id, q.number, q.stem, q.answer, q.question_type
      FROM questions q LEFT JOIN question_ai_labels l ON l.question_id = q.id
@@ -228,7 +363,7 @@ export async function labelNextUnit(body: JsonRecord): Promise<JsonRecord> {
             (question_id, primary_skill, secondary_skills, trap_types,
              attention_points, vocabulary_demand, context_dependency,
              grammar_dependency, confidence, locked, user_edited, model_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)
            ON CONFLICT(question_id) DO UPDATE SET
              primary_skill = excluded.primary_skill,
              secondary_skills = excluded.secondary_skills,
@@ -238,6 +373,7 @@ export async function labelNextUnit(body: JsonRecord): Promise<JsonRecord> {
              context_dependency = excluded.context_dependency,
              grammar_dependency = excluded.grammar_dependency,
              confidence = excluded.confidence,
+             locked = 1,
              model_name = excluded.model_name,
              label_version = question_ai_labels.label_version + 1,
              updated_at = CURRENT_TIMESTAMP
@@ -269,9 +405,10 @@ export async function labelNextUnit(body: JsonRecord): Promise<JsonRecord> {
     done: false,
     processed,
     run_id: runId,
+    question_bank_profile_id: context.question_bank_profile_id,
     unit_id: unit.id,
     unit_title: `${unit.year} 年 ${unit.title}`,
-    ...await labelingStatus({ year, paper_ids: paperIds }),
+    ...await labelingStatus({ year, paper_ids: paperIds, question_bank_profile_id: context.question_bank_profile_id, run_id: runId }),
   }
 }
 

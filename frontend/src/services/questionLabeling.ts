@@ -11,6 +11,8 @@ export type LabelStatus = {
   review_pending: number
   remaining: number
   percentage: number
+  question_bank_profile_id?: number
+  run_id?: string
 }
 
 export type LabelScope = {
@@ -18,6 +20,7 @@ export type LabelScope = {
   title: string
   year: number | null
   paperIds: number[]
+  questionBankProfileId: number
 }
 
 export const questionLabelingState = reactive<{
@@ -43,30 +46,56 @@ let activeLoop = 0
 function normalized(scope: LabelScope): LabelScope {
   return {
     ...scope,
+    questionBankProfileId: Number(scope.questionBankProfileId || 0),
     paperIds: [...new Set(scope.paperIds.filter(value => value > 0))].sort((a, b) => a - b),
   }
 }
 
-function query(scope: LabelScope) {
+function scopeKey(scope: LabelScope) {
+  const next = normalized(scope)
+  return JSON.stringify([next.kind, next.year, next.questionBankProfileId, next.paperIds])
+}
+
+function query(scope: LabelScope, runId = '') {
   const params = new URLSearchParams()
   if (scope.year !== null) params.set('year', String(scope.year))
   if (scope.paperIds.length) params.set('paper_ids', scope.paperIds.join(','))
+  if (scope.questionBankProfileId > 0) {
+    params.set('question_bank_profile_id', String(scope.questionBankProfileId))
+  }
+  if (runId) params.set('run_id', runId)
   return params.toString() ? `?${params}` : ''
 }
 
 export async function loadQuestionLabelingStatus(scope: LabelScope) {
   const next = normalized(scope)
-  const status = await get<LabelStatus>(`/ai/question-labels/status${query(next)}`)
-  questionLabelingState.scope = next
-  questionLabelingState.status = status
+  const sameRun = Boolean(
+    questionLabelingState.isRunning
+      && questionLabelingState.scope
+      && scopeKey(questionLabelingState.scope) === scopeKey(next),
+  )
+  const status = await get<LabelStatus>(
+    `/ai/question-labels/status${query(next, sameRun ? questionLabelingState.runId : '')}`,
+  )
+  if (!questionLabelingState.isRunning
+    || scopeKey(questionLabelingState.scope || next) === scopeKey(next)) {
+    questionLabelingState.scope = next
+    questionLabelingState.status = status
+  }
   return status
 }
 
 export async function startQuestionLabeling(scope: LabelScope, overwriteUnlocked = false) {
   if (questionLabelingState.isRunning || questionLabelingState.isPausing) return
   const next = normalized(scope)
+  const sameRun = Boolean(
+    questionLabelingState.scope
+      && scopeKey(questionLabelingState.scope) === scopeKey(next),
+  )
   questionLabelingState.scope = next
-  questionLabelingState.runId = crypto.randomUUID()
+  if (!sameRun || !questionLabelingState.runId) {
+    questionLabelingState.runId = crypto.randomUUID()
+  }
   questionLabelingState.isRunning = true
   questionLabelingState.isPausing = false
   questionLabelingState.error = ''
@@ -79,20 +108,23 @@ export async function startQuestionLabeling(scope: LabelScope, overwriteUnlocked
         paper_ids: next.paperIds,
         overwrite_unlocked: overwriteUnlocked,
         run_id: questionLabelingState.runId,
+        question_bank_profile_id: next.questionBankProfileId,
       })
       if (loopId !== activeLoop) return
       questionLabelingState.status = result
       questionLabelingState.runId = result.run_id || questionLabelingState.runId
-      if (questionLabelingState.isPausing) {
-        questionLabelingState.isRunning = false
-        questionLabelingState.isPausing = false
-        questionLabelingState.message = '已暂停，下次从下一篇未完成材料继续。'
-        return
-      }
       if (result.done) {
         questionLabelingState.isRunning = false
+        questionLabelingState.isPausing = false
         questionLabelingState.runId = ''
         questionLabelingState.message = `${next.title}已完成智能标注`
+        return
+      }
+      if (questionLabelingState.isPausing) {
+        await post(`/ai/question-labels/runs/${encodeURIComponent(questionLabelingState.runId)}/pause`, {})
+        questionLabelingState.isRunning = false
+        questionLabelingState.isPausing = false
+        questionLabelingState.message = '已暂停。再次开始时会从下一篇未完成材料继续。'
         return
       }
       questionLabelingState.message = `已完成：${result.unit_title}，本篇标注 ${result.processed} 道`
