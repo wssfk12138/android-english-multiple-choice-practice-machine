@@ -1,23 +1,31 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
-import JSZip from 'jszip'
 import {
   esqFormatName,
   paperExamMetadata,
   validateEsqManifest,
 } from '../src/platform/android/esq-format.ts'
 
-const packagePath = resolve(
-  '..',
-  'work',
-  'internal-channel',
-  'postgraduate-english-two-2010-2025-v1.0.0.esq',
-)
-const zip = await JSZip.loadAsync(await readFile(packagePath), { checkCRC32: true })
-const manifest = JSON.parse(await zip.file('manifest.json').async('text'))
+const manifest = {
+  format: 'esq',
+  schemaVersion: '1.1',
+  packageId: 'org.example.public-compatibility-fixture',
+  contentVersion: '1.0.0',
+  papers: [
+    {
+      id: 'paper-2025-01',
+      path: 'papers/paper-2025-01.json',
+      examType: 'postgraduate_english2',
+      examMonth: 0,
+      setNumber: 1,
+      listeningTracks: [],
+    },
+  ],
+}
 const firstDescriptor = manifest.papers[0]
-const firstPaper = JSON.parse(await zip.file(firstDescriptor.path).async('text'))
+const firstPaper = {
+  id: firstDescriptor.id,
+  title: 'Public compatibility fixture',
+}
 
 assert.doesNotThrow(() => validateEsqManifest(manifest))
 assert.equal(esqFormatName(manifest), 'esq-1.1')

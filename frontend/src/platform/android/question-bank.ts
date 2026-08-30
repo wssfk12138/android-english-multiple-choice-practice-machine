@@ -4,11 +4,21 @@ import { esqFormatName, paperExamMetadata, validateEsqManifest } from './esq-for
 import { LocalApiError } from './errors'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
 import { orderingFixedSlotsForPaperUnit } from './ordering-fixed-slots'
+import { MAX_ESQ_BYTES, MAX_ESQ_ENTRIES, MAX_ESQ_MIB, MAX_SINGLE_JSON_BYTES, MAX_TOTAL_JSON_BYTES, MAX_ZIP_COMPRESSION_RATIO } from '../question-bank-limits.ts'
 
 type JsonRecord = Record<string, any>
 
 type ImportedPackage = {
   manifest: JsonRecord
+  assets?: Array<{
+    assetId: string
+    mediaType: string
+    originalName?: string
+    label?: string
+    size: number
+    sha256: string
+    storedPath: string
+  }>
   papers: Array<{
     descriptor: JsonRecord
     paper: JsonRecord
@@ -64,8 +74,12 @@ async function jsonFile(zip: JSZip, path: string, required = true): Promise<Json
     return null
   }
   if ((entry as any).dir) throw new LocalApiError(422, `${path} 不能是目录`)
+  const payload = await entry.async('uint8array')
+  if (payload.byteLength > MAX_SINGLE_JSON_BYTES) {
+    throw new LocalApiError(422, `${path} 超过单个 JSON 64 MiB 限制`)
+  }
   try {
-    return JSON.parse(await entry.async('text'))
+    return JSON.parse(new TextDecoder().decode(payload))
   } catch {
     throw new LocalApiError(422, `${path} 不是有效的 UTF-8 JSON`)
   }
@@ -80,13 +94,16 @@ function validateManifest(manifest: JsonRecord) {
 }
 
 export async function parseEsqBytes(data: ArrayBuffer | Uint8Array): Promise<ImportedPackage> {
-  if (data.byteLength > 100 * 1024 * 1024) throw new LocalApiError(422, 'ESQ 文件不能超过 100 MiB')
+  if (data.byteLength > MAX_ESQ_BYTES) {
+    throw new LocalApiError(422, `ESQ 文件不能超过 ${MAX_ESQ_MIB} MiB`)
+  }
   const zip = await JSZip.loadAsync(data, {
     checkCRC32: true,
     createFolders: false,
   })
   const entries = Object.values(zip.files)
-  if (entries.length > 1000) throw new LocalApiError(422, '题库包文件数量超过限制')
+  if (entries.length > MAX_ESQ_ENTRIES) throw new LocalApiError(422, '题库包文件数量超过限制')
+  let totalJsonBytes = 0
   for (const entry of entries) {
     const name = entry.name.replaceAll('\\', '/')
     if (name.startsWith('/') || name.split('/').includes('..')) {
@@ -95,6 +112,17 @@ export async function parseEsqBytes(data: ArrayBuffer | Uint8Array): Promise<Imp
     if (/\.(?:exe|dll|bat|cmd|ps1|js|html|htm|apk)$/i.test(name)) {
       throw new LocalApiError(422, `题库包包含不允许的文件：${name}`)
     }
+    const sizes = (entry as { _data?: { compressedSize?: number; uncompressedSize?: number } })._data
+    if (sizes?.compressedSize && sizes.compressedSize > 0 && typeof sizes.uncompressedSize === 'number') {
+      const ratio = Math.ceil(sizes.uncompressedSize / sizes.compressedSize)
+      if (ratio > MAX_ZIP_COMPRESSION_RATIO) {
+        throw new LocalApiError(422, '题库包压缩比超过安全限制')
+      }
+    }
+    if (name.toLowerCase().endsWith('.json')) totalJsonBytes += sizes?.uncompressedSize ?? 0
+  }
+  if (totalJsonBytes > MAX_TOTAL_JSON_BYTES) {
+    throw new LocalApiError(422, '题库包 JSON 总大小超过限制')
   }
   const manifest = (await jsonFile(zip, 'manifest.json'))!
   validateManifest(manifest)
@@ -121,7 +149,7 @@ export async function parseEsqBytes(data: ArrayBuffer | Uint8Array): Promise<Imp
     }
     papers.push({ descriptor, paper, answers, labels })
   }
-  return { manifest, papers }
+  return { manifest, papers, assets: [] }
 }
 
 export async function parseEsqFile(file: File): Promise<ImportedPackage> {
@@ -154,7 +182,7 @@ async function buildPreview(pkg: ImportedPackage, profileId: number): Promise<Js
     title: pkg.manifest.title || 'ESQ 题库',
     publisher: pkg.manifest.publisher || '',
     contentVersion: pkg.manifest.contentVersion,
-    totals: { papers: pkg.papers.length, units, questions, assets: 0 },
+    totals: { papers: pkg.papers.length, units, questions, assets: pkg.assets?.length || 0 },
     conflicts,
   }
 }
@@ -171,7 +199,7 @@ function bytesToBase64(data: Uint8Array): string {
 async function createParsedEsqImport(
   filename: string,
   pkg: ImportedPackage,
-  rawData: Uint8Array,
+  rawData: Uint8Array | null,
   profileId: number,
 ): Promise<JsonRecord> {
   const preview = await buildPreview(pkg, profileId)
@@ -179,7 +207,7 @@ async function createParsedEsqImport(
     `INSERT INTO esq_import_jobs
       (profile_id, filename, package_data, raw_file_base64, preview_data, status)
      VALUES (?, ?, ?, ?, ?, 'draft')`,
-    [profileId, filename, JSON.stringify(pkg), bytesToBase64(rawData), JSON.stringify(preview)],
+    [profileId, filename, JSON.stringify(pkg), rawData ? bytesToBase64(rawData) : '', JSON.stringify(preview)],
   )
   return {
     id: Number(created.lastId),
@@ -210,6 +238,39 @@ export async function createEsqImportFromBytes(
     filename,
     await parseEsqBytes(data),
     data,
+    profileId || await activeQuestionBankProfileId(),
+  )
+}
+
+export async function createEsqImportFromNativePackage(
+  filename: string,
+  value: JsonRecord,
+  profileId?: number,
+): Promise<JsonRecord> {
+  const pkg = value as ImportedPackage
+  validateManifest(pkg.manifest)
+  if (!Array.isArray(pkg.papers) || !Array.isArray(pkg.assets)) {
+    throw new LocalApiError(422, '原生题库数据缺少试卷或资产清单')
+  }
+  for (const item of pkg.papers) {
+    if (!item?.descriptor?.paperKey || !item?.paper || !item?.answers) {
+      throw new LocalApiError(422, '原生题库数据包含无效试卷')
+    }
+    if (item.paper.paperKey !== item.descriptor.paperKey
+      || item.answers.paperKey !== item.descriptor.paperKey) {
+      throw new LocalApiError(422, `${item.descriptor.paperKey} 的正文与答案标识不一致`)
+    }
+    try {
+      paperExamMetadata(item.descriptor, item.paper)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '考试元数据无效'
+      throw new LocalApiError(422, `${item.descriptor.paperKey}：${message}`)
+    }
+  }
+  return createParsedEsqImport(
+    filename,
+    pkg,
+    null,
     profileId || await activeQuestionBankProfileId(),
   )
 }
@@ -336,7 +397,7 @@ async function upsertPaper(
       `UPDATE papers SET
          profile_id = ?, external_key = ?, package_id = ?, content_version = ?, year = ?,
          subject = ?, title = ?, exam_type = ?, exam_month = ?, set_number = ?,
-         status = 'published', updated_at = CURRENT_TIMESTAMP
+         status = 'published', deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         profileId,
@@ -376,6 +437,7 @@ async function upsertPaper(
     paperId = Number(inserted.changes?.lastId)
   }
   const answers = item.answers.answers || {}
+  const assets = new Map((pkg.assets || []).map(asset => [asset.assetId, asset]))
   for (let unitIndex = 0; unitIndex < paper.units.length; unitIndex++) {
     const unit = paper.units[unitIndex]
     const blocks = unit.passage?.blocks || []
@@ -387,6 +449,27 @@ async function upsertPaper(
       [paperId, unit.unitKey, Number(unit.sequence || unitIndex + 1)],
     )
     let unitId = Number(existingUnit.values?.[0]?.id || 0)
+    const contentBlocks = [
+      ...blocks,
+      ...(unit.questions || []).flatMap((question: JsonRecord) => [
+        ...(question.stemBlocks || []),
+        ...(question.options || []).flatMap((option: JsonRecord) => option.contentBlocks || []),
+      ]),
+    ]
+    const unitAssetIds = [...new Set(contentBlocks
+      .filter((block: JsonRecord) => block?.type === 'audio' && block.assetId)
+      .map((block: JsonRecord) => String(block.assetId)))]
+    const audioTracks = unitAssetIds
+      .map((assetId: string) => assets.get(assetId))
+      .filter((asset): asset is NonNullable<typeof asset> => Boolean(asset))
+      .map(asset => ({
+        asset_id: asset.assetId,
+        label: asset.label || asset.originalName || asset.assetId,
+        media_type: asset.mediaType,
+        path: asset.storedPath,
+        package_id: manifest.packageId,
+        content_version: manifest.contentVersion,
+      }))
     const unitValues = [
       unit.unitKey,
       unit.type,
@@ -404,6 +487,10 @@ async function upsertPaper(
           ]),
         ),
         ...(fixedSlots.length ? { fixed_slots: fixedSlots } : {}),
+        ...(audioTracks.length ? {
+          audio_tracks: audioTracks,
+          audio_mode: audioTracks.length === 1 ? 'continuous' : 'playlist',
+        } : {}),
       }),
     ]
     if (unitId) {
@@ -560,22 +647,42 @@ export async function publishEsqImport(
   const publishedPaperIds: number[] = []
   await transaction(async db => {
     for (const item of pkg.papers) {
-      const existing = await db.query(
-        `SELECT id FROM papers
-         WHERE profile_id = ? AND external_key = ? AND deleted_at IS NULL LIMIT 1`,
+      const matches = await db.query(
+        `SELECT id, deleted_at FROM papers
+         WHERE profile_id = ? AND external_key = ?
+         ORDER BY deleted_at IS NULL DESC, id`,
         [profileId, item.paper.paperKey],
       )
-      const existingId = Number(existing.values?.[0]?.id || 0)
+      const activeMatches = (matches.values || []).filter(row => row.deleted_at == null)
+      const deletedMatches = (matches.values || []).filter(row => row.deleted_at != null)
+      if (activeMatches.length > 1) {
+        throw new LocalApiError(409, `${item.paper.year} 年题库存在多个活动版本，无法安全导入`)
+      }
+      if (!activeMatches.length && deletedMatches.length > 1) {
+        throw new LocalApiError(409, `${item.paper.year} 年题库存在多个已删除版本，无法确定应复用哪一个`)
+      }
+      const existingId = Number(activeMatches[0]?.id || deletedMatches[0]?.id || 0)
+      const reusingDeleted = !activeMatches.length && deletedMatches.length === 1
       if (existingId) {
-        const action = resolutions.get(item.paper.paperKey)
-        if (!action) throw new LocalApiError(409, `请先决定 ${item.paper.year} 年题库的处理方式`)
-        if (action === 'keep_existing') {
-          publishedPaperIds.push(existingId)
-          continue
+        if (!reusingDeleted) {
+          const action = resolutions.get(item.paper.paperKey)
+          if (!action) throw new LocalApiError(409, `请先决定 ${item.paper.year} 年题库的处理方式`)
+          if (action === 'keep_existing') {
+            publishedPaperIds.push(existingId)
+            continue
+          }
+          if (action !== 'replace_with_imported') throw new LocalApiError(422, '未知的题库冲突处理方式')
         }
-        if (action !== 'replace_with_imported') throw new LocalApiError(422, '未知的题库冲突处理方式')
       }
       publishedPaperIds.push(await upsertPaper(db, pkg, item, profileId, existingId))
+      if (reusingDeleted) {
+        await db.run(
+          `UPDATE trash_entries SET restored_at = CURRENT_TIMESTAMP
+           WHERE resource_type = 'paper' AND resource_id = ? AND restored_at IS NULL`,
+          [existingId],
+          false,
+        )
+      }
     }
     await db.run(
       `INSERT OR REPLACE INTO question_bank_packages
@@ -606,12 +713,55 @@ export async function publishEsqImport(
   }
 }
 
+async function sweepEmptyPaperSessions() {
+  await run(
+    `UPDATE practice_sessions SET status = 'abandoned', updated_at = CURRENT_TIMESTAMP
+     WHERE mode = 'paper' AND status = 'active'
+       AND NOT EXISTS (SELECT 1 FROM practice_answers pa
+         WHERE pa.session_id = practice_sessions.id AND TRIM(COALESCE(pa.user_answer, '')) <> '')
+       AND NOT EXISTS (SELECT 1 FROM practice_unit_submissions pus
+         WHERE pus.session_id = practice_sessions.id)
+       AND COALESCE(practice_sessions.updated_at, practice_sessions.started_at) < datetime('now', '-7 days')`,
+  )
+}
+
 export async function listPapers(): Promise<JsonRecord[]> {
   const profileId = await activeQuestionBankProfileId()
   return rows(
-    `SELECT p.*,
+     `SELECT p.*,
        COUNT(DISTINCT u.id) AS unit_count,
-       COUNT(q.id) AS question_count
+       COUNT(q.id) AS question_count,
+       (SELECT ps.id FROM practice_sessions ps
+        WHERE ps.paper_id = p.id AND ps.status = 'active' AND ps.mode = 'paper'
+          AND (EXISTS (SELECT 1 FROM practice_answers pa_progress
+               WHERE pa_progress.session_id = ps.id AND TRIM(COALESCE(pa_progress.user_answer, '')) <> '')
+            OR EXISTS (SELECT 1 FROM practice_unit_submissions pus_progress
+               WHERE pus_progress.session_id = ps.id))
+        ORDER BY
+          (SELECT COUNT(*) FROM practice_unit_submissions pus WHERE pus.session_id = ps.id) DESC,
+          (SELECT COUNT(*) FROM practice_answers pa
+           WHERE pa.session_id = ps.id AND TRIM(COALESCE(pa.user_answer, '')) <> '') DESC,
+          ps.id DESC LIMIT 1) AS active_session_id,
+       (SELECT COUNT(*) FROM practice_unit_submissions pus
+        WHERE pus.session_id = (
+          SELECT ps.id FROM practice_sessions ps
+          WHERE ps.paper_id = p.id AND ps.status = 'active' AND ps.mode = 'paper'
+            AND (EXISTS (SELECT 1 FROM practice_answers pa_progress
+                 WHERE pa_progress.session_id = ps.id AND TRIM(COALESCE(pa_progress.user_answer, '')) <> '')
+              OR EXISTS (SELECT 1 FROM practice_unit_submissions pus_progress
+                 WHERE pus_progress.session_id = ps.id))
+          ORDER BY
+            (SELECT COUNT(*) FROM practice_unit_submissions ranked WHERE ranked.session_id = ps.id) DESC,
+            (SELECT COUNT(*) FROM practice_answers pa
+             WHERE pa.session_id = ps.id AND TRIM(COALESCE(pa.user_answer, '')) <> '') DESC,
+            ps.id DESC LIMIT 1
+        )) AS active_done,
+       (SELECT ps.score FROM practice_sessions ps
+        WHERE ps.paper_id = p.id AND ps.status = 'submitted' AND ps.mode = 'paper'
+        ORDER BY ps.id DESC LIMIT 1) AS last_score,
+       (SELECT ps.max_score FROM practice_sessions ps
+        WHERE ps.paper_id = p.id AND ps.status = 'submitted' AND ps.mode = 'paper'
+        ORDER BY ps.id DESC LIMIT 1) AS last_max_score
      FROM papers p
      LEFT JOIN units u ON u.paper_id = p.id
      LEFT JOIN questions q ON q.unit_id = u.id
