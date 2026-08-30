@@ -123,12 +123,15 @@ async function serializeUnit(
   if (options.onlyQuestionIds) {
     questions = questions.filter(question => options.onlyQuestionIds!.has(question.id))
   }
-  let sharedPartBOrder: string[] | undefined
-  if (unit.unit_type === 'part_b'
+  let sharedCandidateOrder: string[] | undefined
+  const usesSharedCandidates = ['part_b', 'word_bank', 'paragraph_matching'].includes(
+    String(unit.unit_type || ''),
+  )
+  if (usesSharedCandidates
     && questions.length
     && options.shuffleOptions
     && !options.answerOrders?.size) {
-    sharedPartBOrder = shuffled(
+    sharedCandidateOrder = shuffled(
       (await rows<{ stable_key: string }>(
         'SELECT stable_key FROM options WHERE question_id = ? ORDER BY sequence',
         [questions[0].id],
@@ -139,8 +142,8 @@ async function serializeUnit(
   for (const question of questions) {
     serializedQuestions.push(await serializeQuestion(
       question,
-      options.shuffleOptions && !sharedPartBOrder,
-      options.answerOrders?.get(question.id) || sharedPartBOrder,
+      options.shuffleOptions && !sharedCandidateOrder,
+      options.answerOrders?.get(question.id) || sharedCandidateOrder,
       Boolean(options.includeAnswers),
       unit.subtype === 'true_false',
     ))
@@ -326,6 +329,23 @@ function normalizeListeningAudio(units: JsonRecord[]) {
 export async function createSession(body: JsonRecord): Promise<JsonRecord> {
   const { unitIds, paperId } = await selectUnitIds(body)
   if (!unitIds.length) throw new LocalApiError(400, '没有符合条件的练习篇目')
+  if (body.mode === 'paper' && paperId != null) {
+    if (body.force_new) {
+      await run(
+        `UPDATE practice_sessions SET status = 'abandoned'
+         WHERE paper_id = ? AND status = 'active' AND mode = 'paper'`,
+        [paperId],
+      )
+    } else {
+      const existing = await row<{ id: number }>(
+        `SELECT id FROM practice_sessions
+         WHERE paper_id = ? AND status = 'active' AND mode = 'paper'
+         ORDER BY id DESC LIMIT 1`,
+        [paperId],
+      )
+      if (existing) return { ...(await getSession(Number(existing.id))), resumed: true }
+    }
+  }
   const shuffleOptions = body.shuffle_options !== false
   const created = await run(
     `INSERT INTO practice_sessions (mode, paper_id, unit_ids, shuffle_options)
@@ -394,6 +414,25 @@ export async function createSession(body: JsonRecord): Promise<JsonRecord> {
       total: units.reduce((sum, unit) => sum + unit.questions.length, 0),
     },
   }
+}
+
+export async function abandonIfEmpty(sessionId: number): Promise<JsonRecord> {
+  const answered = await row<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM practice_answers
+     WHERE session_id = ? AND TRIM(COALESCE(user_answer, '')) <> ''`,
+    [sessionId],
+  )
+  const submitted = await row<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM practice_unit_submissions WHERE session_id = ?`,
+    [sessionId],
+  )
+  if (Number(answered?.n || 0) > 0 || Number(submitted?.n || 0) > 0) return { kept: true }
+  await run(
+    `UPDATE practice_sessions SET status = 'abandoned', updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status = 'active' AND mode = 'paper'`,
+    [sessionId],
+  )
+  return { kept: false }
 }
 
 export async function getSession(sessionId: number): Promise<JsonRecord> {

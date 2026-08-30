@@ -1,6 +1,6 @@
 import { analyzeWrongQuestions, analyzeWrongStatus, createProfile, createConversation, deleteConversation, deleteProfile, listConversations, listProfiles, selectorModels, sendChat, setAllModelVisibility, setModelVisibility, syncModels, testProfile, updateProfile } from './ai'
 import { LocalApiError } from './errors'
-import { archiveWrongUnits, createSession, dashboard, getSession, listWrong, saveAnswer, submitSession, submitUnit } from './practice'
+import { abandonIfEmpty, archiveWrongUnits, createSession, dashboard, getSession, listWrong, saveAnswer, submitSession, submitUnit } from './practice'
 import { createEsqImport, listEsqImports, listPapers, publishEsqImport, readEsqImport } from './question-bank'
 import { addVocabulary, deleteVocabulary, homeVocabulary, listVocabulary, reviewVocabulary, retryVocabulary, serializeEntry, updateVocabulary } from './vocabulary'
 import { checkAppUpdate, checkQuestionBankCatalog, downloadQuestionBankPackage, installAppUpdate, readUpdateSettings, updateSettings } from './app-update'
@@ -17,6 +17,8 @@ import {
   labelingStatus,
   labelNextUnit,
   listQuestionLabels,
+  failLabelRun,
+  pauseLabelRun,
   updateQuestionLabel,
 } from './question-labeling'
 import { queueAndStartVocabularyTranslations } from './vocabulary-translation-runner'
@@ -94,6 +96,8 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (params && method === 'POST') {
     return await submitUnit(Number(params[1]), Number(params[2])) as T
   }
+  params = match(pathname, /^\/practice\/sessions\/(\d+)\/abandon-if-empty$/)
+  if (params && method === 'POST') return await abandonIfEmpty(Number(params[1])) as T
   params = match(pathname, /^\/practice\/sessions\/(\d+)\/submit$/)
   if (params && method === 'POST') return await submitSession(Number(params[1])) as T
 
@@ -214,8 +218,15 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
       return await listQuestionLabels(url.searchParams) as T
     }
     if (pathname === '/ai/question-labels/next' && method === 'POST') {
-      return await labelNextUnit(body || {}) as T
+      try {
+        return await labelNextUnit(body || {}) as T
+      } catch (error) {
+        try { await failLabelRun(String(body?.run_id || ''), error) } catch { /* Preserve the original model error. */ }
+        throw error
+      }
     }
+    params = match(pathname, /^\/ai\/question-labels\/runs\/([^/]+)\/pause$/)
+    if (params && method === 'POST') return await pauseLabelRun(decodeURIComponent(params[1])) as T
     params = match(pathname, /^\/ai\/question-labels\/(\d+)$/)
     if (params && method === 'PUT') return await updateQuestionLabel(Number(params[1]), body || {}) as T
   }
