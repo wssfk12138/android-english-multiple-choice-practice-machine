@@ -10,16 +10,21 @@ import {
   Server,
   Trash2,
 } from 'lucide-vue-next'
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { get, post, put } from '../api'
 import {
   clearDiagnosticLogs,
+  copyIssueReportTemplate,
   copyDiagnosticLogs,
   listDiagnosticLogs,
   shareDiagnosticLogs,
   type DiagnosticLogEntry,
 } from '../platform/android/diagnostics'
+import {
+  copyLearningHistoryDiagnostics,
+  shareLearningHistoryDiagnostics,
+} from '../platform/android/learning-history-diagnostics'
 
 const router = useRouter()
 const settings = reactive({
@@ -27,10 +32,15 @@ const settings = reactive({
 })
 const appUpdate = ref<any>(null)
 const questionBankCatalog = ref<any>(null)
+const selectedPackages = ref<string[]>([])
+const packageResults = ref<Record<string, { status: 'pending' | 'success' | 'failed', message: string }>>({})
 const diagnosticLogs = ref<DiagnosticLogEntry[]>([])
 const busy = ref('')
 const notice = ref('')
 const error = ref('')
+const packageKey = (item: any) => `${item.packageId}@${item.contentVersion}`
+const allPackagesSelected = computed(() => Boolean(questionBankCatalog.value?.packages?.length)
+  && questionBankCatalog.value.packages.every((item: any) => selectedPackages.value.includes(packageKey(item))))
 
 const categoryLabels: Record<string, string> = {
   question_bank_import: '本地题库导入',
@@ -95,6 +105,8 @@ async function checkBanks() {
   busy.value = 'banks'; error.value = ''
   try {
     questionBankCatalog.value = await post('/android/updates/question-banks/check')
+    selectedPackages.value = []
+    packageResults.value = {}
     notice.value = questionBankCatalog.value.configured
       ? `远程题库源返回 ${questionBankCatalog.value.packages?.length || 0} 个题库包`
       : '尚未配置远程题库源，本地 ESQ 导入不受影响'
@@ -106,17 +118,41 @@ async function checkBanks() {
   }
 }
 
-async function downloadBank(item: any) {
-  busy.value = `bank:${item.packageId}`; error.value = ''
-  try {
-    const result: any = await post('/android/updates/question-banks/download', { package: item })
-    notice.value = '题库下载和 SHA-256 校验已完成，正在打开导入预览'
-    await router.push({ path: '/imports', query: { esqImportId: String(result.id) } })
-  } catch (cause) {
-    error.value = String(cause)
-    await refreshLogs()
-  } finally {
-    busy.value = ''
+function toggleAllPackages() {
+  selectedPackages.value = allPackagesSelected.value
+    ? []
+    : (questionBankCatalog.value?.packages?.map(packageKey) || [])
+}
+
+async function installSelectedPackages() {
+  const selected = (questionBankCatalog.value?.packages || [])
+    .filter((item: any) => selectedPackages.value.includes(packageKey(item)))
+  if (!selected.length) return
+  busy.value = 'catalog-install'
+  error.value = ''
+  notice.value = ''
+  packageResults.value = {}
+  const importIds: number[] = []
+  for (const item of selected) {
+    const key = packageKey(item)
+    packageResults.value[key] = { status: 'pending', message: '正在下载、校验并建立导入草稿' }
+    try {
+      const result: any = await post('/android/updates/question-banks/download', {
+        package_id: item.packageId,
+        content_version: item.contentVersion,
+      })
+      importIds.push(Number(result.id))
+      packageResults.value[key] = { status: 'success', message: '已校验，等待你在导入预览中确认' }
+    } catch (cause) {
+      packageResults.value[key] = { status: 'failed', message: String(cause) }
+    }
+  }
+  busy.value = ''
+  const failedCount = selected.length - importIds.length
+  notice.value = `已建立 ${importIds.length} 个导入草稿${failedCount ? `，${failedCount} 个失败` : ''}`
+  await refreshLogs()
+  if (importIds.length) {
+    await router.push({ path: '/imports', query: { esqImportId: String(importIds[0]) } })
   }
 }
 
@@ -148,6 +184,16 @@ async function copyLogs() {
   }
 }
 
+async function copyReportTemplate() {
+  error.value = ''
+  try {
+    await copyIssueReportTemplate()
+    notice.value = '问题报告模板已复制，请补充复现步骤后主动提交'
+  } catch (cause) {
+    error.value = `复制模板失败：${String(cause)}`
+  }
+}
+
 async function shareLogs() {
   error.value = ''
   try {
@@ -165,6 +211,26 @@ async function clearLogs() {
   notice.value = '诊断日志已清空'
 }
 
+async function copyHistoryDiagnostics() {
+  error.value = ''
+  try {
+    await copyLearningHistoryDiagnostics()
+    notice.value = '学习历史只读汇总诊断已复制'
+  } catch (cause) {
+    error.value = `复制学习历史诊断失败：${String(cause)}`
+  }
+}
+
+async function shareHistoryDiagnostics() {
+  error.value = ''
+  try {
+    await shareLearningHistoryDiagnostics()
+    notice.value = '已打开系统发送界面，请选择发送方式'
+  } catch (cause) {
+    error.value = `导出学习历史诊断失败：${String(cause)}`
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -172,7 +238,6 @@ onMounted(load)
   <div class="page android-updates-page">
     <div class="page-head">
       <div>
-        <span class="eyebrow">ANDROID DELIVERY</span>
         <h1>更新与远程题库</h1>
         <p class="lead">程序更新和题库更新相互独立。APK 下载后会校验 SHA-256，并由 Android 系统确认安装。</p>
       </div>
@@ -212,18 +277,27 @@ onMounted(load)
           <span class="api-profile-icon"><PackageCheck :size="20" /></span>
           <div><h2>远程题库源</h2><p class="lead">下载后会校验文件大小和 SHA-256，再进入 ESQ 预览；不会自动覆盖已有年份。</p></div>
         </div>
-        <button class="button secondary" type="button" :disabled="busy === 'banks'" @click="checkBanks"><RefreshCw :size="16" />检查远程题库</button>
+        <button class="button secondary" type="button" :disabled="busy === 'banks' || busy === 'catalog-install'" @click="checkBanks"><RefreshCw :size="16" />检查远程题库</button>
         <div v-if="questionBankCatalog?.configured" class="update-package-list">
-          <div v-for="item in questionBankCatalog.packages" :key="`${item.packageId}:${item.contentVersion}`">
-            <strong>{{ item.title }}</strong>
-            <small>{{ item.contentVersion }} · {{ item.fileName }}</small>
-            <button
-              class="button compact"
-              type="button"
-              :disabled="busy === `bank:${item.packageId}`"
-              @click="downloadBank(item)"
-            ><Download :size="15" />{{ busy === `bank:${item.packageId}` ? '下载校验中…' : '下载并导入' }}</button>
+          <div class="catalog-toolbar">
+            <span>{{ questionBankCatalog.packages.length }} 个可用 · 已选 {{ selectedPackages.length }} 个</span>
+            <div class="catalog-actions">
+              <button class="button ghost compact" type="button" :disabled="busy === 'catalog-install'" @click="toggleAllPackages">{{ allPackagesSelected ? '清空选择' : '全选' }}</button>
+              <button class="button compact" type="button" :disabled="busy === 'catalog-install' || !selectedPackages.length" @click="installSelectedPackages">
+                <Download :size="15" />{{ busy === 'catalog-install' ? '正在处理…' : `安装选中题库（${selectedPackages.length}）` }}
+              </button>
+            </div>
           </div>
+          <label v-for="item in questionBankCatalog.packages" :key="packageKey(item)" class="catalog-item">
+            <input v-model="selectedPackages" type="checkbox" :value="packageKey(item)" :disabled="busy === 'catalog-install'">
+            <span>
+              <strong>{{ item.title }}</strong>
+              <small>版本 {{ item.contentVersion }} · {{ item.years.join('、') || '多年份' }} · {{ Math.ceil(item.size / 1024) }} KiB</small>
+              <small>{{ item.license }}</small>
+              <small v-if="packageResults[packageKey(item)]" :class="`catalog-${packageResults[packageKey(item)].status}`">{{ packageResults[packageKey(item)].message }}</small>
+            </span>
+          </label>
+          <p v-if="!questionBankCatalog.packages.length" class="diagnostic-empty">远程目录当前没有可安装题库。</p>
         </div>
       </section>
     </div>
@@ -234,12 +308,15 @@ onMounted(load)
           <span class="api-profile-icon"><FileWarning :size="20" /></span>
           <div>
             <h2>诊断日志</h2>
-            <p class="lead">导入或更新失败时自动保存在本机。发送前会过滤 API Key、题库与答案正文、学习记录和完整文件路径。</p>
+            <p class="lead">导入或更新失败时自动保存在本机。仅记录事件、模块、版本、时间、错误类别和短症状。</p>
           </div>
         </div>
         <span class="pill">{{ diagnosticLogs.length }} 条</span>
       </div>
       <div class="diagnostic-actions">
+        <button class="button secondary" type="button" @click="copyReportTemplate">
+          <ClipboardCopy :size="16" />复制问题报告模板
+        </button>
         <button class="button secondary" type="button" :disabled="!diagnosticLogs.length" @click="copyLogs">
           <ClipboardCopy :size="16" />复制日志
         </button>
@@ -250,23 +327,30 @@ onMounted(load)
           <Trash2 :size="16" />清空
         </button>
       </div>
-      <p class="diagnostic-privacy">日志仅保存在本机，不会自动上传；可复制、导出或通过系统分享交给开发者。</p>
+      <p class="diagnostic-privacy">诊断最多保留 50 条且导出包不超过约 1 MiB。不会后台上传，只有你点击复制、导出或系统分享时才会离开本机。</p>
+      <div class="diagnostic-actions">
+        <button class="button secondary" type="button" @click="copyHistoryDiagnostics">
+          <ClipboardCopy :size="16" />复制学习历史只读诊断
+        </button>
+        <button class="button secondary" type="button" @click="shareHistoryDiagnostics">
+          <Send :size="16" />导出并系统分享
+        </button>
+      </div>
+      <p class="diagnostic-privacy">学习历史诊断只执行本地只读汇总，包含数量和完整性类别，不含学习记录、题库名、题目、答案、词汇或任何同步标识。</p>
       <div v-if="diagnosticLogs.length" class="diagnostic-list">
-        <details v-for="item in diagnosticLogs" :key="item.id">
+        <details v-for="item in diagnosticLogs" :key="`${item.createdAt}:${item.event}`">
           <summary>
             <span>
-              <strong>{{ categoryLabels[item.category] || item.category }}</strong>
-              <small>{{ formatLogTime(item.createdAt) }} · {{ item.stage }}</small>
+              <strong>{{ categoryLabels[item.module] || item.module }}</strong>
+              <small>{{ formatLogTime(item.createdAt) }} · {{ item.event }}</small>
             </span>
-            <span class="diagnostic-code">{{ item.errorCode }}</span>
+            <span class="diagnostic-code">{{ item.errorCategory }}</span>
           </summary>
           <div class="diagnostic-detail">
-            <p>{{ item.message }}</p>
+            <p>{{ item.symptom }}</p>
             <dl>
-              <template v-if="item.fileName"><dt>文件</dt><dd>{{ item.fileName }}<span v-if="item.fileSize"> · {{ Math.ceil(item.fileSize / 1024) }} KiB</span></dd></template>
-              <dt>应用</dt><dd>{{ item.appVersion }}（{{ item.appVersionCode }}）</dd>
-              <template v-if="item.deviceModel"><dt>设备</dt><dd>{{ item.deviceModel }} · Android {{ item.androidVersion }}</dd></template>
-              <dt>技术信息</dt><dd>{{ item.technicalMessage }}</dd>
+              <dt>应用版本</dt><dd>{{ item.appVersion }}</dd>
+              <dt>错误类别</dt><dd>{{ item.errorCategory }}</dd>
             </dl>
           </div>
         </details>
@@ -275,3 +359,13 @@ onMounted(load)
     </section>
   </div>
 </template>
+
+<style scoped>
+.catalog-toolbar, .catalog-actions { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.catalog-item { display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--line); border-radius:8px; }
+.catalog-item > span { display:grid; gap:4px; min-width:0; }
+.catalog-item input { margin-top:3px; }
+.catalog-success { color:var(--success); }
+.catalog-failed { color:var(--danger); }
+.catalog-pending { color:var(--muted); }
+</style>

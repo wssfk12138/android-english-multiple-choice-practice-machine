@@ -21,6 +21,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -30,7 +33,129 @@ public class AppUpdaterPlugin extends Plugin {
     private static final String PENDING_FILE = "pending_installer_file";
     private static final String PENDING_VERSION_CODE = "pending_installer_version_code";
     private static final String PENDING_VERSION_NAME = "pending_installer_version_name";
+    private static final int QUESTION_BANK_READ_TIMEOUT_MS = 20 * 60 * 1000;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final Map<String, File> pendingQuestionBankAssets = new ConcurrentHashMap<>();
+
+    @PluginMethod
+    public void downloadQuestionBank(PluginCall call) {
+        String url = call.getString("url");
+        String expectedHash = call.getString("sha256");
+        String requestedName = call.getString("fileName", "question-bank.esq");
+        Long expectedSize = call.getLong("expectedSize");
+        if (url == null || expectedHash == null
+            || !expectedHash.matches("(?i)^[a-f0-9]{64}$")
+            || expectedSize == null || expectedSize < 1 || expectedSize > EsqArchive.MAX_ARCHIVE_BYTES) {
+            call.reject("题库下载参数无效");
+            return;
+        }
+        String sanitizedName = requestedName.replaceAll("[^A-Za-z0-9._-]", "_");
+        final String fileName = sanitizedName.toLowerCase(Locale.ROOT).endsWith(".esq")
+            ? sanitizedName : sanitizedName + ".esq";
+        executor.execute(() -> downloadQuestionBank(call, url, expectedHash, expectedSize, fileName));
+    }
+
+    private void downloadQuestionBank(PluginCall call, String url, String expectedHash, long expectedSize, String fileName) {
+        File temporary = new File(getContext().getCacheDir(), "esq-" + System.nanoTime() + "-" + fileName);
+        HttpURLConnection connection = null;
+        try {
+            URL sourceUrl = new URL(url);
+            validateRemoteUrl(sourceUrl);
+            connection = (HttpURLConnection) sourceUrl.openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(QUESTION_BANK_READ_TIMEOUT_MS);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("Accept", "application/vnd.english-study-question-bank, application/zip");
+            connection.connect();
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) throw new IllegalStateException("题库下载失败：" + status);
+            validateRemoteUrl(connection.getURL());
+            long declaredSize = connection.getContentLengthLong();
+            if (declaredSize >= 0 && declaredSize != expectedSize) throw new SecurityException("题库文件大小与目录声明不一致");
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            long total = 0L;
+            try (InputStream input = connection.getInputStream(); FileOutputStream output = new FileOutputStream(temporary)) {
+                byte[] buffer = new byte[64 * 1024];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    total += count;
+                    if (total > expectedSize || total > EsqArchive.MAX_ARCHIVE_BYTES) {
+                        throw new SecurityException("下载的 ESQ 文件超过目录声明或 2 GiB 上限");
+                    }
+                    output.write(buffer, 0, count);
+                    digest.update(buffer, 0, count);
+                }
+            }
+            if (total != expectedSize) throw new SecurityException("题库文件大小与目录声明不一致");
+            if (!hex(digest.digest()).equalsIgnoreCase(expectedHash)) throw new SecurityException("题库 SHA-256 校验失败，文件可能不完整或已被替换");
+            EsqArchive.Extraction extracted = EsqArchive.extract(temporary, getContext().getFilesDir(), expectedHash.toLowerCase(Locale.ROOT));
+            String cleanupToken = "";
+            if (extracted.createdDirectory != null) {
+                cleanupToken = UUID.randomUUID().toString();
+                pendingQuestionBankAssets.put(cleanupToken, extracted.createdDirectory);
+            }
+            JSObject result = new JSObject();
+            result.put("packageData", extracted.packageData.toString());
+            result.put("cleanupToken", cleanupToken);
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject(error.getMessage() == null ? "题库下载失败" : error.getMessage(), error);
+        } finally {
+            if (connection != null) connection.disconnect();
+            temporary.delete();
+        }
+    }
+
+    @PluginMethod
+    public void resolveQuestionBankAssets(PluginCall call) {
+        String cleanupToken = call.getString("cleanupToken", "");
+        Boolean shouldDelete = call.getBoolean("delete");
+        if (cleanupToken.isEmpty() || shouldDelete == null) {
+            call.reject("题库资产清理参数无效");
+            return;
+        }
+        File directory = pendingQuestionBankAssets.remove(cleanupToken);
+        if (directory == null) {
+            call.reject("题库资产清理令牌已失效");
+            return;
+        }
+        if (shouldDelete) EsqArchive.deleteTree(directory);
+        JSObject result = new JSObject();
+        result.put("deleted", shouldDelete && !directory.exists());
+        result.put("retained", !shouldDelete && directory.isDirectory());
+        call.resolve(result);
+    }
+
+    static void validateRemoteUrl(URL url) {
+        String protocol = url.getProtocol().toLowerCase(Locale.ROOT);
+        if (url.getUserInfo() != null || !protocol.equals("https") || (url.getPort() != -1 && url.getPort() != 443)) {
+            throw new SecurityException("题库地址只允许不含凭据的 HTTPS");
+        }
+        String host = url.getHost().replaceAll("^\\[|\\]$", "").toLowerCase(Locale.ROOT);
+        if (host.equals("localhost") || host.endsWith(".localhost") || host.endsWith(".local")
+            || isForbiddenIpv4(host) || host.equals("::") || host.equals("::1")
+            || host.startsWith("fc") || host.startsWith("fd") || host.matches("^fe[89ab].*")) {
+            throw new SecurityException("题库地址不能指向本机、局域网或保留网络");
+        }
+    }
+
+    private static boolean isForbiddenIpv4(String host) {
+        String[] parts = host.split("\\.");
+        if (parts.length != 4) return false;
+        try {
+            int[] octets = new int[4];
+            for (int index = 0; index < 4; index++) {
+                octets[index] = Integer.parseInt(parts[index]);
+                if (octets[index] < 0 || octets[index] > 255 || !parts[index].equals(String.valueOf(octets[index]))) return false;
+            }
+            return octets[0] == 0 || octets[0] == 10 || octets[0] == 127 || octets[0] >= 224
+                || (octets[0] == 169 && octets[1] == 254)
+                || (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31)
+                || (octets[0] == 192 && octets[1] == 168);
+        } catch (NumberFormatException error) {
+            return false;
+        }
+    }
 
     @PluginMethod
     public void downloadAndInstall(PluginCall call) {
@@ -39,6 +164,7 @@ public class AppUpdaterPlugin extends Plugin {
         String requestedName = call.getString("fileName", "english-practice-machine-update.apk");
         Integer targetVersionCode = call.getInt("targetVersionCode");
         String targetVersionName = call.getString("targetVersionName", "");
+        Long expectedSize = call.getLong("expectedSize");
         if (url == null
             || expectedHash == null
             || !expectedHash.matches("(?i)^[a-f0-9]{64}$")
@@ -56,6 +182,7 @@ public class AppUpdaterPlugin extends Plugin {
             url,
             expectedHash,
             fileName,
+            expectedSize,
             targetVersionCode,
             targetVersionName
         ));
@@ -112,6 +239,7 @@ public class AppUpdaterPlugin extends Plugin {
         String url,
         String expectedHash,
         String fileName,
+        Long expectedSize,
         int targetVersionCode,
         String targetVersionName
     ) {
@@ -136,16 +264,24 @@ public class AppUpdaterPlugin extends Plugin {
             if (status < 200 || status >= 300) {
                 throw new IllegalStateException("APK 下载失败：" + status);
             }
+            long declaredSize = connection.getContentLengthLong();
+            if (expectedSize != null && (expectedSize < 1 || (declaredSize >= 0 && declaredSize != expectedSize))) {
+                throw new SecurityException("APK 文件大小与清单声明不一致");
+            }
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            long total = 0L;
             try (InputStream input = connection.getInputStream();
                  FileOutputStream target = new FileOutputStream(output)) {
                 byte[] buffer = new byte[64 * 1024];
                 int count;
                 while ((count = input.read(buffer)) != -1) {
+                    total += count;
+                    if (expectedSize != null && total > expectedSize) throw new SecurityException("APK 文件大小与清单声明不一致");
                     target.write(buffer, 0, count);
                     digest.update(buffer, 0, count);
                 }
             }
+            if (expectedSize != null && total != expectedSize) throw new SecurityException("APK 文件大小与清单声明不一致");
             if (!hex(digest.digest()).equalsIgnoreCase(expectedHash)) {
                 output.delete();
                 throw new SecurityException("APK 校验失败，文件可能不完整或已被替换");
