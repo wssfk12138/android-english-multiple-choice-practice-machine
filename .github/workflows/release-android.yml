@@ -34,6 +34,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate release inputs
+        env:
+          TAG: ${{ inputs.tag }}
+          VERSION_NAME: ${{ inputs.version_name }}
+          VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          if ! [[ "$VERSION_NAME" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "::error::versionName 格式无效。"
+            exit 1
+          fi
+          if [ "$TAG" != "v$VERSION_NAME" ]; then
+            echo "::error::Release 标签必须等于 v + versionName。"
+            exit 1
+          fi
+          if ! [[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::versionCode 必须为正整数。"
+            exit 1
+          fi
+
       - name: Verify signing secrets present
         env:
           HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_B64 }}
@@ -80,21 +99,26 @@ jobs:
           } > signing.properties
 
       - name: Build signed release APK
+        env:
+          VERSION_CODE: ${{ inputs.version_code }}
+          VERSION_NAME: ${{ inputs.version_name }}
         working-directory: frontend/android
         run: |
           ./gradlew :app:assembleRelease \
-            -PappVersionCode=${{ inputs.version_code }} \
-            -PappVersionName=${{ inputs.version_name }} \
+            "-PappVersionCode=$VERSION_CODE" \
+            "-PappVersionName=$VERSION_NAME" \
             --console=plain -q
 
       - name: Verify signature and rename APK
+        env:
+          VERSION_NAME: ${{ inputs.version_name }}
         working-directory: frontend/android
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           BUILD_TOOLS="$ANDROID_HOME/build-tools"
           APKSIGNER=$(ls "$BUILD_TOOLS"/*/apksigner | sort -V | tail -1)
           "$APKSIGNER" verify --print-certs "$APK"
-          OUT="english-practice-machine-android-${{ inputs.version_name }}.apk"
+          OUT="english-practice-machine-android-$VERSION_NAME.apk"
           cp "$APK" "$GITHUB_WORKSPACE/$OUT"
           echo "APK_PATH=$OUT" >> "$GITHUB_ENV"
 
@@ -104,24 +128,44 @@ jobs:
           VERSION_NAME: ${{ inputs.version_name }}
           VERSION_CODE: ${{ inputs.version_code }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          APK_PATH="$GITHUB_WORKSPACE/${{ env.APK_PATH }}"
-          SIZE=$(stat -c %s "$APK_PATH")
-          SHA=$(sha256sum "$APK_PATH" | cut -d' ' -f1)
-          REPO="${{ github.repository }}"
-          {
-            echo '{'
-            echo '  "schemaVersion": 1,'
-            echo '  "channel": "beta",'
-            echo "  \"versionName\": \"$VERSION_NAME\","
-            echo "  \"versionCode\": $VERSION_CODE,"
-            echo "  \"apkUrl\": \"https://github.com/$REPO/releases/download/$TAG/${{ env.APK_PATH }}\","
-            echo "  \"apkSha256\": \"$SHA\","
-            echo "  \"apkSize\": $SIZE,"
-            echo "  \"releaseNotes\": \"$RELEASE_NOTES\""
-            echo '}'
-          } > android-update.json
-          python3 -m json.tool android-update.json > /dev/null
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          try:
+              version_code = int(os.environ["VERSION_CODE"])
+          except ValueError as exc:
+              raise SystemExit("version_code must be an integer") from exc
+          if version_code <= 0:
+              raise SystemExit("version_code must be positive")
+
+          apk_file = os.environ["APK_PATH"]
+          apk_path = Path(os.environ["GITHUB_WORKSPACE"]) / apk_file
+          digest = hashlib.sha256()
+          with apk_path.open("rb") as apk_stream:
+              for chunk in iter(lambda: apk_stream.read(1024 * 1024), b""):
+                  digest.update(chunk)
+          manifest = {
+              "schemaVersion": 1,
+              "channel": "beta",
+              "versionName": os.environ["VERSION_NAME"],
+              "versionCode": version_code,
+              "apkUrl": (
+                  f"https://github.com/{os.environ['REPOSITORY']}/releases/download/"
+                  f"{os.environ['TAG']}/{apk_file}"
+              ),
+              "apkSha256": digest.hexdigest(),
+              "apkSize": apk_path.stat().st_size,
+              "releaseNotes": os.environ.get("RELEASE_NOTES", ""),
+          }
+          output = Path("android-update.json")
+          output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          json.loads(output.read_text(encoding="utf-8"))
+          PY
 
       - name: Create Release
         env:
@@ -130,10 +174,10 @@ jobs:
           VERSION_NAME: ${{ inputs.version_name }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
-          NOTES="${{ inputs.release_notes }}"
+          NOTES="$RELEASE_NOTES"
           if [ -z "$NOTES" ]; then NOTES="英语刷题机 Android $VERSION_NAME"; fi
           gh release create "$TAG" \
-            "$GITHUB_WORKSPACE/${{ env.APK_PATH }}" \
+            "$GITHUB_WORKSPACE/$APK_PATH" \
             android-update.json \
             --title "英语刷题机 Android $VERSION_NAME" \
             --notes "$NOTES"
