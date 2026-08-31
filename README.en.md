@@ -104,9 +104,13 @@ These screenshots come from the current Android portrait build and cover the mai
 ### AI and model profiles
 
 - Store multiple API profiles with endpoint, API key, default model, Temperature, enabled state, and model-selector visibility.
-- Fetch available models automatically and switch models in the assistant. OpenAI-compatible, Ollama, LM Studio, and similar endpoints can be used.
+- Six protocol adapters are built in: `openai-chat`, `openai-responses`, `anthropic`, `google`, `kiro`, and `command-code`. They translate messages, image attachments, reasoning effort, and response text for each protocol.
+- Fetch available models automatically and switch models in the assistant. Ollama, LM Studio, and similar services can use the appropriate OpenAI protocol; exact capabilities depend on the selected service and model.
 - AI workflows include study chat, vocabulary translation, wrong-answer advice, import-draft correction, and question-skill labeling.
+- The assistant accepts up to four compressed image attachments per message. Attachments remain in local conversation history, and unsupported image inputs produce an explicit error.
 - Keys are protected by Android Keystore/AES-GCM. Core practice and grading remain offline without AI.
+
+Current verification covers local request/response contracts for all six protocols, reasoning-effort mapping, and the frontend build. No requests have yet been sent to live endpoints for all six provider families, so this is not a claim of end-to-end provider certification.
 
 ### Updates and privacy
 

@@ -51,12 +51,15 @@ type Attachment = {
   dataUrl: string
 }
 
+type ReasoningEffort = '' | 'low' | 'medium' | 'high'
+
 const router = useRouter()
 
 const models = ref<SelectorModel[]>([])
 const conversations = ref<ConversationSummary[]>([])
 const messages = ref<ChatMessage[]>([])
 const selectedModel = ref(localStorage.getItem('linjian-ai-model') || '')
+const reasoningEffort = ref<ReasoningEffort>('')
 const conversationId = ref<number | null>(null)
 const input = ref('')
 const loading = ref(false)
@@ -247,6 +250,7 @@ function startNewConversation() {
   messages.value = []
   if (window.innerWidth <= 820) historyOpen.value = false
   input.value = ''
+  reasoningEffort.value = ''
 }
 
 async function openConversation(id: number) {
@@ -308,6 +312,7 @@ async function sendMessage() {
         model: selection.model_id,
         message: text,
         ...(attachmentPayload.length ? { attachments: attachmentPayload } : {}),
+        ...(reasoningEffort.value ? { reasoning_effort: reasoningEffort.value } : {}),
       }),
       signal: controller.signal,
     })
@@ -546,6 +551,16 @@ onBeforeUnmount(() => {
                     {{ model.display_name || model.model_id }}
                   </option>
                 </optgroup>
+              </select>
+            </div>
+            <div class="ai-model-control ai-reasoning-control">
+              <label class="sr-only" for="assistant-reasoning-effort">本次对话推理强度</label>
+              <span class="ai-reasoning-label" aria-hidden="true">推理强度</span>
+              <select id="assistant-reasoning-effort" v-model="reasoningEffort" :disabled="loading" aria-label="本次对话推理强度">
+                <option value="">跟随配置</option>
+                <option value="low">推理：低</option>
+                <option value="medium">推理：中</option>
+                <option value="high">推理：高</option>
               </select>
             </div>
             <button

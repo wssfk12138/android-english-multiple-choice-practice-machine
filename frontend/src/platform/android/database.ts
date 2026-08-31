@@ -246,12 +246,14 @@ CREATE TABLE IF NOT EXISTS vocabulary_reviews (
 CREATE TABLE IF NOT EXISTS ai_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
+  adapter TEXT NOT NULL DEFAULT 'openai-chat',
   base_url TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   is_default INTEGER NOT NULL DEFAULT 0,
   default_model TEXT NOT NULL DEFAULT '',
   temperature REAL NOT NULL DEFAULT 0.2,
   max_tokens INTEGER NOT NULL DEFAULT 1200,
+  reasoning_effort TEXT NOT NULL DEFAULT '',
   system_prompt TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -864,6 +866,8 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       if (!(await db.isDBOpen()).result) await db.open()
       await recoverInterruptedPaperTable(db)
       await db.execute(SCHEMA)
+      await ensureColumn(db, 'ai_profiles', 'adapter', "TEXT NOT NULL DEFAULT 'openai-chat'")
+      await ensureColumn(db, 'ai_profiles', 'reasoning_effort', "TEXT NOT NULL DEFAULT ''")
       await restorePaperMigrationSnapshots(db)
       await migratePaperExamMetadata(db)
       await migrateQuestionBankProfiles(db)

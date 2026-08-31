@@ -1,15 +1,25 @@
 import { secureStore } from '../secure-store'
 import { row, rows, run, transaction } from './database'
 import { LocalApiError } from './errors'
-import { nativeJson } from './native-http'
+import { nativeBytes, nativeJson, nativeText } from './native-http'
+import { adapterFor, normalizeAdapterId, type ChatMessage } from './ai-adapters'
 
 type JsonRecord = Record<string, any>
+type ReasoningEffort = '' | 'low' | 'medium' | 'high'
 
 const keyName = (profileId: number) => `ai-profile-${profileId}-api-key`
+
+export function normalizeReasoningEffort(value: unknown): ReasoningEffort {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (!normalized) return ''
+  if (normalized === 'low' || normalized === 'medium' || normalized === 'high') return normalized
+  throw new LocalApiError(400, '推理强度只支持未设置、低、中或高')
+}
 
 function profilePayload(profile: JsonRecord, models: JsonRecord[]): JsonRecord {
   return {
     ...profile,
+    adapter: normalizeAdapterId(profile.adapter),
     enabled: Boolean(profile.enabled),
     is_default: Boolean(profile.is_default),
     has_api_key: Boolean(profile.has_api_key),
@@ -63,16 +73,18 @@ export async function createProfile(body: JsonRecord): Promise<JsonRecord> {
   if (makeDefault) await run('UPDATE ai_profiles SET is_default = 0')
   const created = await run(
     `INSERT INTO ai_profiles
-      (name, base_url, enabled, is_default, default_model, temperature, max_tokens, system_prompt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      (name, adapter, base_url, enabled, is_default, default_model, temperature, max_tokens, reasoning_effort, system_prompt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       String(body.name).trim(),
+      normalizeAdapterId(body.adapter),
       String(body.base_url).trim().replace(/\/+$/, ''),
       body.enabled === false ? 0 : 1,
       makeDefault ? 1 : 0,
       String(body.default_model || '').trim(),
       Number(body.temperature ?? 0.2),
       Number(body.max_tokens ?? 1200),
+      normalizeReasoningEffort(body.reasoning_effort),
       String(body.system_prompt || ''),
     ],
   )
@@ -97,17 +109,19 @@ export async function updateProfile(id: number, body: JsonRecord): Promise<JsonR
   else if (body.api_key) await secureStore.set(keyName(id), String(body.api_key).trim())
   if (body.is_default) await run('UPDATE ai_profiles SET is_default = 0 WHERE id <> ?', [id])
   await run(
-    `UPDATE ai_profiles SET name = ?, base_url = ?, enabled = ?, is_default = ?,
-      default_model = ?, temperature = ?, max_tokens = ?, system_prompt = ?,
+    `UPDATE ai_profiles SET name = ?, adapter = ?, base_url = ?, enabled = ?, is_default = ?,
+      default_model = ?, temperature = ?, max_tokens = ?, reasoning_effort = ?, system_prompt = ?,
       updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
     [
       String(body.name).trim(),
+      normalizeAdapterId(body.adapter),
       String(body.base_url).trim().replace(/\/+$/, ''),
       body.enabled === false ? 0 : 1,
       body.is_default ? 1 : 0,
       String(body.default_model || '').trim(),
       Number(body.temperature ?? 0.2),
       Number(body.max_tokens ?? 1200),
+      normalizeReasoningEffort(body.reasoning_effort),
       String(body.system_prompt || ''),
       id,
     ],
@@ -134,48 +148,42 @@ export async function deleteProfile(id: number): Promise<{ ok: true }> {
   return { ok: true }
 }
 
-async function apiHeaders(profile: JsonRecord): Promise<Headers> {
+async function apiHeaders(profile: JsonRecord): Promise<Record<string, string>> {
   const headers = new Headers({ 'Content-Type': 'application/json', Accept: 'application/json' })
   const key = await secureStore.get(keyName(profile.id))
-  if (key) headers.set('Authorization', `Bearer ${key}`)
-  return headers
-}
-
-function modelUrls(baseUrl: string): string[] {
-  const normalized = baseUrl.replace(/\/+$/, '')
-  const urls = [`${normalized}/models`]
-  if (normalized.endsWith('/v1')) urls.push(`${normalized.slice(0, -3)}/api/tags`)
-  else urls.push(`${normalized}/api/tags`)
-  return [...new Set(urls)]
+  for (const [name, value] of Object.entries(adapterFor(profile.adapter).headers(key || ''))) {
+    headers.set(name, value)
+  }
+  return Object.fromEntries(headers.entries())
 }
 
 export async function syncModels(id: number): Promise<JsonRecord> {
   const profile = await profileOr404(id)
   const headers = await apiHeaders(profile)
-  let data: any = null
+  const adapter = adapterFor(profile.adapter)
+  let models: Array<{ id: string; owned_by: string }> | null = null
   let source = ''
   let lastError = ''
-  for (const url of modelUrls(profile.base_url)) {
+  const endpoints = adapter.modelEndpoints(profile.base_url)
+  if (!endpoints.length) models = adapter.parseModels(null)
+  for (const endpoint of endpoints) {
     try {
-      data = await nativeJson<any>({
-        url,
+      const data = await nativeJson<unknown>({
+        url: endpoint.url,
         method: 'GET',
-        headers: Object.fromEntries(headers.entries()),
+        headers,
       }, '读取模型列表')
-      source = url.includes('/api/tags') ? 'ollama' : 'openai-compatible'
-      break
+      models = adapter.parseModels(data)
+      if (models) {
+        source = endpoint.source
+        break
+      }
+      lastError = '返回格式不受支持'
     } catch (error) {
       lastError = String(error)
     }
   }
-  const rawModels = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : null
-  if (!rawModels) throw new LocalApiError(400, `读取模型列表失败：${lastError || '返回格式不受支持'}`)
-  const models: Array<{ id: string; owned_by: string }> = rawModels
-    .map((item: any) => ({
-      id: String(item.id || item.name || item.model || '').trim(),
-      owned_by: String(item.owned_by || item.details?.family || ''),
-    }))
-    .filter((item: any) => item.id)
+  if (!models) throw new LocalApiError(400, `读取模型列表失败：${lastError || '返回格式不受支持'}`)
   await run('UPDATE ai_profile_models SET is_available = 0 WHERE profile_id = ?', [id])
   for (const model of models) {
     await run(
@@ -198,26 +206,39 @@ export async function syncModels(id: number): Promise<JsonRecord> {
 async function chatCompletion(
   profileId: number,
   model: string,
-  messages: JsonRecord[],
-  options: { maxTokens?: number; responseFormat?: JsonRecord } = {},
+  messages: ChatMessage[],
+  options: { maxTokens?: number; responseFormat?: JsonRecord; reasoningEffort?: unknown } = {},
 ): Promise<string> {
   const profile = await profileOr404(profileId)
-  const data = await nativeJson<any>({
-    url: `${String(profile.base_url).replace(/\/+$/, '')}/chat/completions`,
-    method: 'POST',
-    headers: Object.fromEntries((await apiHeaders(profile)).entries()),
-    data: {
-      model,
-      messages,
-      temperature: Number(profile.temperature),
-      ...(options.responseFormat ? { response_format: options.responseFormat } : {}),
-    },
-  }, '模型请求')
-  const content = data?.choices?.[0]?.message?.content
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new LocalApiError(400, '模型没有返回可显示的正文')
+  const adapter = adapterFor(profile.adapter)
+  const key = await secureStore.get(keyName(profile.id))
+  if (adapter.id === 'kiro' && !String(key || '').startsWith('ksk_')) {
+    throw new LocalApiError(400, 'Kiro 需要以 ksk_ 开头的 API Key；本应用不导入 OpenCodex/Kiro CLI 的 OAuth 会话')
   }
-  return content.trim()
+  const reasoningEffort = options.reasoningEffort === undefined
+    ? normalizeReasoningEffort(profile.reasoning_effort)
+    : normalizeReasoningEffort(options.reasoningEffort)
+  const request = {
+    url: adapter.chatUrl(String(profile.base_url), model),
+    method: 'POST',
+    headers: await apiHeaders(profile),
+    data: adapter.serialize(model, messages, {
+      temperature: Number(profile.temperature),
+      maxTokens: options.maxTokens,
+      responseFormat: options.responseFormat,
+      reasoningEffort: adapter.supportsReasoningEffort ? reasoningEffort : '',
+    }),
+  }
+  const data = adapter.responseKind === 'text'
+    ? await nativeText(request, '模型请求')
+    : adapter.responseKind === 'bytes'
+      ? await nativeBytes(request, '模型请求')
+      : await nativeJson<unknown>(request, '模型请求')
+  try {
+    return adapter.parseText(data)
+  } catch (error) {
+    throw new LocalApiError(400, error instanceof Error ? error.message : '模型没有返回可显示的正文')
+  }
 }
 
 export async function testProfile(id: number, body: JsonRecord): Promise<JsonRecord> {
@@ -289,9 +310,6 @@ export async function deleteConversation(id: number): Promise<{ ok: true }> {
   return { ok: true }
 }
 
-// data URL 为 ASCII base64，长度近似字节数；与前端附件条的上限保持一致。
-const MAX_ATTACHMENT_DATA_URL_CHARS = 8 * 1024 * 1024
-
 function normalizeAttachments(value: unknown): Array<{ name: string; dataUrl: string }> {
   if (!Array.isArray(value)) return []
   return value
@@ -302,12 +320,6 @@ function normalizeAttachments(value: unknown): Array<{ name: string; dataUrl: st
       name: String(item.name || '图片').slice(0, 80),
       dataUrl: String(item.dataUrl),
     }))
-    .filter(item => {
-      if (item.dataUrl.length > MAX_ATTACHMENT_DATA_URL_CHARS) {
-        throw new LocalApiError(422, '单张图片附件过大（超过 8 MiB），请裁剪或压缩后再试')
-      }
-      return true
-    })
 }
 
 function parseAttachments(value: unknown): Array<{ name: string; dataUrl: string }> {
@@ -330,11 +342,14 @@ export async function sendChat(body: JsonRecord): Promise<JsonRecord> {
   let conversationId = body.conversation_id ? Number(body.conversation_id) : 0
   if (!conversationId) conversationId = Number((await run('INSERT INTO ai_conversations DEFAULT VALUES')).lastId)
   else await conversation(conversationId)
-  const history = (await rows<JsonRecord>(
+  const history = (await rows<{ role: string; content: string }>(
     `SELECT role, content FROM ai_messages WHERE conversation_id = ?
      ORDER BY id DESC LIMIT 24`,
     [conversationId],
-  )).reverse()
+  )).reverse().map((message): ChatMessage => ({
+    role: message.role === 'assistant' ? 'assistant' : 'user',
+    content: message.content,
+  }))
   const system = [
     '你是英语刷题机中的考研英语学习助手。回答要准确、清晰、直接。',
     '除非用户明确要求，不要主动泄露题库中的标准答案。',
@@ -342,10 +357,10 @@ export async function sendChat(body: JsonRecord): Promise<JsonRecord> {
   ].filter(Boolean).join('\n')
   const attachments = normalizeAttachments(body.attachments)
   const userText = String(body.message || '').trim()
-  const userContent = attachments.length
+  const userContent: ChatMessage['content'] = attachments.length
     ? [
-        ...(userText ? [{ type: 'text', text: userText }] : []),
-        ...attachments.map(item => ({ type: 'image_url', image_url: { url: item.dataUrl } })),
+        ...(userText ? [{ type: 'text' as const, text: userText }] : []),
+        ...attachments.map(item => ({ type: 'image_url' as const, image_url: { url: item.dataUrl } })),
       ]
     : userText
   const content = await chatCompletion(
@@ -356,10 +371,13 @@ export async function sendChat(body: JsonRecord): Promise<JsonRecord> {
       ...history,
       { role: 'user', content: userContent },
     ],
+    body.reasoning_effort == null
+      ? {}
+      : { reasoningEffort: body.reasoning_effort },
   )
   await run(
     `INSERT INTO ai_messages (conversation_id, role, content, attachments, profile_id, model_id)
-     VALUES (?, 'user', ?, ?, ?, ?, ?)`,
+     VALUES (?, 'user', ?, ?, ?, ?)`,
     [
       conversationId,
       userText || '(图片)',

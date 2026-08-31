@@ -17,6 +17,8 @@
     "test:question-label-auto-lock": "node tests/question-label-auto-lock.mjs",
     "test:esq-compatibility": "node --experimental-strip-types tests/esq-1.1-import.mjs",
     "test:question-bank-catalog": "node --experimental-strip-types tests/question-bank-catalog.mjs",
+    "test:ai-reasoning-effort": "node tests/ai-reasoning-effort.mjs",
+    "test:ai-adapters": "node --experimental-strip-types tests/ai-adapters.mjs",
     "preview": "vite preview",
     "cap:sync": "pnpm build && cap sync",
     "cap:copy": "pnpm build && cap copy",
