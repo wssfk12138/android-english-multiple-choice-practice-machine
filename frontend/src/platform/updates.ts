@@ -133,3 +133,33 @@ export async function fetchQuestionBankCatalog(url: string): Promise<QuestionBan
   if (byteLength > MAX_CATALOG_BYTES) throw new UpdateManifestError('题库目录超过 2 MiB 大小上限')
   return validateQuestionBankCatalog(data)
 }
+
+export function resolveQuestionBankCatalogSources(options: {
+  officialUrl?: string
+  controlledMirrorUrls?: string[]
+  thirdPartyUrl?: string
+}): string[] {
+  const thirdPartyUrl = String(options.thirdPartyUrl || '').trim()
+  if (thirdPartyUrl) return [thirdPartyUrl]
+  return [...new Set([
+    String(options.officialUrl || '').trim(),
+    ...(options.controlledMirrorUrls || []).map(url => String(url).trim()),
+  ].filter(Boolean))]
+}
+
+export async function fetchQuestionBankCatalogFromSources(
+  urls: string[],
+): Promise<QuestionBankRemoteCatalog & { sourceUrl: string, checkedSources: number }> {
+  const sources = [...new Set(urls.map(url => url.trim()).filter(Boolean))]
+  if (!sources.length) throw new UpdateManifestError('没有可用的题库目录地址')
+  const failures: string[] = []
+  for (let index = 0; index < sources.length; index += 1) {
+    try {
+      const catalog = await fetchQuestionBankCatalog(sources[index])
+      return { ...catalog, sourceUrl: sources[index], checkedSources: index + 1 }
+    } catch (error) {
+      failures.push(String(error instanceof Error ? error.message : error))
+    }
+  }
+  throw new UpdateManifestError(`题库目录均不可用：${failures.join('；')}`)
+}

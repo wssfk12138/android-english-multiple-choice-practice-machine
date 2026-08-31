@@ -9,6 +9,7 @@ import {
   Send,
   Server,
   Trash2,
+  Wifi,
 } from 'lucide-vue-next'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -29,6 +30,13 @@ import {
 const router = useRouter()
 const settings = reactive({
   question_bank_catalog_url: '',
+})
+const lanSync = reactive({
+  host: '',
+  passcode: '',
+  auto: false,
+  configured: false,
+  runtime: { running: false, online: true, lastSyncAt: '', lastError: '' },
 })
 const appUpdate = ref<any>(null)
 const questionBankCatalog = ref<any>(null)
@@ -60,6 +68,65 @@ async function load() {
     error.value = String(cause)
   }
   await refreshLogs()
+  await refreshLanSync()
+}
+
+async function refreshLanSync() {
+  try {
+    const result: any = await get('/android/lan-sync/status')
+    lanSync.host = String(result.host || '')
+    lanSync.auto = Boolean(result.auto)
+    lanSync.configured = Boolean(result.configured)
+    Object.assign(lanSync.runtime, result.runtime || {}, {
+      lastSyncAt: result.runtime?.lastSyncAt || result.last_sync_at || '',
+    })
+  } catch (cause) {
+    error.value = `读取局域网同步状态失败：${String(cause)}`
+  }
+}
+
+async function saveLanSync() {
+  busy.value = 'lan-sync-save'
+  error.value = ''
+  try {
+    const result: any = await put('/android/lan-sync/settings', {
+      host: lanSync.host,
+      passcode: lanSync.passcode,
+      auto: lanSync.auto,
+    })
+    lanSync.host = String(result.host || lanSync.host)
+    lanSync.configured = Boolean(result.configured)
+    Object.assign(lanSync.runtime, result.runtime || {})
+    lanSync.passcode = ''
+    notice.value = '局域网同步设置已保存'
+  } catch (cause) {
+    error.value = String(cause)
+  } finally {
+    busy.value = ''
+  }
+}
+
+async function runLanSyncNow() {
+  busy.value = 'lan-sync-run'
+  error.value = ''
+  try {
+    const result: any = await post('/android/lan-sync/run')
+    lanSync.runtime.lastSyncAt = String(result.last_sync_at || '')
+    lanSync.runtime.lastError = ''
+    notice.value = '做题记录、错题本和单词本同步完成'
+    await refreshLanSync()
+  } catch (cause) {
+    error.value = `局域网同步失败：${String(cause)}`
+    await refreshLanSync()
+  } finally {
+    busy.value = ''
+  }
+}
+
+function formatSyncTime(value: string) {
+  if (!value) return '尚未同步'
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('zh-CN')
 }
 
 async function save() {
@@ -237,9 +304,9 @@ onMounted(load)
 <template>
   <div class="page android-updates-page">
     <div class="page-head">
-      <div>
+      <div class="page-title-row">
+        <span class="page-title-icon page-title-icon-lucide"><Download :size="22" /></span>
         <h1>更新与远程题库</h1>
-        <p class="lead">程序更新和题库更新相互独立。APK 下载后会校验 SHA-256，并由 Android 系统确认安装。</p>
       </div>
     </div>
     <div v-if="error" class="warning" role="alert">{{ error }}</div>
@@ -247,8 +314,44 @@ onMounted(load)
 
     <section class="card update-source-card">
       <div class="update-source-heading">
+        <span class="api-profile-icon"><Wifi :size="20" /></span>
+        <div>
+          <h2>局域网学习记录同步</h2>
+          <p class="lead">同步做题记录、错题本和单词本历史。电脑端需主动开启局域网同步，并保持独立的 8766 同步服务可访问。</p>
+        </div>
+      </div>
+      <div class="field">
+        <label for="lan-sync-host">电脑端地址</label>
+        <input id="lan-sync-host" v-model.trim="lanSync.host" inputmode="url" placeholder="http://192.168.x.x:8766">
+      </div>
+      <div class="field">
+        <label for="lan-sync-passcode">同步口令</label>
+        <input id="lan-sync-passcode" v-model.trim="lanSync.passcode" type="password" autocomplete="new-password" placeholder="输入电脑端显示的口令">
+      </div>
+      <label class="lan-sync-toggle">
+        <input v-model="lanSync.auto" type="checkbox">
+        <span><strong>自动同步</strong><small>默认关闭；主动开启后，本地记录变化、应用或网络恢复时自动尝试同步</small></span>
+      </label>
+      <div class="update-actions lan-sync-actions">
+        <button class="button" type="button" :disabled="busy === 'lan-sync-save'" @click="saveLanSync">
+          <Save :size="16" />{{ busy === 'lan-sync-save' ? '保存中…' : '保存同步设置' }}
+        </button>
+        <button class="button secondary" type="button" :disabled="busy === 'lan-sync-run' || !lanSync.configured" @click="runLanSyncNow">
+          <RefreshCw :size="16" />{{ busy === 'lan-sync-run' ? '同步中…' : '立即同步' }}
+        </button>
+      </div>
+      <div class="lan-sync-status" aria-live="polite">
+        <span>{{ lanSync.runtime.online ? '设备网络在线' : '设备当前离线' }}</span>
+        <span>{{ lanSync.runtime.running ? '正在同步' : '当前空闲' }}</span>
+        <span>上次同步：{{ formatSyncTime(lanSync.runtime.lastSyncAt) }}</span>
+      </div>
+      <p v-if="lanSync.runtime.lastError" class="warning">上次错误：{{ lanSync.runtime.lastError }}</p>
+    </section>
+
+    <section class="card update-source-card">
+      <div class="update-source-heading">
         <span class="api-profile-icon"><Server :size="20" /></span>
-        <div><h2>远程题库</h2><p class="lead">程序更新通道由系统在后台自动选择；此处只配置可选的远程 ESQ 题库目录。</p></div>
+        <div><h2>远程题库目录 URL</h2></div>
       </div>
       <div class="field">
         <label for="bank-update-url">远程题库目录 URL（可留空）</label>
@@ -261,7 +364,7 @@ onMounted(load)
       <section class="card">
         <div class="update-source-heading">
           <span class="api-profile-icon"><Download :size="20" /></span>
-          <div><h2>程序更新</h2><p class="lead">系统会在后台自动选择可用更新通道。不会静默安装，最终安装操作由你在系统界面确认。</p></div>
+          <div><h2>程序更新</h2></div>
         </div>
         <button class="button secondary" type="button" :disabled="busy === 'app'" @click="checkApp"><RefreshCw :size="16" />检查程序更新</button>
         <div v-if="appUpdate" class="update-result">
@@ -275,7 +378,7 @@ onMounted(load)
       <section class="card">
         <div class="update-source-heading">
           <span class="api-profile-icon"><PackageCheck :size="20" /></span>
-          <div><h2>远程题库源</h2><p class="lead">下载后会校验文件大小和 SHA-256，再进入 ESQ 预览；不会自动覆盖已有年份。</p></div>
+          <div><h2>远程题库</h2></div>
         </div>
         <button class="button secondary" type="button" :disabled="busy === 'banks' || busy === 'catalog-install'" @click="checkBanks"><RefreshCw :size="16" />检查远程题库</button>
         <div v-if="questionBankCatalog?.configured" class="update-package-list">
@@ -308,7 +411,6 @@ onMounted(load)
           <span class="api-profile-icon"><FileWarning :size="20" /></span>
           <div>
             <h2>诊断日志</h2>
-            <p class="lead">导入或更新失败时自动保存在本机。仅记录事件、模块、版本、时间、错误类别和短症状。</p>
           </div>
         </div>
         <span class="pill">{{ diagnosticLogs.length }} 条</span>

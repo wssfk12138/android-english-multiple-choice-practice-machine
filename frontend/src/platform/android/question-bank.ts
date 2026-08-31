@@ -5,6 +5,7 @@ import { LocalApiError } from './errors'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
 import { orderingFixedSlotsForPaperUnit } from './ordering-fixed-slots'
 import { MAX_ESQ_BYTES, MAX_ESQ_ENTRIES, MAX_ESQ_MIB, MAX_SINGLE_JSON_BYTES, MAX_TOTAL_JSON_BYTES, MAX_ZIP_COMPRESSION_RATIO } from '../question-bank-limits.ts'
+import { rebindLearningHistory } from './learning-history-rebind'
 
 type JsonRecord = Record<string, any>
 
@@ -684,6 +685,9 @@ export async function publishEsqImport(
         )
       }
     }
+    await rebindLearningHistory(db, {
+      paperKeys: pkg.papers.map(item => String(item.paper.paperKey || '')).filter(Boolean),
+    })
     await db.run(
       `INSERT OR REPLACE INTO question_bank_packages
         (package_id, content_version, title, publisher, manifest_data, status)

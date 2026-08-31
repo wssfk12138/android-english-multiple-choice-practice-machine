@@ -56,7 +56,7 @@ onMounted(() => {
 <template>
   <div class="page mobile-hub settings-hub">
     <div class="page-head compact-page-head">
-      <div><h1>设置</h1><p class="lead">集中管理题库、模型、外观与设备更新。</p></div>
+      <div class="page-title-row"><img class="page-title-icon" src="/assets/icons/settings.png" alt=""><h1>设置</h1></div>
     </div>
     <section class="settings-theme-row card">
       <img src="/assets/icons/theme.png" alt="">

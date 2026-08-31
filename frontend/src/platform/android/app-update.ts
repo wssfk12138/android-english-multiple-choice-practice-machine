@@ -2,7 +2,7 @@ import { App } from '@capacitor/app'
 import { registerPlugin } from '@capacitor/core'
 import { row, run } from './database'
 import { LocalApiError } from './errors'
-import { fetchQuestionBankCatalog, fetchUpdateManifest, validateQuestionBankRemoteUrl } from '../updates'
+import { fetchQuestionBankCatalogFromSources, fetchUpdateManifest, resolveQuestionBankCatalogSources, validateQuestionBankRemoteUrl } from '../updates'
 import { createEsqImportFromNativePackage } from './question-bank'
 
 type JsonRecord = Record<string, any>
@@ -14,22 +14,21 @@ const BUILD_DEFAULTS: Record<string, string> = {
 const DEFAULT_APP_UPDATE_MANIFEST_URL =
   'https://github.com/wssfk12138/android-english-multiple-choice-practice-machine/releases/latest/download/android-update.json'
 
-// 国内用户无法稳定访问 GitHub 时使用的 HTTPS 镜像，按顺序自动回退。
-const DEFAULT_APP_UPDATE_MIRROR_MANIFEST_URLS = [
-  'https://ghproxy.net/https://github.com/wssfk12138/android-english-multiple-choice-practice-machine/releases/latest/download/android-update.json',
-  'https://gh-proxy.com/https://github.com/wssfk12138/android-english-multiple-choice-practice-machine/releases/latest/download/android-update.json',
-]
+// Controlled HTTPS mirrors are opt-in build inputs. The public source tree
+// intentionally ships with an empty mirror list.
+const CONTROLLED_APP_UPDATE_MIRROR_MANIFEST_URLS = String(
+  import.meta.env.VITE_APP_UPDATE_MIRROR_MANIFEST_URLS || '',
+).split(/[\r\n,]+/).map(item => item.trim()).filter(Boolean)
+
+const CONTROLLED_QUESTION_BANK_MIRROR_URLS = String(
+  import.meta.env.VITE_QUESTION_BANK_CATALOG_MIRROR_URLS || '',
+).split(/[\r\n,]+/).map(item => item.trim()).filter(Boolean)
 
 function appUpdateManifestUrls(): string[] {
   const envManifest = String(import.meta.env.VITE_APP_UPDATE_MANIFEST_URL || '').trim()
-  const envMirrors = String(import.meta.env.VITE_APP_UPDATE_MIRROR_MANIFEST_URLS || '')
-    .split(/[\r\n,]+/)
-    .map(item => item.trim())
-    .filter(Boolean)
   const candidates = [
     envManifest || DEFAULT_APP_UPDATE_MANIFEST_URL,
-    ...envMirrors,
-    ...DEFAULT_APP_UPDATE_MIRROR_MANIFEST_URLS,
+    ...CONTROLLED_APP_UPDATE_MIRROR_MANIFEST_URLS,
   ]
   // 公共版更新只接受 HTTPS，避免可配置地址把 APK 下载引向明文或非 HTTP 协议。
   const httpsOnly = candidates.filter((item) => {
@@ -41,6 +40,16 @@ function appUpdateManifestUrls(): string[] {
     }
   })
   return [...new Set(httpsOnly)]
+}
+
+async function questionBankCatalog() {
+  const thirdPartyUrl = await setting('question_bank_catalog_url')
+  const sources = resolveQuestionBankCatalogSources({
+    officialUrl: BUILD_DEFAULTS.question_bank_catalog_url,
+    controlledMirrorUrls: CONTROLLED_QUESTION_BANK_MIRROR_URLS,
+    thirdPartyUrl,
+  })
+  return sources.length ? fetchQuestionBankCatalogFromSources(sources) : null
 }
 
 function mirrorRewriteApkUrl(manifestUrl: string, apkUrl: string): string {
@@ -180,9 +189,8 @@ export async function resolveInstallerCleanup(shouldDelete: boolean): Promise<{
 }
 
 export async function checkQuestionBankCatalog(): Promise<JsonRecord> {
-  const url = await setting('question_bank_catalog_url')
-  if (!url) return { configured: false, packages: [] }
-  const catalog = await fetchQuestionBankCatalog(url)
+  const catalog = await questionBankCatalog()
+  if (!catalog) return { configured: false, packages: [] }
   return { configured: true, ...catalog }
 }
 
@@ -192,9 +200,8 @@ export async function downloadQuestionBankPackage(body: JsonRecord): Promise<Jso
   if (!packageId || !contentVersion) {
     throw new LocalApiError(400, '请指定要下载的题库和版本')
   }
-  const catalogUrl = await setting('question_bank_catalog_url')
-  if (!catalogUrl) throw new LocalApiError(400, '请先填写远程题库目录地址')
-  const catalog = await fetchQuestionBankCatalog(catalogUrl)
+  const catalog = await questionBankCatalog()
+  if (!catalog) throw new LocalApiError(400, '当前没有可用的远程题库目录，请先填写第三方目录地址')
   const item = catalog.packages.find(candidate => (
     candidate.packageId === packageId && candidate.contentVersion === contentVersion
   ))

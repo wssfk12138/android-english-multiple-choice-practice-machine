@@ -232,7 +232,7 @@ function timerStorageKey(sessionId: number) {
 
 function isAndroidPortrait() {
   return document.documentElement.dataset.platform === 'android'
-    && window.matchMedia('(orientation: portrait) and (max-width: 840px)').matches
+    && document.documentElement.dataset.orientation === 'portrait'
 }
 
 function clampPortraitPaneRatio(value: number) {
@@ -1430,8 +1430,8 @@ async function copySelectedTerm() {
         </template>
       </div>
     </section>
-    <section v-if="timerPromptVisible" class="timer-overlay" role="dialog" aria-modal="true" aria-labelledby="timer-choice-title">
-      <div class="timer-dialog card">
+    <section v-if="timerPromptVisible" class="timer-overlay" role="dialog" aria-modal="true" aria-labelledby="timer-choice-title" @click.self.prevent>
+      <div class="timer-dialog card" @click.stop>
         <span class="timer-dialog-icon"><Clock3 :size="30" /></span>
         <h2 id="timer-choice-title">这次练习要计时吗？</h2>
         <p class="lead">计时能帮助你了解自己的答题节奏。中途可以点击“休息一下”，暂停期间不会计入用时。</p>
@@ -1444,8 +1444,8 @@ async function copySelectedTerm() {
         <small>本次选择只对当前练习生效。</small>
       </div>
     </section>
-    <section v-if="timerState?.mode === 'paused' && session?.status === 'active'" class="timer-overlay timer-pause-overlay" role="dialog" aria-modal="true" aria-labelledby="timer-pause-title">
-      <div class="timer-dialog pause-dialog card">
+    <section v-if="timerState?.mode === 'paused' && session?.status === 'active'" class="timer-overlay timer-pause-overlay" role="dialog" aria-modal="true" aria-labelledby="timer-pause-title" @click.self.prevent>
+      <div class="timer-dialog pause-dialog card" @click.stop>
         <span class="timer-dialog-icon rest"><Coffee :size="30" /></span>
         <h2 id="timer-pause-title">计时已暂停</h2>
         <div class="paused-time">{{ timerText }}</div>

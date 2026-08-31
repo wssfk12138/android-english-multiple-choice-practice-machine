@@ -1,0 +1,79 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+const read = path => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
+const app = read('../src/App.vue')
+const localApi = read('../src/platform/android/local-api.ts')
+const practice = read('../src/platform/android/practice.ts')
+const database = read('../src/platform/android/database.ts')
+const lanSync = read('../src/platform/android/lan-sync.ts')
+const lanSyncCompat = read('../src/platform/android/lan-sync-compat.ts')
+const lanSyncSerialization = read('../src/platform/android/lan-sync-serialization.ts')
+const syncScheduler = read('../src/platform/android/sync-scheduler.ts')
+const syncCoordinator = read('../src/platform/android/sync-coordinator.ts')
+const vocabulary = read('../src/platform/android/vocabulary.ts')
+const updates = read('../src/views/AndroidUpdatesView.vue')
+
+assert.match(app, /startAutoSync()/, 'Android startup must start the sync scheduler')
+assert.match(app, /stopAutoSync()/, 'Android teardown must stop the sync scheduler')
+assert.match(localApi, /\/android\/lan-sync\/settings/, 'sync settings route must be exposed')
+assert.match(localApi, /\/android\/lan-sync\/run/, 'manual sync route must be exposed')
+assert.match(localApi, /notifyLocalChange\(\)/, 'learning mutations must notify the scheduler')
+assert.match(localApi, /retryVocabulary\(id\)[\s\S]*notifyLocalChange\(\)/, 'word translation retry must notify the scheduler')
+assert.match(localApi, /tombstoneVocabularyEntry/, 'word deletion must write tombstones')
+assert.match(practice, /practice_sessions[\s\S]*sync_id[\s\S]*updated_at/, 'sessions need stable sync metadata')
+assert.match(practice, /practice_answer_events[\s\S]*sync_id[\s\S]*updated_at/, 'answer events need stable sync metadata')
+assert.match(vocabulary, /vocabulary_occurrences[\s\S]*sync_id[\s\S]*updated_at/, 'word occurrences need stable sync metadata')
+assert.match(vocabulary, /vocabulary_reviews[\s\S]*sync_id[\s\S]*updated_at/, 'word reviews need stable sync metadata')
+assert.match(database, /CREATE TABLE IF NOT EXISTS sync_id_aliases/, 'sync-id aliases must survive app restarts')
+assert.match(lanSync, /const LOGICAL_KEYS/, 'composite logical keys must reconcile independently generated ids')
+assert.match(lanSync, /const REQUIRED_REFS/, 'missing parent references must fail the incoming batch')
+assert.match(lanSync, /recordSyncAlias/, 'remote sync ids must be mapped to local canonical ids')
+assert.match(lanSync, /syncRow\(db, table, objectKey\)/, 'tombstones must resolve sync-id aliases')
+assert.match(lanSync, /canonicalObjectKey[\s\S]*recordTombstone\(db, table, canonicalKey/, 'forwarded tombstones must use canonical sync ids')
+assert.match(lanSync, /await transaction\(async \(db\)/, 'pulled changes and tombstones must apply atomically')
+assert.match(lanSync, /const visibleItems = items[\s\S]*const last = visibleItems\.at\(-1\)/, 'an invisible tombstone must not advance the local watermark')
+assert.match(lanSync, /profileFingerprint: JSON\.stringify\(\[\.\.\.profiles\]\.sort\(\)\)/, 'profile visibility must have a stable fingerprint')
+assert.match(lanSync, /const profileChanged =[\s\S]*lan_sync_cursor_profiles/, 'profile changes must invalidate old incremental watermarks')
+assert.match(lanSync, /const remoteCursor = profileChanged[\s\S]*const localTombstoneCursor = profileChanged/, 'all four watermarks must restart when profile visibility changes')
+const pushStatusCheck = lanSync.indexOf('if (pushResponse.status !== 200)')
+for (const setting of [
+  'lan_sync_remote_cursor',
+  'lan_sync_remote_tombstone_cursor',
+  'lan_sync_local_cursor',
+  'lan_sync_local_tombstone_cursor',
+  'lan_sync_cursor_profiles',
+]) {
+  assert.ok(
+    lanSync.indexOf(`setSyncSetting('${setting}'`) > pushStatusCheck,
+    `${setting} must only persist after the push succeeds`,
+  )
+}
+assert.match(lanSync, /pa\.deleted_at IS NULL AND p\.deleted_at IS NULL/, 'stable references must ignore deleted question-bank rows')
+assert.match(lanSync, /\? = '' OR p\.name = \?/, 'stable references must be scoped by profile name')
+assert.match(lanSync, /conflicts in profile/, 'ambiguous stable references must fail instead of using an arbitrary row')
+assert.match(lanSync, /unit_ids contains an unresolved stable reference/, 'session unit references must not be silently dropped')
+assert.match(lanSync, /unit reference cannot be serialized/, 'outgoing session references must fail explicitly instead of dropping keys')
+assert.match(lanSync, /loadSerializationLookup/, 'outgoing references must be prefetched once per sync round')
+assert.match(lanSync, /serializeLocalRow\(table, item, lookup\)/, 'outgoing rows must use the prefetched lookup')
+assert.match(lanSyncSerialization, /lookupStableKey/, 'stable keys must resolve from an in-memory lookup')
+assert.match(lanSyncSerialization, /lookupProfile/, 'profile isolation must resolve from the same in-memory lookup')
+assert.match(syncScheduler, /createSyncCoordinator\(performSync\)/, 'the scheduler must use a single-flight coordinator')
+assert.match(syncCoordinator, /if \(active\) return active/, 'manual sync calls must join the active run')
+assert.match(syncCoordinator, /followUpPending/, 'a local mutation during sync must retain one follow-up run')
+assert.match(syncScheduler, /setState\(\{ running: false \}\)/, 'sync completion and failure must both clear the running state')
+assert.doesNotMatch(lanSync, /catch \{\s*changes\[table\] = \[\]/, 'serialization failures must not silently erase an outgoing table')
+assert.match(lanSync, /recoverPaperSessionUnitIds/, 'full-paper sessions may recover old unit references through their stable paper key')
+assert.match(lanSync, /ids.length !== expectedCount/, 'paper-based recovery must reject mismatched unit cardinality')
+assert.match(lanSync, /resolvedIds\.every\(\(resolvedId, index\) => resolvedId == null \|\| resolvedId === ids\[index\]\)/, 'paper-based recovery must preserve every unit position that already resolves')
+assert.match(lanSync, /session=.*profile=.*missing=/, 'unresolved session references must include bounded diagnostics')
+assert.match(lanSyncCompat, /practice_answers[\s\S]*practice_answer_events[\s\S]*practice_unit_submissions[\s\S]*wrong_retry_rounds/, 'empty remote sessions must exclude every learning child table')
+assert.match(lanSync, /emptyRemoteSessions\.has\(syncId\)/, 'only a remote session proven empty may enter compatibility handling')
+assert.match(lanSync, /localSessionHasLearningData\(db, syncId\)/, 'a remote empty shell must not hide local learning history')
+assert.match(lanSync, /isUnresolvedSessionUnitReference\(error, syncId\)/, 'compatibility handling must only catch the bounded stale-unit error')
+assert.match(practice, /sync_tombstones[\s\S]*DELETE FROM wrong_current_questions/, 'replacing the wrong-question pool must tombstone old rows')
+assert.match(practice, /practice_unit_submissions pus WHERE pus\.session_id = s\.id\) DESC,[\s\S]*TRIM\(COALESCE\(pa\.user_answer/, 'active sessions must prefer real progress over the newest empty shell')
+assert.match(updates, /局域网学习记录同步/, 'the Android settings UI must expose LAN sync')
+
+console.log('Android LAN sync wiring and mutation contracts: OK')

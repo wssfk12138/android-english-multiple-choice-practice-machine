@@ -4,6 +4,7 @@ import { Directory, Filesystem } from '@capacitor/filesystem'
 import { row, rows, run, transaction } from './database'
 import { incompleteSubmission, LocalApiError } from './errors'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
+import { selectResumableWrongSession, type WrongSessionCandidate } from './practice-session-resume'
 
 type JsonRecord = Record<string, any>
 type TransactionDb = Pick<SQLiteDBConnection, 'query' | 'run'>
@@ -326,48 +327,22 @@ function normalizeListeningAudio(units: JsonRecord[]) {
   })
 }
 
-export async function createSession(body: JsonRecord): Promise<JsonRecord> {
-  const { unitIds, paperId } = await selectUnitIds(body)
-  if (!unitIds.length) throw new LocalApiError(400, '没有符合条件的练习篇目')
-  if (body.mode === 'paper' && paperId != null) {
-    if (body.force_new) {
-      await run(
-        `UPDATE practice_sessions SET status = 'abandoned'
-         WHERE paper_id = ? AND status = 'active' AND mode = 'paper'`,
-        [paperId],
-      )
-    } else {
-      const existing = await row<{ id: number }>(
-        `SELECT id FROM practice_sessions
-         WHERE paper_id = ? AND status = 'active' AND mode = 'paper'
-         ORDER BY id DESC LIMIT 1`,
-        [paperId],
-      )
-      if (existing) return { ...(await getSession(Number(existing.id))), resumed: true }
-    }
-  }
-  const shuffleOptions = body.shuffle_options !== false
-  const created = await run(
-    `INSERT INTO practice_sessions (mode, paper_id, unit_ids, shuffle_options)
-     VALUES (?, ?, ?, ?)`,
-    [body.mode, paperId, JSON.stringify(unitIds), shuffleOptions ? 1 : 0],
-  )
-  const sessionId = Number(created.lastId)
-  const requestedWrongQuestions = new Set<number>((body.question_ids || []).map(Number))
-  const onlyByUnit = new Map<number, Set<number>>()
+async function wrongQuestionIdsByUnit(body: JsonRecord, unitIds: number[]): Promise<Map<number, Set<number>>> {
+  const result = new Map<number, Set<number>>()
   if (body.mode === 'wrong') {
+    const requested = new Set<number>((body.question_ids || []).map(Number))
     let sql = `SELECT q.id, q.unit_id FROM wrong_current_questions wc
       JOIN questions q ON q.id = wc.question_id
       WHERE wc.deleted_at IS NULL AND q.unit_id IN (${unitIds.map(() => '?').join(',')})`
     const values: unknown[] = [...unitIds]
-    if (requestedWrongQuestions.size) {
-      sql += ` AND q.id IN (${[...requestedWrongQuestions].map(() => '?').join(',')})`
-      values.push(...requestedWrongQuestions)
+    if (requested.size) {
+      sql += ` AND q.id IN (${[...requested].map(() => '?').join(',')})`
+      values.push(...requested)
     }
     for (const question of await rows<{ id: number; unit_id: number }>(sql, values)) {
-      const set = onlyByUnit.get(question.unit_id) || new Set<number>()
+      const set = result.get(question.unit_id) || new Set<number>()
       set.add(question.id)
-      onlyByUnit.set(question.unit_id, set)
+      result.set(question.unit_id, set)
     }
   } else if (body.mode === 'wrong_history') {
     for (const question of await rows<{ id: number; unit_id: number }>(
@@ -378,11 +353,90 @@ export async function createSession(body: JsonRecord): Promise<JsonRecord> {
        WHERE rq.round_id = ? AND rq.is_correct = 0 AND r.deleted_at IS NULL`,
       [Number(body.history_round_id)],
     )) {
-      const set = onlyByUnit.get(question.unit_id) || new Set<number>()
+      const set = result.get(question.unit_id) || new Set<number>()
       set.add(question.id)
-      onlyByUnit.set(question.unit_id, set)
+      result.set(question.unit_id, set)
     }
   }
+  return result
+}
+
+async function resumableWrongSession(
+  mode: string,
+  unitIds: number[],
+  questionIds: number[],
+): Promise<WrongSessionCandidate | null> {
+  const candidates = await rows<Omit<WrongSessionCandidate, 'question_ids'>>(
+    `SELECT s.id, s.mode, s.unit_ids, s.started_at, s.updated_at,
+       SUM(CASE WHEN TRIM(COALESCE(pa.user_answer, '')) <> '' THEN 1 ELSE 0 END) AS answered_rows
+     FROM practice_sessions s
+     LEFT JOIN practice_answers pa ON pa.session_id = s.id
+     WHERE s.status = 'active' AND s.mode = ?
+     GROUP BY s.id, s.mode, s.unit_ids, s.started_at, s.updated_at`,
+    [mode],
+  )
+  if (!candidates.length) return null
+  const answers = await rows<{ session_id: number; question_id: number }>(
+    `SELECT session_id, question_id FROM practice_answers
+     WHERE session_id IN (${candidates.map(() => '?').join(',')})`,
+    candidates.map(candidate => Number(candidate.id)),
+  )
+  const questionIdsBySession = new Map<number, number[]>()
+  for (const answer of answers) {
+    const ids = questionIdsBySession.get(Number(answer.session_id)) || []
+    ids.push(Number(answer.question_id))
+    questionIdsBySession.set(Number(answer.session_id), ids)
+  }
+  return selectResumableWrongSession(
+    candidates.map(candidate => ({
+      ...candidate,
+      question_ids: questionIdsBySession.get(Number(candidate.id)) || [],
+    })),
+    mode,
+    unitIds,
+    questionIds,
+  )
+}
+
+export async function createSession(body: JsonRecord): Promise<JsonRecord> {
+  const { unitIds, paperId } = await selectUnitIds(body)
+  if (!unitIds.length) throw new LocalApiError(400, '没有符合条件的练习篇目')
+  const isWrongMode = ['wrong', 'wrong_history'].includes(String(body.mode))
+  const onlyByUnit = isWrongMode ? await wrongQuestionIdsByUnit(body, unitIds) : new Map<number, Set<number>>()
+  if (isWrongMode && !body.force_new) {
+    const questionIds = [...onlyByUnit.values()].flatMap(ids => [...ids])
+    const existing = await resumableWrongSession(String(body.mode), unitIds, questionIds)
+    if (existing) return { ...(await getSession(Number(existing.id))), resumed: true }
+  }
+  if (body.mode === 'paper' && paperId != null) {
+    if (body.force_new) {
+      await run(
+        `UPDATE practice_sessions SET status = 'abandoned', updated_at = CURRENT_TIMESTAMP WHERE paper_id = ? AND status = 'active' AND mode = 'paper'`,
+        [paperId],
+      )
+    } else {
+      const existing = await row<{ id: number }>(
+        `SELECT s.id FROM practice_sessions s
+         WHERE s.paper_id = ? AND s.status = 'active' AND s.mode = 'paper'
+         ORDER BY
+           (SELECT COUNT(*) FROM practice_unit_submissions pus WHERE pus.session_id = s.id) DESC,
+           (SELECT COUNT(*) FROM practice_answers pa
+            WHERE pa.session_id = s.id AND TRIM(COALESCE(pa.user_answer, '')) <> '') DESC,
+           COALESCE(s.updated_at, s.started_at) DESC, s.id DESC
+         LIMIT 1`,
+        [paperId],
+      )
+      if (existing) return { ...(await getSession(Number(existing.id))), resumed: true }
+    }
+  }
+
+  const shuffleOptions = body.shuffle_options !== false
+  const created = await run(
+    `INSERT INTO practice_sessions (mode, paper_id, unit_ids, shuffle_options, sync_id, updated_at)
+     VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
+    [body.mode, paperId, JSON.stringify(unitIds), shuffleOptions ? 1 : 0],
+  )
+  const sessionId = Number(created.lastId)
   const units = []
   for (const unitId of unitIds) {
     const unit = await serializeUnit(unitId, {
@@ -395,8 +449,8 @@ export async function createSession(body: JsonRecord): Promise<JsonRecord> {
     for (const question of unit.questions) {
       await run(
         `INSERT OR IGNORE INTO practice_answers
-          (session_id, question_id, user_answer, option_order)
-         VALUES (?, ?, '', ?)`,
+          (session_id, question_id, user_answer, option_order, sync_id, updated_at)
+         VALUES (?, ?, '', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
         [sessionId, question.id, JSON.stringify(question.option_order)],
       )
     }
@@ -564,13 +618,22 @@ export async function saveAnswer(
      WHERE session_id = ? AND question_id = ?`,
     [sessionId, questionId],
   )
+  let optionOrder = Array.isArray(body.option_order) ? body.option_order : []
+  if (!optionOrder.length) {
+    // Part B / 排序题若前端未带 option_order，回退到题目原始选项顺序，
+    // 避免把空列表写库，导致下次恢复时选项顺序错乱或选项区为空。
+    optionOrder = (await rows<{ stable_key: string }>(
+      'SELECT stable_key FROM options WHERE question_id = ? ORDER BY sequence',
+      [questionId],
+    )).map(item => item.stable_key)
+  }
   const result = await run(
     `UPDATE practice_answers
-     SET user_answer = ?, option_order = ?, answered_at = CURRENT_TIMESTAMP
+     SET user_answer = ?, option_order = ?, answered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
      WHERE session_id = ? AND question_id = ?`,
     [
       String(body.answer || ''),
-      JSON.stringify(body.option_order || []),
+      JSON.stringify(optionOrder),
       sessionId,
       questionId,
     ],
@@ -579,9 +642,9 @@ export async function saveAnswer(
   if (body.answer && previous?.user_answer !== body.answer) {
     await run(
       `INSERT INTO practice_answer_events
-        (session_id, question_id, user_answer, option_order)
-       VALUES (?, ?, ?, ?)`,
-      [sessionId, questionId, body.answer, JSON.stringify(body.option_order || [])],
+        (session_id, question_id, user_answer, option_order, sync_id, updated_at)
+       VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
+      [sessionId, questionId, body.answer, JSON.stringify(optionOrder)],
     )
   }
   return { saved: true }
@@ -625,8 +688,8 @@ async function updateWrongStat(
       db,
       `INSERT INTO wrong_stats
         (question_id, attempt_count, wrong_count, recent_results,
-         consecutive_correct, last_wrong_at, last_attempt_at)
-       VALUES (?, 1, ?, ?, ?, ?, ?)`,
+         consecutive_correct, last_wrong_at, last_attempt_at, updated_at)
+       VALUES (?, 1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
       [
         questionId,
         isCorrect ? 0 : 1,
@@ -647,7 +710,7 @@ async function updateWrongStat(
        recent_results = ?,
        consecutive_correct = ?,
        last_wrong_at = ?,
-       last_attempt_at = ?
+       last_attempt_at = ?, updated_at = CURRENT_TIMESTAMP
      WHERE question_id = ?`,
     [
       isCorrect ? 0 : 1,
@@ -674,7 +737,7 @@ async function gradeRows(
     const answer = String(answerRow.answer || '').trim().toUpperCase().split('').sort().join('')
     const correct = Boolean(user) && user === answer
     if (correct) score += Number(answerRow.score)
-    await transactionRun(db, 'UPDATE practice_answers SET is_correct = ? WHERE id = ?', [
+    await transactionRun(db, 'UPDATE practice_answers SET is_correct = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [
       correct ? 1 : 0,
       answerRow.id,
     ])
@@ -697,9 +760,9 @@ async function addCurrentWrongQuestions(
 ) {
   for (const result of results.filter(item => !item.is_correct)) {
     await db.run(
-      `INSERT INTO wrong_current_questions (unit_id, question_id, deleted_at)
-       VALUES (?, ?, NULL)
-       ON CONFLICT(unit_id, question_id) DO UPDATE SET deleted_at = NULL`,
+      `INSERT INTO wrong_current_questions (unit_id, question_id, deleted_at, sync_id, updated_at)
+       VALUES (?, ?, NULL, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)
+       ON CONFLICT(unit_id, question_id) DO UPDATE SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP`,
       [unitId, result.question_id],
       false,
     )
@@ -720,8 +783,8 @@ async function recordWrongRetryRound(
   const correctCount = results.filter(item => item.is_correct).length
   const created = await db.run(
     `INSERT INTO wrong_retry_rounds
-      (unit_id, session_id, round_number, question_count, correct_count, wrong_count)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+      (unit_id, session_id, round_number, question_count, correct_count, wrong_count, sync_id, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
     [unitId, sessionId, Number(next?.round_number || 1), results.length, correctCount, results.length - correctCount],
     false,
   )
@@ -729,16 +792,40 @@ async function recordWrongRetryRound(
   for (const result of results) {
     await db.run(
       `INSERT INTO wrong_retry_round_questions
-        (round_id, question_id, user_answer, is_correct) VALUES (?, ?, ?, ?)`,
+        (round_id, question_id, user_answer, is_correct, sync_id, updated_at)
+       VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
       [roundId, result.question_id, result.user_answer, result.is_correct ? 1 : 0],
+      false,
+    )
+  }
+  const currentRows = (await db.query(
+    'SELECT sync_id FROM wrong_current_questions WHERE unit_id = ?',
+    [unitId],
+  )).values || []
+  const profileRow = (await db.query(
+    `SELECT p.name FROM question_bank_profiles p
+     JOIN papers pa ON pa.profile_id = p.id
+     JOIN units u ON u.paper_id = pa.id
+     WHERE u.id = ? LIMIT 1`,
+    [unitId],
+  )).values?.[0]
+  for (const current of currentRows) {
+    const syncId = String(current.sync_id || '')
+    if (!syncId) continue
+    await db.run(
+      `INSERT INTO sync_tombstones(table_name, object_key, profile_name, deleted_at)
+       VALUES ('wrong_current_questions', ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(table_name, object_key, profile_name)
+       DO UPDATE SET deleted_at = CURRENT_TIMESTAMP`,
+      [syncId, String(profileRow?.name || '')],
       false,
     )
   }
   await db.run('DELETE FROM wrong_current_questions WHERE unit_id = ?', [unitId], false)
   for (const result of results.filter(item => !item.is_correct)) {
     await db.run(
-      `INSERT INTO wrong_current_questions (unit_id, question_id, since_round_id)
-       VALUES (?, ?, ?)`,
+      `INSERT INTO wrong_current_questions (unit_id, question_id, since_round_id, sync_id, updated_at)
+       VALUES (?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
       [unitId, result.question_id, roundId],
       false,
     )
@@ -775,7 +862,8 @@ export async function submitUnit(sessionId: number, unitId: number): Promise<Jso
     await addCurrentWrongQuestions(unitId, graded.results, db)
     await db.run(
       `INSERT INTO practice_unit_submissions
-        (session_id, unit_id, score, max_score) VALUES (?, ?, ?, ?)`,
+        (session_id, unit_id, score, max_score, sync_id, updated_at)
+       VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
       [sessionId, unitId, graded.score, graded.maxScore],
       false,
     )
@@ -823,10 +911,10 @@ export async function submitSession(sessionId: number): Promise<JsonRecord> {
       maxScore += graded.maxScore
       await db.run(
         `INSERT INTO practice_unit_submissions
-          (session_id, unit_id, score, max_score)
-         VALUES (?, ?, ?, ?)
+          (session_id, unit_id, score, max_score, sync_id, updated_at)
+         VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)
          ON CONFLICT(session_id, unit_id) DO UPDATE SET
-           score = excluded.score, max_score = excluded.max_score`,
+           score = excluded.score, max_score = excluded.max_score, updated_at = CURRENT_TIMESTAMP`,
         [sessionId, unitId, graded.score, graded.maxScore],
         false,
       )
@@ -834,7 +922,7 @@ export async function submitSession(sessionId: number): Promise<JsonRecord> {
     await db.run(
       `UPDATE practice_sessions SET
          status = 'submitted', submitted_at = CURRENT_TIMESTAMP,
-         score = ?, max_score = ?
+         score = ?, max_score = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [score, maxScore, sessionId],
       false,
@@ -876,6 +964,18 @@ export async function dashboard(): Promise<JsonRecord> {
      ORDER BY s.id DESC LIMIT 5`,
     [profileId],
   )
+  const resumeSession = await row<JsonRecord>(
+    `SELECT s.id, s.mode, s.started_at, p.year
+     FROM practice_sessions s LEFT JOIN papers p ON p.id = s.paper_id
+     WHERE s.status = 'active' AND (p.profile_id = ? OR s.paper_id IS NULL)
+     ORDER BY
+       (SELECT COUNT(*) FROM practice_unit_submissions pus WHERE pus.session_id = s.id) DESC,
+       (SELECT COUNT(*) FROM practice_answers pa
+        WHERE pa.session_id = s.id AND TRIM(COALESCE(pa.user_answer, '')) <> '') DESC,
+       COALESCE(s.updated_at, s.started_at) DESC, s.id DESC
+     LIMIT 1`,
+    [profileId],
+  )
   const unitTypeCounts = Object.fromEntries(
     (await rows<{ unit_type: string; count: number }>(
       `SELECT u.unit_type, COUNT(DISTINCT u.id) AS count
@@ -904,6 +1004,9 @@ export async function dashboard(): Promise<JsonRecord> {
     unit_type_counts: unitTypeCounts,
     paper_type_counts: paperTypeCounts,
     recent_sessions: recentSessions,
+    resume_session: resumeSession
+      ? { id: Number(resumeSession.id), mode: resumeSession.mode, year: resumeSession.year }
+      : null,
   }
 }
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { validateQuestionBankCatalog, validateQuestionBankRemoteUrl } from '../src/platform/updates.ts'
+import { resolveQuestionBankCatalogSources, validateQuestionBankCatalog, validateQuestionBankRemoteUrl } from '../src/platform/updates.ts'
 import { MAX_ESQ_BYTES } from '../src/platform/question-bank-limits.ts'
 
 function remotePackage(overrides = {}) {
@@ -31,4 +31,14 @@ for (const url of ['https://localhost/bank.esq', 'https://192.168.1.2/bank.esq',
   assert.throws(() => validateQuestionBankRemoteUrl(url), /局域网/)
 }
 assert.equal(validateQuestionBankRemoteUrl('https://example.com/bank.esq'), 'https://example.com/bank.esq')
+assert.deepEqual(resolveQuestionBankCatalogSources({}), [])
+assert.deepEqual(resolveQuestionBankCatalogSources({
+  officialUrl: 'https://official.example/catalog.json',
+  controlledMirrorUrls: ['https://mirror.example/catalog.json', 'https://mirror.example/catalog.json'],
+}), ['https://official.example/catalog.json', 'https://mirror.example/catalog.json'])
+assert.deepEqual(resolveQuestionBankCatalogSources({
+  officialUrl: 'https://official.example/catalog.json',
+  controlledMirrorUrls: ['https://mirror.example/catalog.json'],
+  thirdPartyUrl: 'https://third-party.example/catalog.json',
+}), ['https://third-party.example/catalog.json'])
 console.log('Question-bank catalog validation verified')

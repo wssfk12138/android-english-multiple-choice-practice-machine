@@ -5,6 +5,12 @@ import {
 } from '@capacitor-community/sqlite'
 import { createSerialQueue } from './serial-queue'
 import { orderingFixedSlotsForPaperUnit } from './ordering-fixed-slots'
+import {
+  repairLearningHistoryRebindDrift,
+  runLearningHistoryRebindV1,
+  runLearningHistoryRebindV2,
+  runLearningHistoryRebindV3,
+} from './learning-history-rebind'
 
 const DB_NAME = 'english_practice_machine'
 const DB_VERSION = 1
@@ -388,6 +394,20 @@ CREATE INDEX IF NOT EXISTS idx_answers_session ON practice_answers(session_id);
 CREATE INDEX IF NOT EXISTS idx_wrong_count ON wrong_stats(wrong_count DESC);
 CREATE INDEX IF NOT EXISTS idx_vocab_priority ON vocabulary_entries(encounter_count DESC, last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trash_purge ON trash_entries(purge_after, restored_at);
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+  table_name TEXT NOT NULL,
+  object_key TEXT NOT NULL,
+  profile_name TEXT NOT NULL DEFAULT '',
+  deleted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (table_name, object_key, profile_name)
+);
+CREATE TABLE IF NOT EXISTS sync_id_aliases (
+  table_name TEXT NOT NULL,
+  alias_sync_id TEXT NOT NULL,
+  canonical_sync_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (table_name, alias_sync_id)
+);
 INSERT OR IGNORE INTO schema_version(version) VALUES (1);
 `
 
@@ -946,6 +966,66 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
           false,
         )
       }
+      for (const table of [
+        'practice_sessions',
+        'practice_answers',
+        'practice_answer_events',
+        'practice_unit_submissions',
+        'wrong_retry_rounds',
+        'wrong_retry_round_questions',
+        'wrong_current_questions',
+        'vocabulary_occurrences',
+        'vocabulary_reviews',
+      ]) {
+        const syncColumns = await db.query(`PRAGMA table_info(${table})`)
+        const names = new Set((syncColumns.values || []).map(column => column.name))
+        if (!names.has('sync_id')) {
+          await db.execute(`ALTER TABLE ${table} ADD COLUMN sync_id TEXT`)
+        }
+        if (!names.has('updated_at')) {
+          await db.execute(`ALTER TABLE ${table} ADD COLUMN updated_at TEXT`)
+        }
+      }
+      for (const table of ['wrong_stats']) {
+        const syncColumns = await db.query(`PRAGMA table_info(${table})`)
+        const names = new Set((syncColumns.values || []).map(column => column.name))
+        if (!names.has('updated_at')) {
+          await db.execute(`ALTER TABLE ${table} ADD COLUMN updated_at TEXT`)
+        }
+      }
+      // LAN sync stable keys: backfill sync_id / updated_at for rows that
+      // predate the sync columns, so incremental comparisons and deletes work.
+      for (const table of [
+        'practice_sessions',
+        'practice_answers',
+        'practice_answer_events',
+        'practice_unit_submissions',
+        'wrong_retry_rounds',
+        'wrong_retry_round_questions',
+        'wrong_current_questions',
+        'vocabulary_occurrences',
+        'vocabulary_reviews',
+      ]) {
+        await db.run(
+          `UPDATE ${table} SET sync_id = lower(hex(randomblob(16))) WHERE sync_id IS NULL OR sync_id = ''`,
+          [],
+          false,
+        )
+        await db.run(
+          `UPDATE ${table} SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL OR updated_at = ''`,
+          [],
+          false,
+        )
+      }
+      await db.run(
+        `UPDATE wrong_stats SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL OR updated_at = ''`,
+        [],
+        false,
+      )
+      await runLearningHistoryRebindV1(db)
+      await runLearningHistoryRebindV2(db)
+      await runLearningHistoryRebindV3(db)
+      await repairLearningHistoryRebindDrift(db)
       return db
     })()
   }

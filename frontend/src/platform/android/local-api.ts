@@ -22,6 +22,8 @@ import {
   updateQuestionLabel,
 } from './question-labeling'
 import { queueAndStartVocabularyTranslations } from './vocabulary-translation-runner'
+import { lanSyncStatus, tombstoneVocabularyEntry, tombstoneWrongUnit, updateLanSyncSettings } from './lan-sync'
+import { notifyLocalChange, refreshSyncState, syncNow } from './sync-scheduler'
 import {
   activateQuestionBankProfile,
   createQuestionBankProfile,
@@ -62,7 +64,13 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (method === 'GET' && pathname === '/startup') return await dashboard() as T
   if (method === 'GET' && pathname === '/papers') return await listPapers() as T
   if (method === 'GET' && pathname === '/wrong') return await listWrong(url.searchParams.get('view') || 'current') as T
-  if (method === 'POST' && pathname === '/wrong/archive-delete') return await archiveWrongUnits(body?.unit_ids || []) as T
+  if (method === 'POST' && pathname === '/wrong/archive-delete') {
+    const unitIds = (body?.unit_ids || []).map(Number).filter(Boolean)
+    for (const unitId of unitIds) await tombstoneWrongUnit(unitId)
+    const result = await archiveWrongUnits(unitIds)
+    notifyLocalChange()
+    return result as T
+  }
   if (method === 'GET' && pathname === '/question-bank-profiles') {
     return await listQuestionBankProfiles() as T
   }
@@ -84,22 +92,32 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (params && method === 'DELETE') return await purgeTrash(Number(params[1])) as T
 
   if (method === 'POST' && pathname === '/practice/sessions') {
-    return await createSession(body!) as T
+    const result = await createSession(body!)
+    notifyLocalChange()
+    return result as T
   }
   params = match(pathname, /^\/practice\/sessions\/(\d+)$/)
   if (params && method === 'GET') return await getSession(Number(params[1])) as T
   params = match(pathname, /^\/practice\/sessions\/(\d+)\/answers\/(\d+)$/)
   if (params && method === 'PUT') {
-    return await saveAnswer(Number(params[1]), Number(params[2]), body!) as T
+    const result = await saveAnswer(Number(params[1]), Number(params[2]), body!)
+    notifyLocalChange()
+    return result as T
   }
   params = match(pathname, /^\/practice\/sessions\/(\d+)\/units\/(\d+)\/submit$/)
   if (params && method === 'POST') {
-    return await submitUnit(Number(params[1]), Number(params[2])) as T
+    const result = await submitUnit(Number(params[1]), Number(params[2]))
+    notifyLocalChange()
+    return result as T
   }
   params = match(pathname, /^\/practice\/sessions\/(\d+)\/abandon-if-empty$/)
   if (params && method === 'POST') return await abandonIfEmpty(Number(params[1])) as T
   params = match(pathname, /^\/practice\/sessions\/(\d+)\/submit$/)
-  if (params && method === 'POST') return await submitSession(Number(params[1])) as T
+  if (params && method === 'POST') {
+    const result = await submitSession(Number(params[1]))
+    notifyLocalChange()
+    return result as T
+  }
 
   if (pathname === '/question-banks/imports' && method === 'GET') {
     return await listEsqImports() as T
@@ -136,7 +154,11 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (pathname === '/vocabulary' && method === 'GET') {
     return await listVocabulary(url.searchParams) as T
   }
-  if (pathname === '/vocabulary' && method === 'POST') return await addVocabulary(body!) as T
+  if (pathname === '/vocabulary' && method === 'POST') {
+    const result = await addVocabulary(body!)
+    notifyLocalChange()
+    return result as T
+  }
   if (pathname === '/vocabulary/home' && method === 'GET') {
     return await homeVocabulary(Number(url.searchParams.get('limit') || 20)) as T
   }
@@ -157,16 +179,47 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   }
   params = match(pathname, /^\/vocabulary\/(\d+)$/)
   if (params && method === 'GET') return await serializeEntry(Number(params[1])) as T
-  if (params && method === 'PUT') return await updateVocabulary(Number(params[1]), body!) as T
-  if (params && method === 'DELETE') return await deleteVocabulary(Number(params[1])) as T
+  if (params && method === 'PUT') {
+    const result = await updateVocabulary(Number(params[1]), body!)
+    notifyLocalChange()
+    return result as T
+  }
+  if (params && method === 'DELETE') {
+    const id = Number(params[1])
+    await tombstoneVocabularyEntry(id)
+    const result = await deleteVocabulary(id)
+    notifyLocalChange()
+    return result as T
+  }
   params = match(pathname, /^\/vocabulary\/(\d+)\/retry$/)
   if (params && method === 'POST') {
     const id = Number(params[1])
     await retryVocabulary(id)
-    return await queueAndStartVocabularyTranslations([id]) as T
+    const result = await queueAndStartVocabularyTranslations([id])
+    notifyLocalChange()
+    return result as T
   }
   params = match(pathname, /^\/vocabulary\/(\d+)\/review$/)
-  if (params && method === 'POST') return await reviewVocabulary(Number(params[1]), body?.rating, body?.mode) as T
+  if (params && method === 'POST') {
+    const result = await reviewVocabulary(Number(params[1]), body?.rating, body?.mode)
+    notifyLocalChange()
+    return result as T
+  }
+
+  if (pathname === '/android/lan-sync/status' && method === 'GET') {
+    return { ...(await lanSyncStatus()), runtime: await refreshSyncState() } as T
+  }
+  if (pathname === '/android/lan-sync/settings' && method === 'PUT') {
+    const result = await updateLanSyncSettings({
+      lan_sync_host: body?.host,
+      lan_sync_passcode: body?.passcode,
+      lan_sync_auto: body?.auto ? '1' : '0',
+    })
+    return { ...result, runtime: await refreshSyncState() } as T
+  }
+  if (pathname === '/android/lan-sync/run' && method === 'POST') {
+    return await syncNow() as T
+  }
 
   if (pathname === '/ai/profiles' && method === 'GET') return await listProfiles() as T
   if (pathname === '/ai/profiles' && method === 'POST') return await createProfile(body!) as T
@@ -221,7 +274,7 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
       try {
         return await labelNextUnit(body || {}) as T
       } catch (error) {
-        try { await failLabelRun(String(body?.run_id || ''), error) } catch { /* Preserve the original model error. */ }
+        try { await failLabelRun(String(body?.run_id || ''), error) } catch { /* 状态记录失败时保留原始模型错误 */ }
         throw error
       }
     }

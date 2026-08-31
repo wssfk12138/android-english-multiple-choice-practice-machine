@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import {
   Check, FileArchive, FileCheck2, FileKey2, FileUp, Lock, Pause,
-  Play, RefreshCw, Save, Search, Settings, Sparkles, Trash2,
+  Play, RefreshCw, Save, Search, Settings, Sparkles, Trash2, X,
 } from 'lucide-vue-next'
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, del, get, patch, post, put } from '../api'
 import QuestionBankSwitcher from '../components/QuestionBankSwitcher.vue'
@@ -37,6 +37,8 @@ const importConfirmOpen = ref(false)
 const busy = ref(false)
 const uploadStage = ref('')
 const publishStage = ref('')
+const publishSeconds = ref(0)
+let publishTimer: number | null = null
 const error = ref('')
 const notice = ref('')
 const expandedUnits = ref<Record<number, boolean>>({})
@@ -87,6 +89,11 @@ onMounted(async () => {
     const remoteId = Number(route.query.esqImportId || 0)
     if (remoteId) await openEsqJob(remoteId)
   } catch (cause) { error.value = String(cause) }
+})
+
+onUnmounted(() => {
+  if (publishTimer !== null) window.clearInterval(publishTimer)
+  publishTimer = null
 })
 
 async function handleProfileChanged() {
@@ -247,6 +254,19 @@ async function retryWithSelectedModel() {
   await retryModelAssist(Number(profileId), modelParts.join('::'))
 }
 
+function startPublishStage(stage: string) {
+  publishStage.value = stage
+  publishSeconds.value = 0
+  if (publishTimer !== null) window.clearInterval(publishTimer)
+  publishTimer = window.setInterval(() => { publishSeconds.value += 1 }, 1000)
+}
+
+function stopPublishStage() {
+  if (publishTimer !== null) window.clearInterval(publishTimer)
+  publishTimer = null
+  publishStage.value = ''
+}
+
 async function publishDocument() {
   if (!current.value) return
   await saveDraft(false)
@@ -256,7 +276,7 @@ async function publishDocument() {
   }
   if (!confirm(`确认发布 ${current.value.draft.year} 年题库吗？`)) return
   busy.value = true
-  publishStage.value = '正在发布题库…'
+  startPublishStage('正在发布题库…')
   try {
     const result: any = await post(`/imports/${current.value.id}/publish`)
     notice.value = `题库已入库，共 ${result.question_count} 道客观题`
@@ -269,7 +289,7 @@ async function publishDocument() {
       questionBankProfileId: targetProfileId.value,
     })
   } catch (cause) { error.value = String(cause) }
-  finally { busy.value = false; publishStage.value = '' }
+  finally { busy.value = false; stopPublishStage() }
 }
 
 async function promptLabeling(scope: LabelScope) {
@@ -340,6 +360,12 @@ async function openEsqJob(id: number) {
   esqResolutions.value = {}
 }
 
+function closeEsqPreview() {
+  esqCurrent.value = null
+  esqResolutions.value = {}
+  error.value = ''
+}
+
 async function publishEsq() {
   if (!esqCurrent.value || busy.value) return
   const conflicts = esqCurrent.value?.preview?.conflicts?.filter((item: any) => item.existing) || []
@@ -350,7 +376,7 @@ async function publishEsq() {
   const resolutions = Object.entries(esqResolutions.value)
     .map(([paper_key, action]) => ({ paper_key, action }))
   busy.value = true
-  publishStage.value = '正在发布 ESQ 题库包…'
+  startPublishStage('正在发布 ESQ 题库包…')
   try {
     const result: any = await post(`/question-banks/imports/${esqCurrent.value.id}/publish`, { resolutions })
     notice.value = 'ESQ 题库包已发布'
@@ -359,7 +385,7 @@ async function publishEsq() {
       await promptLabeling({ kind: 'papers', title: esqCurrent.value.preview.title, year: null, paperIds: result.paper_ids, questionBankProfileId: targetProfileId.value })
     }
   } catch (cause) { error.value = String(cause) }
-  finally { busy.value = false; publishStage.value = '' }
+  finally { busy.value = false; stopPublishStage() }
 }
 
 async function removeImportJob(job: any, esq = false) {
@@ -382,7 +408,6 @@ async function removeImportJob(job: any, esq = false) {
     <div class="page-head">
       <div>
         <h1>导入题库</h1>
-        <p class="lead">Word/PDF 提取、模型辅助校对、逐字段审核、批准入库与智能标注在一个页面完成。</p>
       </div>
       <button class="button secondary" type="button" @click="promptLabeling({kind:'all',title:'全部题库',year:null,paperIds:[],questionBankProfileId:targetProfileId})">
         <Sparkles :size="17" />智能标注中心
@@ -393,7 +418,7 @@ async function removeImportJob(job: any, esq = false) {
     <div v-if="error" class="warning" role="alert">{{ error }}</div>
     <div v-if="notice" class="success-note" aria-live="polite">{{ notice }}</div>
     <div v-if="uploadStage" class="import-progress" role="status"><RefreshCw class="spin" :size="18" />{{ uploadStage }}</div>
-    <div v-if="publishStage" class="import-publish-toast" role="status" aria-live="polite"><RefreshCw class="spin" :size="17" /><span>{{ publishStage }}</span></div>
+    <div v-if="publishStage" class="import-publish-toast" role="status" aria-live="polite"><RefreshCw class="spin" :size="17" /><span><b>{{ publishStage }}</b><small>{{ publishSeconds < 5 ? '大题库包发布可能需要数分钟，请保持本页开启。' : '已进行 ' + publishSeconds + ' 秒；大题库包发布可能需要数分钟，请保持本页开启。' }}</small></span></div>
 
     <section class="import-source-grid">
       <article class="card import-source-card">
@@ -425,7 +450,7 @@ async function removeImportJob(job: any, esq = false) {
     </section>
 
     <section v-if="esqCurrent" class="card review-card">
-      <div class="review-head"><div><span class="pill">ESQ 1.0</span><h2>{{ esqCurrent.preview.title }}</h2><p>{{ esqCurrent.preview.totals.questions }} 道题 · {{ esqCurrent.preview.totals.units }} 篇</p></div><button class="button" :disabled="busy" @click="publishEsq"><FileCheck2 :size="17" />发布题库包</button></div>
+      <div class="review-head"><div><span class="pill">ESQ 1.0</span><h2>{{ esqCurrent.preview.title }}</h2><p>{{ esqCurrent.preview.totals.questions }} 道题 · {{ esqCurrent.preview.totals.units }} 篇</p></div><div class="review-actions"><button class="button" :disabled="busy" @click="publishEsq"><FileCheck2 :size="17" />发布题库包</button><button class="button secondary" type="button" :disabled="busy" @click="closeEsqPreview"><X :size="17" />关闭预览</button></div></div>
       <div v-for="conflict in esqCurrent.preview.conflicts.filter((item:any)=>item.existing)" :key="conflict.paperKey" class="conflict-row">
         <b>{{ conflict.year }} 年已存在</b>
         <label><input v-model="esqResolutions[conflict.paperKey]" type="radio" value="keep_existing">保留现有</label>

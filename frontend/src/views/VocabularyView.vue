@@ -46,7 +46,7 @@ const expandedAll = ref(false)
 
 function isAndroidPortrait() {
   return document.documentElement.dataset.platform === 'android'
-    && window.matchMedia('(orientation: portrait) and (max-width: 840px)').matches
+    && document.documentElement.dataset.orientation === 'portrait'
 }
 
 function translationStatusText(status: string, detail = false) {
@@ -204,7 +204,7 @@ onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
 <template>
   <div class="page vocabulary-page">
     <div class="page-head">
-      <div><h1>我的单词本</h1><p class="lead">从真题语境中收集、理解并复习真正困扰你的词。</p></div>
+      <div><h1>我的单词本</h1></div>
       <div style="display:flex;gap:8px;align-items:center">
         <button class="button" @click="startReview"><BookOpen :size="17" />今日到期 {{ counts.review || 0 }}</button>
       </div>
@@ -226,8 +226,8 @@ onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
       </div>
     </section>
 
-    <section v-if="reviewMode" class="review-overlay">
-      <div class="review-card" v-if="reviewWord">
+    <section v-if="reviewMode" class="review-overlay vocabulary-review-overlay">
+      <div v-if="reviewWord" class="review-card vocabulary-review-card" data-review-fullscreen>
         <header class="review-header">
           <strong>{{ reviewKind === 'scheduled' ? '到期复习' : '额外巩固' }} <span>{{ String(reviewIndex + 1).padStart(2, '0') }} / {{ String(reviewItems.length).padStart(2, '0') }}</span></strong>
           <button class="review-close" type="button" title="退出复习" aria-label="退出复习" @click="reviewMode=false">×</button>
@@ -279,7 +279,7 @@ onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
           </button>
           <section v-if="selected?.id===word.id" class="portrait-vocab-detail" aria-label="单词详情">
             <div class="vocab-detail-head">
-              <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2>{{ selected.lemma || selected.term }}</h2><p>{{ selected.phonetic }} <span v-if="selected.part_of_speech">· {{ selected.part_of_speech }}</span></p></div>
+              <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2>{{ selected.lemma || selected.term }}</h2><p>{{ selected.phonetic }}<span v-if="selected.part_of_speech">{{ selected.phonetic ? ' · ' : '' }}{{ selected.part_of_speech }}</span></p></div>
               <div class="vocab-tools"><button class="button ghost" @click="expandedAll=!expandedAll">{{ expandedAll ? '收起' : '展开全部' }}</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" aria-label="删除单词" @click="removeEntry"><Trash2 :size="17" /></button></div>
             </div>
             <div v-if="selected.translation_status!=='ready'" class="vocab-pending-panel">
@@ -305,7 +305,7 @@ onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
 
       <section class="vocab-detail desktop-vocab-detail card" v-if="selected">
         <div class="vocab-detail-head">
-          <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2>{{ selected.lemma || selected.term }}</h2><p>{{ selected.phonetic }} <span v-if="selected.part_of_speech">· {{ selected.part_of_speech }}</span></p></div>
+          <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2>{{ selected.lemma || selected.term }}</h2><p>{{ selected.phonetic }}<span v-if="selected.part_of_speech">{{ selected.phonetic ? ' · ' : '' }}{{ selected.part_of_speech }}</span></p></div>
           <div class="vocab-tools"><button class="button ghost" @click="expandedAll=!expandedAll">{{ expandedAll ? '收起全部' : '展开全部' }}</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" @click="removeEntry"><Trash2 :size="17" /></button></div>
         </div>
         <div v-if="selected.translation_status!=='ready'" class="vocab-pending-panel">

@@ -248,7 +248,7 @@ async function archive(unitIds: number[]) {
 <template>
   <div class="page wrong-page">
     <div class="page-head wrong-head">
-      <div><h1>错题本</h1><p class="lead">正式重做会留下快照，并让当前错题只保留仍未掌握的部分。</p></div>
+      <div><h1>错题本</h1></div>
       <div class="wrong-head-actions">
         <button v-if="!selecting" class="button secondary compact" type="button" @click="selecting = true"><CheckSquare :size="16" />批量删除</button>
         <template v-else>

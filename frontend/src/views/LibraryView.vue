@@ -46,7 +46,7 @@ async function restartPaper(id: number) {
 }
 
 function scoreText(paper: any) {
-  const fmt = (value: number) => Number.isInteger(value) ? String(value) : value.toFixed(1)
+  const fmt = (value: number) => (Number.isFinite(value) && Number.isInteger(value) ? String(value) : value.toFixed(1))
   return `${fmt(Number(paper.last_score) || 0)}/${fmt(Number(paper.last_max_score) || 0)}`
 }
 
@@ -138,12 +138,11 @@ async function deleteSelected() {
         @click="togglePaper(paper.id)"
       >
         <div class="paper-card-head"><span v-if="paper.active_session_id" class="pill">进行中 · 已做 {{ paper.active_done }}/{{ paper.unit_count }} 篇</span><span v-else-if="paper.last_score != null" class="pill">{{ scoreText(paper) }}</span><span v-else></span><BookOpen :size="20" /></div>
-        <h2 class="paper-year">{{ paper.year }}</h2>
         <h3>{{ paper.title }}</h3>
         <p class="lead">{{ paper.subject }} · {{ paper.unit_count }}篇 · {{ paper.question_count }}题</p>
         <div class="paper-actions">
-          <button class="button" style="flex:1" :disabled="paper.status !== 'published' || batchMode" @click.stop="startPaper(paper.id)"><Play :size="16" />{{ paper.active_session_id ? '继续练习' : '开始整卷' }}</button>
-          <button v-if="paper.active_session_id" class="button ghost" :disabled="batchMode" @click.stop="restartPaper(paper.id)">重新开始</button>
+          <button class="button paper-primary-action" :disabled="paper.status !== 'published' || batchMode" @click.stop="startPaper(paper.id)"><Play :size="16" />{{ paper.active_session_id ? '继续练习' : '开始整卷' }}</button>
+          <button v-if="paper.active_session_id" class="button ghost paper-restart-action" :disabled="batchMode" @click.stop="restartPaper(paper.id)">重新开始</button>
         </div>
       </article>
     </div>

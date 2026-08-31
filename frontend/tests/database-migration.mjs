@@ -104,6 +104,19 @@ assert.ok(
   'profile indexes must be created only after legacy profile columns are added',
 )
 
+const learningHistoryMigration = source.indexOf('await runLearningHistoryRebindV1(db)')
+const learningHistoryV3Migration = source.indexOf('await runLearningHistoryRebindV3(db)', learningHistoryMigration)
+const learningHistoryDriftRepair = source.indexOf('await repairLearningHistoryRebindDrift(db)', learningHistoryV3Migration)
+assert.ok(learningHistoryV3Migration > learningHistoryMigration,
+  'v3 history repair must run after the earlier startup migrations')
+assert.ok(learningHistoryDriftRepair > learningHistoryV3Migration,
+  'repeatable history drift repair must run after one-time migrations')
+const syncBackfill = source.indexOf('UPDATE wrong_stats SET updated_at = CURRENT_TIMESTAMP')
+assert.ok(
+  learningHistoryMigration > syncBackfill,
+  'learning history rebind must run after LAN sync columns and stable IDs are backfilled',
+)
+
 const transactionStart = source.indexOf('export async function transaction')
 const startedGuard = source.indexOf('let started = false', transactionStart)
 const beginTransaction = source.indexOf('await db.beginTransaction()', startedGuard)
@@ -132,6 +145,26 @@ assert.match(
   dashboard,
   /addEventListener\('android-startup-prepared', reloadAfterAndroidStartup\)/,
   'the dashboard must reload after first-run bundled-bank installation finishes',
+)
+
+const questionBank = readFileSync(
+  fileURLToPath(new URL('../src/platform/android/question-bank.ts', import.meta.url)),
+  'utf8',
+)
+assert.match(
+  questionBank,
+  /status = 'published', deleted_at = NULL, updated_at = CURRENT_TIMESTAMP/,
+  'updating a reused paper must restore its active state',
+)
+assert.match(
+  questionBank,
+  /!activeMatches.length && deletedMatches.length > 1/,
+  'multiple deleted papers with the same stable key must be rejected as ambiguous',
+)
+assert.match(
+  questionBank,
+  /resource_type = 'paper' AND resource_id = \? AND restored_at IS NULL/,
+  'reimporting the unique deleted paper must close its trash entry',
 )
 assert.match(
   dashboard,

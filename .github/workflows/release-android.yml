@@ -12,10 +12,10 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release 标签（例如 v0.1.0-beta.4）"
+        description: "Release 标签（例如 v0.1.0-beta.5）"
         required: true
       version_name:
-        description: "versionName（例如 0.1.0-beta.4）"
+        description: "versionName（例如 0.1.0-beta.5）"
         required: true
       version_code:
         description: "versionCode（必须大于所有已发布版本）"
@@ -66,7 +66,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22.14.0"
 
       - uses: actions/setup-java@v4
         with:

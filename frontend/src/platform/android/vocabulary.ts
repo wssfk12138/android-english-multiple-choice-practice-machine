@@ -174,8 +174,8 @@ export async function addVocabulary(body: JsonRecord): Promise<JsonRecord> {
     )
   } else {
     const created = await run(
-      `INSERT INTO vocabulary_entries (term, normalized_term, translation_status)
-       VALUES (?, ?, 'pending')`,
+      `INSERT INTO vocabulary_entries (term, normalized_term, translation_status, updated_at)
+       VALUES (?, ?, 'pending', CURRENT_TIMESTAMP)`,
       [term, normalized],
     )
     id = Number(created.lastId)
@@ -183,8 +183,8 @@ export async function addVocabulary(body: JsonRecord): Promise<JsonRecord> {
   await run(
     `INSERT INTO vocabulary_occurrences
       (entry_id, surface_form, context_sentence, context_before, context_after,
-       unit_id, question_id, year, unit_title, unit_type)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       unit_id, question_id, year, unit_title, unit_type, sync_id, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
     [
       id,
       term,
@@ -315,7 +315,7 @@ export async function reviewVocabulary(id: number, rating: string, mode = 'sched
   const now = new Date()
   if (mode === 'reinforcement') {
     await run(
-      "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at) VALUES (?, ?, 'reinforcement', ?)",
+      "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, 'reinforcement', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)",
       [id, rating, now.toISOString()],
     )
     return serializeEntry(id)
@@ -330,7 +330,7 @@ export async function reviewVocabulary(id: number, rating: string, mode = 'sched
     [stage, rating, rating === 'fluent' ? 'mastered' : 'learning', rating === 'again' ? 1 : 0, now.toISOString(), next, id],
   )
   await run(
-    "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at) VALUES (?, ?, 'scheduled', ?)",
+    "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, 'scheduled', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)",
     [id, rating, next],
   )
   return serializeEntry(id)
