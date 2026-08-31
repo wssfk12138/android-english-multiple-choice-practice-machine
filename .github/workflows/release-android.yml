@@ -90,7 +90,8 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         working-directory: frontend/android
         run: |
-          echo "$ANDROID_KEYSTORE_B64" | base64 -d > release-ci.jks
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > app/release-ci.jks
+          test -s app/release-ci.jks
           {
             echo "storeFile=release-ci.jks"
             echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
