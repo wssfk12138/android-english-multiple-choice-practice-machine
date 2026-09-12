@@ -1,0 +1,192 @@
+import assert from 'node:assert/strict'
+import { readFile, mkdir, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { createServer } from 'vite'
+import vue from '@vitejs/plugin-vue'
+
+const require = createRequire(import.meta.url)
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
+const root = fileURLToPath(new URL('../', import.meta.url))
+const output = process.env.VOCAB_LAYOUT_OUTPUT
+if (output) await mkdir(output, { recursive: true })
+const stylesOverride = process.env.VOCAB_LAYOUT_STYLES
+  ? await readFile(process.env.VOCAB_LAYOUT_STYLES, 'utf8') : null
+const themeOverride = process.env.VOCAB_LAYOUT_THEME
+  ? await readFile(process.env.VOCAB_LAYOUT_THEME, 'utf8') : null
+const longWord = 'interdisciplinary'
+const veryLongWord = 'pneumonoultramicroscopicsilicovolcanoconiosis'
+
+function fixture() {
+  localStorage.setItem('linjian-android-onboarding-v1', 'done')
+  const sentence = 'Researchers compare evidence and revise their explanations when new observations become available. '
+  const words = ['evidence', 'interdisciplinary', 'pneumonoultramicroscopicsilicovolcanoconiosis'].map((term, index) => ({
+    id: index + 1, term, translation_status: 'ready', study_status: 'learning', encounter_count: index + 2,
+    phonetic: '/synthetic/', part_of_speech: 'n.', common_meaning: 'Synthetic definition',
+    contextual_meaning: 'Synthetic contextual meaning', latest_sentence: sentence,
+    occurrences: [{ id: index + 1, context_sentence: sentence, year: 2026, unit_title: 'Synthetic reading' }],
+  }))
+  globalThis.fixtureWords = words
+  globalThis.mockApi = async (path, body) => {
+    if (path === '/vocabulary/translation-runs') return { workerStarted: false }
+    if (path.startsWith('/vocabulary?')) return { items: words, counts: { total: 3, frequent: 0, mastered: 0, pending: 0, review: 3 } }
+    const match = path.match(/^\/vocabulary\/(\d+)(?:\/review)?$/)
+    if (match) {
+      const word = words.find(word => word.id === Number(match[1]))
+      return body ? Object.assign(word, body) : { ...word }
+    }
+    throw new Error('Unexpected synthetic API: ' + path)
+  }
+}
+const stubs = {
+  api: 'export const get=(p)=>globalThis.mockApi(p);export const post=(p,b)=>globalThis.mockApi(p,b);export const put=post;export const del=post;',
+  router: 'export const route={path:"/vocabulary",query:{}};export const useRoute=()=>route;export const useRouter=()=>({push:async()=>{},replace:async()=>{}});',
+  runtime: 'export const platformRuntime={isAndroid:true};',
+  update: 'export const pendingInstallerCleanup=async()=>({pending:false});export const resolveInstallerCleanup=async()=>{};',
+  native: 'export const App={addListener:async()=>({remove:()=>{}})};',
+  translations: 'export const resumeVocabularyTranslations=()=>{};',
+  scheduler: 'export const startAutoSync=()=>{};export const stopAutoSync=()=>{};',
+}
+const entry = '(' + fixture.toString() + ')();' +
+  'import {createApp,h} from "vue";import App from "/src/App.vue";import View from "/src/views/VocabularyView.vue";' +
+  'import "/src/styles.css";import "/src/study-theme.css";' +
+  'const app=createApp(App);app.component("RouterView",View);app.component("RouterLink",{props:["to"],setup:(p,{slots})=>()=>h("a",{href:p.to,class:p.to==="/vocabulary"?"router-link-active":""},slots.default())});app.mount("#app");'
+const server = await createServer({ configFile: false, root, optimizeDeps: { noDiscovery: true, include: ['vue', 'lucide-vue-next'] }, plugins: [
+  { name: 'isolated-vocabulary-layout', enforce: 'pre',
+    resolveId(id) {
+      if (id === 'virtual:vocabulary-layout') return id
+      if (id === 'vue-router') return 'virtual:stub:router'
+      if (id === '../api' || id === './api') return 'virtual:stub:api'
+      if (id === './platform/runtime') return 'virtual:stub:runtime'
+      if (id.endsWith('/android/app-update')) return 'virtual:stub:update'
+      if (id === '@capacitor/app') return 'virtual:stub:native'
+      if (id.endsWith('/android/vocabulary-translation-runner')) return 'virtual:stub:translations'
+      if (id.endsWith('/android/sync-scheduler')) return 'virtual:stub:scheduler'
+    },
+    load(id) {
+      if (id === 'virtual:vocabulary-layout') return entry
+      if (id.startsWith('virtual:stub:')) return stubs[id.slice(13)]
+      if (stylesOverride !== null && id.replaceAll('\\', '/').endsWith('/src/styles.css')) return stylesOverride
+      if (themeOverride !== null && id.replaceAll('\\', '/').endsWith('/src/study-theme.css')) return themeOverride
+    },
+    configureServer(server) { server.middlewares.use((req, res, next) => {
+      if (req.url !== '/__vocabulary-layout') return next()
+      res.setHeader('Content-Type', 'text/html; charset=utf-8')
+      res.end('<!doctype html><html data-platform="android"><meta name="viewport" content="width=device-width, initial-scale=1"><body><div id="app"></div><script type="module" src="/@id/virtual:vocabulary-layout"></script></body></html>')
+    }) },
+  }, vue()], server: { host: '127.0.0.1', port: 0 } })
+
+async function inspectDetail(page) {
+  return page.evaluate(() => {
+    const root = [...document.querySelectorAll('.desktop-vocab-detail, .portrait-vocab-detail')]
+      .find(element => element.getBoundingClientRect().width > 0)
+    const box = element => { const r=element.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height} }
+    const header = root.querySelector('.vocab-detail-head')
+    const title = header.querySelector('h2')
+    const tools = header.querySelector('.vocab-tools')
+    const padding = parseFloat(getComputedStyle(root).paddingRight)
+    const layout = document.querySelector('.vocabulary-layout')
+    return {
+      card:box(root),header:box(header),title:box(title),tools:box(tools),padding,
+      buttons:[...tools.querySelectorAll('button')].map(box),
+      scrollWidth:root.scrollWidth,clientWidth:root.clientWidth,
+      layout:box(layout),columns:getComputedStyle(layout).gridTemplateColumns,
+      theme:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
+      orientation:document.documentElement.dataset.orientation,
+    }
+  })
+}
+async function inspectReview(page) {
+  return page.evaluate(() => {
+    const box = selector => { const element=document.querySelector(selector);if(!element)return null;const r=element.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height} }
+    const content=document.querySelector('.review-content')
+    return {card:box('.vocabulary-review-card'),term:box('.review-term'),header:box('.review-header'),actions:box('.review-actions'),close:box('.review-close'),content:box('.review-content'),scrollHeight:content.scrollHeight,clientHeight:content.clientHeight}
+  })
+}
+let browser
+const evidence=[]
+let cases=0
+try {
+  await server.listen()
+  browser=await chromium.launch({headless:true})
+  for (const [width,height] of [[1280,800],[1120,700],[960,600],[800,1280]]) for (const dark of [false,true]) {
+    const page=await browser.newPage({viewport:{width,height},colorScheme:dark?'dark':'light'})
+    const errors=[]
+    page.on('pageerror',error=>errors.push(error.message))
+    await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.abort())
+    await page.addInitScript(()=>Object.defineProperty(screen.orientation,'type',{get:()=>innerHeight>innerWidth?'portrait-primary':'landscape-primary'}))
+    await page.goto(server.resolvedUrls.local[0]+'__vocabulary-layout')
+    await page.locator('.vocab-list-item').first().waitFor()
+    const label=width+'x'+height+'-'+(dark?'dark':'light')
+    for (const word of ['evidence',longWord,veryLongWord]) {
+      if (word!=='evidence') await page.locator('.vocab-list-item').filter({hasText:word}).click()
+      await page.locator('.vocab-detail-head h2:visible').scrollIntoViewIfNeeded()
+      const measured=await inspectDetail(page)
+      evidence.push({label,word,...measured})
+      if(output) await page.screenshot({path:join(output,label+'-'+word+'.png')})
+      assert.equal(measured.theme,dark?'#191b20':'#edf2f6')
+      assert.ok(measured.tools.right <= measured.card.right-measured.padding+1, JSON.stringify({label,word,reason:'tools outside detail content',...measured}))
+      assert.ok(measured.scrollWidth <= measured.clientWidth+1, JSON.stringify({label,word,reason:'detail horizontal overflow',...measured}))
+      assert.ok(measured.title.right <= measured.card.right-measured.padding+1)
+      assert.ok(measured.title.bottom <= measured.tools.top+1 || measured.title.right <= measured.tools.left+1, 'word and tools must not overlap')
+      if(width===1280&&word==='evidence') assert.ok(measured.tools.top < measured.title.bottom, 'short-word header retains its existing single row')
+      if((width===1120||width===960)&&word==='evidence') assert.ok(measured.card.top>measured.layout.top+100, 'legacy narrow-window detail placement remains unchanged')
+      const visibleDetail=page.locator('.desktop-vocab-detail:visible, .portrait-vocab-detail:visible')
+      await visibleDetail.getByRole('button',{name:'编辑',exact:true}).click()
+      await visibleDetail.locator('.vocab-edit').waitFor()
+      await visibleDetail.getByRole('button',{name:'取消',exact:true}).click()
+      cases++
+    }
+    await page.locator('.page-head button').click()
+    for (const state of ['hidden','revealed']) {
+      if(state==='revealed') await page.locator('.reveal-button').click()
+      const measured=await inspectReview(page)
+      evidence.push({label,state,...measured})
+      if(output) await page.screenshot({path:join(output,label+'-compact-'+state+'.png')})
+      if(width>height) {
+        assert.ok(measured.card.width<=720, 'landscape review uses desktop card width')
+        assert.ok(measured.card.top>=16&&measured.card.bottom<=height-16, 'review leaves space around its border')
+        assert.ok(Math.abs(measured.card.left-(width-measured.card.width)/2)<2, 'review card is centered')
+        if(state==='hidden') {
+          assert.ok(measured.card.height>=480 && measured.card.height<=520, 'unrevealed card retains desktop recall proportions')
+          assert.ok(measured.term.top-measured.header.bottom>=60, 'word has breathing room below the header')
+          const recallGap=await page.locator('.reveal-button').evaluate(button=>button.getBoundingClientRect().top-document.querySelector('.review-phonetic').getBoundingClientRect().bottom)
+          assert.ok(recallGap>=79 && recallGap<=81, 'recall button uses desktop spacing')
+        }
+        else assert.ok(measured.actions.top-measured.content.bottom<=12, 'rating follows the answer without unused vertical space')
+      }
+      cases++
+    }
+    await page.getByRole('button',{name:'退出复习',exact:true}).click()
+    await page.evaluate(()=>{
+      fixtureWords[0].common_meaning='Synthetic long definition for layout regression. '.repeat(80)
+      fixtureWords[0].latest_sentence=fixtureWords[0].latest_sentence.repeat(30)
+    })
+    for (const kind of ['scheduled','reinforcement']) {
+      if(kind==='scheduled') await page.locator('.page-head button').click()
+      else await page.locator('.vocab-reinforcement-actions button').first().click()
+      await page.locator('.reveal-button').click()
+      const measured=await inspectReview(page)
+      evidence.push({label,kind,...measured})
+      if(output) await page.screenshot({path:join(output,label+'-'+kind+'.png')})
+      assert.ok(measured.card.top>=-1&&measured.card.bottom<=height+1)
+      assert.ok(measured.actions.top>=0&&measured.actions.bottom<=height+1)
+      assert.ok(measured.close.top>=0&&measured.close.bottom<=height+1)
+      assert.ok(measured.scrollHeight>measured.clientHeight, 'long answer scrolls inside review content')
+      await page.locator('.review-content').evaluate(element=>{element.scrollTop=element.scrollHeight})
+      assert.ok(await page.locator('.review-content').evaluate(element=>element.scrollTop>0))
+      await page.getByRole('button',{name:'退出复习',exact:true}).click()
+      await page.locator('.vocabulary-layout').waitFor()
+      cases++
+    }
+    assert.deepEqual(errors,[])
+    console.log(label+': word containment, edit reachability, theme and both scrolling review modes passed')
+    await page.close()
+  }
+  console.log('Vocabulary layout: '+cases+' scenarios passed')
+} finally {
+  if(output) await writeFile(join(output,'geometry.json'),JSON.stringify(evidence,null,2))
+  await browser?.close()
+  await server.close()
+}
