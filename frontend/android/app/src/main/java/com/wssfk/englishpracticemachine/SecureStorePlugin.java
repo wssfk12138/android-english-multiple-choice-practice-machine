@@ -28,6 +28,8 @@ public class SecureStorePlugin extends Plugin {
     private static final String KEY_ALIAS = "english-practice-machine-secure-store-v1";
     private static final String PREFS = "english_practice_secure_store";
     private static final String SEPARATOR = ":";
+    // SharedPreferences updates its cache even when a disk commit fails.
+    private static volatile boolean persistenceFailed;
 
     @Override
     public void load() {
@@ -64,9 +66,14 @@ public class SecureStorePlugin extends Plugin {
             return;
         }
         try {
-            preferences().edit().putString(key, encrypt(value)).apply();
+            if (!preferences().edit().putString(key, encrypt(value)).commit()) {
+                persistenceFailed = true;
+                call.reject("无法持久保存安全存储");
+                return;
+            }
             call.resolve();
         } catch (Exception error) {
+            persistenceFailed = true;
             call.reject("无法写入安全存储", error);
         }
     }
@@ -75,11 +82,24 @@ public class SecureStorePlugin extends Plugin {
     public void remove(PluginCall call) {
         String key = requiredKey(call);
         if (key == null) return;
-        preferences().edit().remove(key).apply();
-        call.resolve();
+        try {
+            if (!preferences().edit().remove(key).commit()) {
+                persistenceFailed = true;
+                call.reject("无法持久删除安全存储");
+                return;
+            }
+            call.resolve();
+        } catch (Exception error) {
+            persistenceFailed = true;
+            call.reject("无法删除安全存储", error);
+        }
     }
 
     private String requiredKey(PluginCall call) {
+        if (persistenceFailed) {
+            call.reject("安全存储持久化失败，请重启应用后重试");
+            return null;
+        }
         String key = call.getString("key");
         if (key == null || key.trim().isEmpty() || key.length() > 160) {
             call.reject("安全存储键无效");

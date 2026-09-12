@@ -19,8 +19,12 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -30,7 +34,198 @@ public class AppUpdaterPlugin extends Plugin {
     private static final String PENDING_FILE = "pending_installer_file";
     private static final String PENDING_VERSION_CODE = "pending_installer_version_code";
     private static final String PENDING_VERSION_NAME = "pending_installer_version_name";
+    private static final int QUESTION_BANK_READ_TIMEOUT_MS = 20 * 60 * 1000;
+    private static final long MIN_FREE_SPACE_BYTES = 64L * 1024L * 1024L;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final Map<String, File> pendingQuestionBankAssets = new ConcurrentHashMap<>();
+
+    @PluginMethod
+    public void downloadLanQuestionBank(PluginCall call) {
+        executor.execute(() -> {
+            File temporary = new File(getContext().getCacheDir(), "lan-esq-" + UUID.randomUUID() + ".part");
+            try {
+                Long size = readWholeNumber(call.getData().opt("expectedSize"));
+                JSObject tls = call.getObject("tls");
+                if (size == null || tls == null || !hasQuestionBankDownloadSpace(getContext().getCacheDir().getUsableSpace(), size)) {
+                    throw new IllegalArgumentException("Invalid request or insufficient storage");
+                }
+                String sha = call.getString("sha256", "");
+                LanTlsTrust trust = new LanTlsTrust(tls.optString("hostId"), tls.optString("certificatePem"), tls.optString("certificatePin"));
+                LanQuestionBankDownload.download(call.getString("url", ""), trust, call.getString("token", ""), sha, size, temporary);
+                EsqArchive.Extraction extracted = EsqArchive.extract(temporary, getContext().getFilesDir(), sha);
+                String cleanupToken = "";
+                if (extracted.createdDirectory != null) {
+                    cleanupToken = UUID.randomUUID().toString();
+                    pendingQuestionBankAssets.put(cleanupToken, extracted.createdDirectory);
+                }
+                JSObject result = new JSObject();
+                result.put("packageData", extracted.packageData.toString());
+                result.put("cleanupToken", cleanupToken);
+                call.resolve(result);
+            } catch (Exception error) {
+                call.reject("局域网题库下载失败，请检查共享权限、电脑身份、网络和可用空间", "LAN_BANK_DOWNLOAD_FAILED");
+            } finally {
+                cleanupTemporaryFile(temporary);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void downloadQuestionBank(PluginCall call) {
+        String url = call.getString("url");
+        String expectedHash = call.getString("sha256");
+        String requestedName = call.getString("fileName", "question-bank.esq");
+        Long expectedSize = readWholeNumber(call.getData().opt("expectedSize"));
+        if (url == null || expectedHash == null
+            || !expectedHash.matches("(?i)^[a-f0-9]{64}$")
+            || expectedSize == null || expectedSize < 1 || expectedSize > EsqArchive.MAX_ARCHIVE_BYTES) {
+            call.reject("题库下载参数无效");
+            return;
+        }
+        String sanitizedName = requestedName.replaceAll("[^A-Za-z0-9._-]", "_");
+        final String fileName = sanitizedName.toLowerCase(Locale.ROOT).endsWith(".esq")
+            ? sanitizedName : sanitizedName + ".esq";
+        executor.execute(() -> downloadQuestionBank(call, url, expectedHash, expectedSize, fileName));
+    }
+
+    static Long readWholeNumber(Object value) {
+        if (!(value instanceof Number)) return null;
+        Number number = (Number) value;
+        double asDouble = number.doubleValue();
+        long asLong = number.longValue();
+        if (!Double.isFinite(asDouble) || asDouble != (double) asLong) return null;
+        return asLong;
+    }
+
+    static boolean hasQuestionBankDownloadSpace(long usableSpace, long expectedSize) {
+        return expectedSize >= 1
+            && expectedSize <= EsqArchive.MAX_ARCHIVE_BYTES
+            && usableSpace >= expectedSize
+            && usableSpace - expectedSize >= MIN_FREE_SPACE_BYTES;
+    }
+
+    static boolean cleanupTemporaryFile(File temporary) {
+        try {
+            return Files.deleteIfExists(temporary.toPath()) || !temporary.exists();
+        } catch (Exception ignored) {
+            temporary.deleteOnExit();
+            return false;
+        }
+    }
+
+    private void downloadQuestionBank(
+        PluginCall call, String url, String expectedHash, long expectedSize, String fileName
+    ) {
+        File temporary = new File(getContext().getCacheDir(), "esq-" + System.nanoTime() + "-" + fileName);
+        HttpURLConnection connection = null;
+        try {
+            if (temporary.getParentFile() == null || !hasQuestionBankDownloadSpace(
+                temporary.getParentFile().getUsableSpace(), expectedSize
+            )) {
+                throw new IllegalStateException("存储空间不足，无法下载该题库");
+            }
+            URL sourceUrl = new URL(url);
+            validateRemoteUrl(sourceUrl);
+            connection = (HttpURLConnection) sourceUrl.openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(QUESTION_BANK_READ_TIMEOUT_MS);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("Accept", "application/vnd.english-study-question-bank, application/zip");
+            connection.connect();
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) throw new IllegalStateException("题库下载失败：" + status);
+            validateRemoteUrl(connection.getURL());
+            long declaredSize = connection.getContentLengthLong();
+            if (declaredSize >= 0 && declaredSize != expectedSize) throw new SecurityException("题库文件大小与目录声明不一致");
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            long total = 0L;
+            try (InputStream input = connection.getInputStream(); FileOutputStream output = new FileOutputStream(temporary)) {
+                byte[] buffer = new byte[64 * 1024];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    total += count;
+                    if (total > expectedSize || total > EsqArchive.MAX_ARCHIVE_BYTES) {
+                        throw new SecurityException("下载的 ESQ 文件超过目录声明或 2 GiB 上限");
+                    }
+                    output.write(buffer, 0, count);
+                    digest.update(buffer, 0, count);
+                }
+            }
+            if (total != expectedSize) throw new SecurityException("题库文件大小与目录声明不一致");
+            if (!hex(digest.digest()).equalsIgnoreCase(expectedHash)) {
+                throw new SecurityException("题库 SHA-256 校验失败，文件可能不完整或已被替换");
+            }
+            EsqArchive.Extraction extracted = EsqArchive.extract(
+                temporary,
+                getContext().getFilesDir(),
+                expectedHash.toLowerCase(Locale.ROOT)
+            );
+            String cleanupToken = "";
+            if (extracted.createdDirectory != null) {
+                cleanupToken = UUID.randomUUID().toString();
+                pendingQuestionBankAssets.put(cleanupToken, extracted.createdDirectory);
+            }
+            JSObject result = new JSObject();
+            result.put("packageData", extracted.packageData.toString());
+            result.put("cleanupToken", cleanupToken);
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject(error.getMessage() == null ? "题库下载失败" : error.getMessage(), error);
+        } finally {
+            if (connection != null) connection.disconnect();
+            cleanupTemporaryFile(temporary);
+        }
+    }
+
+    @PluginMethod
+    public void resolveQuestionBankAssets(PluginCall call) {
+        String cleanupToken = call.getString("cleanupToken", "");
+        Boolean shouldDelete = call.getBoolean("delete");
+        if (cleanupToken.isEmpty() || shouldDelete == null) {
+            call.reject("题库资产清理参数无效");
+            return;
+        }
+        File directory = pendingQuestionBankAssets.remove(cleanupToken);
+        if (directory == null) {
+            call.reject("题库资产清理令牌已失效");
+            return;
+        }
+        if (shouldDelete) EsqArchive.deleteTree(directory);
+        JSObject result = new JSObject();
+        result.put("deleted", shouldDelete && !directory.exists());
+        result.put("retained", !shouldDelete && directory.isDirectory());
+        call.resolve(result);
+    }
+
+    private static void validateRemoteUrl(URL url) {
+        String protocol = url.getProtocol().toLowerCase(Locale.ROOT);
+        if (url.getUserInfo() != null || (!protocol.equals("https") && !protocol.equals("http"))) {
+            throw new SecurityException("题库地址只允许安全的 HTTP 或 HTTPS");
+        }
+        if (protocol.equals("http") && !isPrivateLanHost(url.getHost())) {
+            throw new SecurityException("HTTP 题库地址仅限本机或私有局域网 IP");
+        }
+    }
+
+    private static boolean isPrivateLanHost(String host) {
+        if (host == null) return false;
+        String value = host.toLowerCase(Locale.ROOT);
+        if (value.equals("localhost") || value.equals("::1") || value.equals("[::1]")) return true;
+        String[] parts = value.split("\\.");
+        if (parts.length != 4) return false;
+        try {
+            int[] octets = new int[4];
+            for (int i = 0; i < 4; i++) {
+                octets[i] = Integer.parseInt(parts[i]);
+                if (octets[i] < 0 || octets[i] > 255 || !parts[i].equals(String.valueOf(octets[i]))) return false;
+            }
+            return octets[0] == 10 || octets[0] == 127
+                || (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31)
+                || (octets[0] == 192 && octets[1] == 168);
+        } catch (NumberFormatException error) {
+            return false;
+        }
+    }
 
     @PluginMethod
     public void downloadAndInstall(PluginCall call) {

@@ -31,6 +31,38 @@ import java.util.Locale;
 @CapacitorPlugin(name = "DocumentExtractor")
 public class DocumentExtractorPlugin extends Plugin {
     @PluginMethod
+    public void shareDocument(PluginCall call) {
+        String encoded = call.getString("data", "");
+        if (encoded.isEmpty() || encoded.length() > 12 * 1024 * 1024) {
+            call.reject("文档大小超出限制");
+            return;
+        }
+        try {
+            byte[] bytes = Base64.decode(encoded, Base64.DEFAULT);
+            if (bytes.length > 8 * 1024 * 1024 || !isZipContainer(bytes)) {
+                call.reject("不是受支持的 DOCX 文档");
+                return;
+            }
+            String name = call.getString("fileName", "edited.docx").replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_");
+            if (!name.toLowerCase(Locale.ROOT).endsWith(".docx")) name += ".docx";
+            if (name.length() > 160) name = "edited.docx";
+            java.io.File folder = new java.io.File(getContext().getCacheDir(), "assistant-" + java.util.UUID.randomUUID());
+            if (!folder.mkdir()) throw new java.io.IOException("Cannot create export folder");
+            java.io.File output = new java.io.File(folder, name);
+            try (java.io.FileOutputStream stream = new java.io.FileOutputStream(output)) { stream.write(bytes); }
+            android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", output);
+            android.content.Intent send = new android.content.Intent(android.content.Intent.ACTION_SEND);
+            send.setType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+            send.putExtra(android.content.Intent.EXTRA_STREAM, uri);
+            send.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            android.content.Intent chooser = android.content.Intent.createChooser(send, "保存或分享 Word 副本");
+            chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(chooser);
+            call.resolve();
+        } catch (Exception error) { call.reject("无法导出 Word 副本", error); }
+    }
+
+    @PluginMethod
     public void extract(PluginCall call) {
         String encoded = call.getString("data", "");
         String fileName = call.getString("fileName", "");
@@ -107,9 +139,10 @@ public class DocumentExtractorPlugin extends Plugin {
     private Extracted extractDocx(byte[] bytes) throws Exception {
         List<String> blocks = new ArrayList<>();
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
+            DocumentNumbering numbering = new DocumentNumbering();
             for (org.apache.poi.xwpf.usermodel.IBodyElement element : document.getBodyElements()) {
                 if (element instanceof XWPFParagraph) {
-                    StringBuilder text = new StringBuilder();
+                    StringBuilder text = new StringBuilder(numbering.prefix((XWPFParagraph) element));
                     for (XWPFRun run : ((XWPFParagraph) element).getRuns()) {
                         appendRun(text, run.text(), run.getUnderline() != null
                             && run.getUnderline() != org.apache.poi.xwpf.usermodel.UnderlinePatterns.NONE);
@@ -120,7 +153,14 @@ public class DocumentExtractorPlugin extends Plugin {
                         StringBuilder text = new StringBuilder();
                         for (XWPFTableCell cell : row.getTableCells()) {
                             if (text.length() > 0) text.append(' ');
-                            text.append(cell.getText());
+                            for (XWPFParagraph paragraph : cell.getParagraphs()) {
+                                if (text.length() > 0) text.append('\n');
+                                text.append(numbering.prefix(paragraph));
+                                for (XWPFRun run : paragraph.getRuns()) {
+                                    appendRun(text, run.text(), run.getUnderline() != null
+                                        && run.getUnderline() != org.apache.poi.xwpf.usermodel.UnderlinePatterns.NONE);
+                                }
+                            }
                         }
                         addBlock(blocks, text.toString());
                     }
