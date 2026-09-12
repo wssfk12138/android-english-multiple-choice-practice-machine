@@ -22,6 +22,7 @@
 | 低 | `vocabulary_enrichment_jobs` 无清理机制、`content-remediation.ts`/`learning-history-rebind.ts` 存在全表读 | 沿用 2026-09-12 性能修复结论：低频路径，当前规模触发不了 | 记录待观察；如词库增长到万级再评估清理与索引 |
 | 中 | 平板测试包残留合成测试数据 | 2026-09-12 T8 已用改前备份恢复（34 卷/203 单元/1525 题，练习/词汇/错题计数为 0），恢复方式为整库文件写回 | 已清理；恢复备份为任务目录 `publictest-before-backup.db`；如再次注数须重复同一恢复流程 |
 | 中 | 手机端未做含修复版本的功能验证 | 2026-09-12 T9 只读诊断：alpha.79 无新增崩溃/ANR，无新增 5 索引（未装修复版） | 待手机覆盖安装含修复版本后按平板同一流程补验 |
+| 中 | 本树待入库内容含个人绝对路径与少量设备/网段信息，同步公开副本前必须脱敏（2026-09-12 入版前扫描，用户决议本树本次不脱敏） | `docs/context/MAP.md:31`、`docs/context/history/2026-09-08-before-convergence-NOW.md:40`、`2026-09-remediation-followup.md:30`、`2026-09-remediation-progress.md:8,17`、`2026-09-study-todos.md:10`、`2026-09.md:20,56,75,83,99,157,175`、`context-routing-before-2026-09-12-MAP.md:24,38,46,48,50,51,52,126`（`C:/Users/MEC/.codex` 证据根与 `E:/EnglishPracticeMachine` 路径）；`docs/question-bank-catalog.md:37` 为 RFC1918 合成 CIDR 字面量；`frontend/public/content-remediation.json:95940,96188,96447` 为题库正文数字串误命中。密钥特征（sk-/AIza/PEM）命中 0 | 同步公开副本（AP 树）前按上述行位清单排除或改写；未列出的文件视为无命中 |
 
 ## 高风险改动附加要求
 
