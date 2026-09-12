@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { ArrowRight, BookOpen, ChevronRight, Sparkles, Star } from 'lucide-vue-next'
+import { Files, ListChecks, ArrowRight, BookOpen, ChevronRight, Sparkles, Star } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { get, post } from '../api'
 import QuestionBankSwitcher from '../components/QuestionBankSwitcher.vue'
+import StudyTodos from '../components/StudyTodos.vue'
+import '../dashboard-glass.css'
 
 const router = useRouter()
 const data = ref<any>(null)
 const papers = ref<any[]>([])
 const error = ref('')
+const tasksRevision = ref(0)
 const vocabulary = ref<any[]>([])
 const tickerPaused = ref(false)
 const vocabularyPage = ref(0)
@@ -29,8 +32,13 @@ const publishedPapers = computed(() => papers.value.filter(
   paper => paper.status === 'published' && Number(paper.question_count || 0) > 0,
 ))
 const resumeSession = computed(() => data.value?.resume_session || null)
-const hasListening = computed(() => Number(data.value?.paper_type_counts?.listening || 0) > 0)
-const hasPracticeType = (type: string) => Number(data.value?.unit_type_counts?.[type] || 0) > 0
+const practiceTypeCount = (type: string) => Number(
+  type === 'listening'
+    ? data.value?.paper_type_counts?.listening || 0
+    : data.value?.unit_type_counts?.[type] || 0,
+)
+const hasPracticeType = (type: string) => practiceTypeCount(type) > 0
+const hasListening = computed(() => hasPracticeType('listening'))
 const hasAnyPractice = computed(() => ['cloze', 'reading', 'part_b', 'listening'].some(hasPracticeType))
 const practiceGridClass = computed(() => {
   const count = ['cloze', 'reading', 'part_b', 'listening'].filter(hasPracticeType).length
@@ -63,6 +71,7 @@ function reloadAfterAndroidStartup() {
 }
 
 async function loadHome() {
+  tasksRevision.value += 1
   error.value = ''
   const embedded = (window as any).__LINJIAN_STARTUP__
   if (embedded) delete (window as any).__LINJIAN_STARTUP__
@@ -135,26 +144,12 @@ function resumePractice() {
 
 <template>
   <div class="page dashboard-page">
-    <div class="desktop-dashboard">
-      <div class="page-head study-hero">
-        <div class="study-hero-copy">
-          <span class="eyebrow">YOUR QUIET STUDY SPACE</span>
-          <h1>今天想练些什么？</h1>
-          <p class="lead">选一篇文章，留一点安静的时间给自己。</p>
-          <RouterLink class="button" to="/library"><BookOpen :size="17" />查看全部题库<ArrowRight :size="16" /></RouterLink>
-        </div>
-      </div>
-      <QuestionBankSwitcher @changed="loadHome" />
+    <div class="desktop-dashboard glass-dashboard">
+      <div class="dashboard-bank-row"><QuestionBankSwitcher @changed="loadHome" /><RouterLink class="button ghost compact" to="/library"><BookOpen :size="17" />查看全部题库<ArrowRight :size="16" /></RouterLink></div>
+      <StudyTodos :key="tasksRevision" />
       <div v-if="error" class="warning">{{ error }}</div>
-      <button v-if="resumeSession" class="resume-practice card" type="button" @click="resumePractice">
-        <span class="resume-icon"><ChevronRight :size="18" /></span>
-        <span class="resume-copy">
-          <small>继续上次未完成练习</small>
-          <strong>{{ resumeSession.year ? `${resumeSession.year} 年` : '随机练习' }}</strong>
-        </span>
-      </button>
       <section v-if="vocabulary.length" class="vocabulary-ticker card" @mouseenter="tickerPaused=true" @mouseleave="tickerPaused=false">
-        <div class="ticker-heading"><div><span class="eyebrow">VOCABULARY REVIEW</span><h3>词汇回顾</h3></div><RouterLink to="/vocabulary">查看单词本 →</RouterLink></div>
+        <div class="ticker-heading"><div><h3>词汇回顾</h3></div><RouterLink to="/vocabulary">查看单词本 →</RouterLink></div>
         <div class="ticker-window"><Transition name="vocabulary-flip" mode="out-in"><div :key="vocabularyPage" class="ticker-group">
           <RouterLink v-for="word in visibleWords" :key="word.id" :to="`/vocabulary?word=${word.id}`" class="ticker-word">
             <Star v-if="word.is_frequent" class="vocab-star" :size="15" fill="currentColor" aria-label="高频词" />
@@ -162,21 +157,21 @@ function resumePractice() {
           </RouterLink>
         </div></Transition></div>
       </section>
+      <div v-if="hasAnyPractice" class="section-title"><h2>题型练习</h2></div>
       <div v-if="hasAnyPractice" class="grid practice-actions" :class="practiceGridClass">
-        <button v-if="hasPracticeType('cloze')" class="card action-card" type="button" @click="randomPractice('cloze')"><span class="feature-icon orange"><img src="/assets/icons/cloze.png" alt="" /></span><span class="action-copy"><small>整篇提交</small><h3>完型填空</h3><p>随机抽取一整篇，在完整语境中完成练习。</p></span><ArrowRight class="action-arrow" :size="19" /></button>
-        <button v-if="hasPracticeType('reading')" class="card action-card" type="button" @click="randomPractice('reading')"><span class="feature-icon sage"><img src="/assets/icons/reading.png" alt="" /></span><span class="action-copy"><small>一篇文章</small><h3>阅读理解</h3><p>按文章完整练习，专注理解论证与细节。</p></span><ArrowRight class="action-arrow" :size="19" /></button>
-        <button v-if="hasPracticeType('part_b')" class="card action-card" type="button" @click="randomPractice('part_b')"><span class="feature-icon blue"><img src="/assets/icons/part-b.png" alt="" /></span><span class="action-copy"><small>排序 · 填入 · 匹配</small><h3>阅读 Part B</h3><p>辨认结构、衔接与观点。</p></span><ArrowRight class="action-arrow" :size="19" /></button>
-        <button v-if="hasListening" class="card action-card" type="button" @click="randomPractice('listening')"><span class="feature-icon purple"><img src="/assets/icons/listening.png" alt="" /></span><span class="action-copy"><small>随机一套</small><h3>听力单刷</h3><p>完成一套试卷的完整听力部分。</p></span><ArrowRight class="action-arrow" :size="19" /></button>
+        <button v-if="hasPracticeType('cloze')" class="card action-card" type="button" @click="randomPractice('cloze')"><span class="feature-icon orange"><img src="/assets/icons/cloze.png" alt="" /></span><span class="action-copy"><h3>完形填空</h3></span><ArrowRight class="action-arrow" :size="19" /></button>
+        <button v-if="hasPracticeType('reading')" class="card action-card" type="button" @click="randomPractice('reading')"><span class="feature-icon sage"><img src="/assets/icons/reading.png" alt="" /></span><span class="action-copy"><h3>阅读理解</h3></span><ArrowRight class="action-arrow" :size="19" /></button>
+        <button v-if="hasPracticeType('part_b')" class="card action-card" type="button" @click="randomPractice('part_b')"><span class="feature-icon blue"><img src="/assets/icons/part-b.png" alt="" /></span><span class="action-copy"><h3>阅读 Part B</h3></span><ArrowRight class="action-arrow" :size="19" /></button>
+        <button v-if="hasListening" class="card action-card listening-action" type="button" @click="randomPractice('listening')"><span class="feature-icon purple"><img src="/assets/icons/listening.png" alt="" /></span><span class="action-copy"><h3>听力练习</h3></span><ArrowRight class="action-arrow" :size="19" /></button>
       </div>
-      <div class="section-title"><h2>学习概览</h2></div>
-      <div v-if="data" class="grid grid-4">
-        <div class="card"><span class="stat-label">已收录试卷</span><div class="stat-value">{{ data.paper_count }}</div></div>
-        <div class="card"><span class="stat-label">练习篇目</span><div class="stat-value">{{ data.unit_count }}</div></div>
-        <div class="card"><span class="stat-label">客观题</span><div class="stat-value">{{ data.question_count }}</div></div>
-        <RouterLink to="/wrong" class="card stat-card linked"><span class="stat-label">高频错题</span><div class="stat-value">{{ data.frequent_count }}</div></RouterLink>
-      </div>
-      <div class="section-title"><h2>温柔提醒</h2></div>
-      <div class="card gentle-reminder"><span class="icon blue" style="margin:0"><Sparkles /></span><div><h3>理解文章，比记住答案更重要。</h3><p class="lead">选项可以每次打乱，但文章中的逻辑不会改变。</p></div></div>
+      <section v-if="data" class="dashboard-bank-summary" aria-label="题库概览">
+        <h2>题库概览</h2>
+        <dl class="overview-grid">
+          <div class="overview-stat"><dt><span>试卷</span><Files aria-hidden="true" /></dt><dd>{{ data.paper_count }}<small>套</small></dd></div>
+          <div class="overview-stat"><dt><span>篇目</span><BookOpen aria-hidden="true" /></dt><dd>{{ data.unit_count }}<small>篇</small></dd></div>
+          <div class="overview-stat"><dt><span>客观题</span><ListChecks aria-hidden="true" /></dt><dd>{{ data.question_count }}<small>道</small></dd></div>
+        </dl>
+      </section>
     </div>
 
     <div class="portrait-dashboard">
@@ -187,7 +182,7 @@ function resumePractice() {
         <span class="resume-icon"><ChevronRight :size="18" /></span>
         <span class="resume-copy">
           <small>继续上次未完成练习</small>
-          <strong>{{ resumeSession.year ? `${resumeSession.year} 年` : '随机练习' }}</strong>
+          <strong>{{ resumeSession.title || '未完成练习' }}</strong>
         </span>
       </button>
 
@@ -199,10 +194,10 @@ function resumePractice() {
       </section>
 
       <section v-if="hasAnyPractice" class="portrait-practice-grid" :class="{ 'has-listening': hasListening, 'without-listening': !hasListening }" aria-label="题型练习">
-        <button v-if="hasListening" class="portrait-practice-card listening" type="button" @click="randomPractice('listening')"><img src="/assets/icons/listening.png" alt="" /><span><strong>听力</strong><small>整套练习</small></span><ChevronRight :size="18" /></button>
-        <button v-if="hasPracticeType('cloze')" class="portrait-practice-card cloze" type="button" @click="randomPractice('cloze')"><img src="/assets/icons/cloze.png" alt="" /><span><strong>完型填空</strong><small>随机一篇</small></span><ChevronRight :size="18" /></button>
-        <button v-if="hasPracticeType('reading')" class="portrait-practice-card reading" type="button" @click="randomPractice('reading')"><img src="/assets/icons/reading.png" alt="" /><span><strong>阅读理解</strong><small>随机一篇</small></span><ChevronRight :size="18" /></button>
-        <button v-if="hasPracticeType('part_b')" class="portrait-practice-card part-b" type="button" @click="randomPractice('part_b')"><img src="/assets/icons/part-b.png" alt="" /><span><strong>阅读 Part B</strong><small>随机一篇</small></span><ChevronRight :size="18" /></button>
+        <button v-if="hasListening" class="portrait-practice-card listening" type="button" @click="randomPractice('listening')"><img src="/assets/icons/listening.png" alt="" /><span><strong>听力</strong></span><ChevronRight :size="18" /></button>
+        <button v-if="hasPracticeType('cloze')" class="portrait-practice-card cloze" type="button" @click="randomPractice('cloze')"><img src="/assets/icons/cloze.png" alt="" /><span><strong>完型填空</strong></span><ChevronRight :size="18" /></button>
+        <button v-if="hasPracticeType('reading')" class="portrait-practice-card reading" type="button" @click="randomPractice('reading')"><img src="/assets/icons/reading.png" alt="" /><span><strong>阅读理解</strong></span><ChevronRight :size="18" /></button>
+        <button v-if="hasPracticeType('part_b')" class="portrait-practice-card part-b" type="button" @click="randomPractice('part_b')"><img src="/assets/icons/part-b.png" alt="" /><span><strong>阅读 Part B</strong></span><ChevronRight :size="18" /></button>
       </section>
       <div v-else-if="data" class="card empty portrait-empty">当前题库还没有可练习题目，请在设置中导入或切换题库。</div>
 
@@ -216,10 +211,15 @@ function resumePractice() {
       <section class="portrait-paper-section">
         <div class="portrait-section-head"><h2>真题试卷</h2><span>{{ publishedPapers.length }} 套</span></div>
         <div v-if="publishedPapers.length" class="portrait-paper-list">
-          <button v-for="paper in publishedPapers" :key="paper.id" type="button" @click="startPaper(paper.id)"><strong>{{ paper.title }}</strong><span v-if="paper.active_session_id" class="pill">进行中 · 已做 {{ paper.active_done }}/{{ paper.unit_count }} 篇</span><span v-else-if="paper.last_score != null" class="pill">{{ scoreText(paper) }}</span></button>
+          <button v-for="paper in publishedPapers" :key="paper.id" type="button" @click="startPaper(paper.id)"><strong>{{ paper.title }}</strong><span v-if="paper.active_session_id" class="pill">已做 {{ paper.active_done }}/{{ paper.unit_count }} 篇</span><span v-else-if="paper.last_score != null" class="pill">{{ scoreText(paper) }}</span></button>
         </div>
         <div v-else class="card empty">当前题库还没有可练习试卷。</div>
       </section>
     </div>
   </div>
 </template>
+
+
+<style scoped>
+.dashboard-bank-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.dashboard-bank-row :deep(.bank-switcher){flex:1;min-width:0;margin:0}.dashboard-bank-row>.button{flex-shrink:0}.dashboard-bank-summary{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px 20px;padding:14px 0;border-top:1px solid var(--line);color:var(--muted)}.dashboard-bank-summary h2{margin:0;font-size:.95rem;color:var(--ink)}.dashboard-bank-summary span{font-size:.88rem}.section-title h2{font-size:1.1rem;letter-spacing:0}
+</style>

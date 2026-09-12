@@ -79,7 +79,7 @@ onMounted(enhanceHeadings)
   <main class="page help-page">
     <header class="help-toolbar">
       <button class="icon-button" type="button" aria-label="返回" @click="closeAndBack"><ArrowLeft :size="20" /></button>
-      <div class="help-title"><BookOpen :size="20" /><div><span class="eyebrow">DOCUMENTATION</span><h1>使用帮助</h1></div></div>
+      <div class="help-title"><BookOpen :size="20" /><div><h1>使用帮助</h1></div></div>
       <div class="help-toolbar-actions">
         <label class="help-search"><Search :size="16" /><span class="sr-only">搜索帮助内容</span><input v-model="query" type="search" placeholder="搜索帮助内容" aria-label="搜索帮助内容"></label>
         <button class="icon-button help-toc-toggle" type="button" aria-label="打开目录" :aria-expanded="mobileTocOpen" @click="mobileTocOpen=!mobileTocOpen"><List :size="20" /></button>

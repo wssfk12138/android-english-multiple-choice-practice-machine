@@ -96,17 +96,19 @@ function diagnosticContext(path: string, options: RequestInit) {
     return { category: 'remote_question_bank' as const, stage: 'catalog_fetch_and_validate', context: {} }
   }
   if (pathname === '/android/updates/question-banks/download') {
-    let fileName = ''
+    let packageId = ''
+    let contentVersion = ''
     try {
       const body = typeof options.body === 'string' ? JSON.parse(options.body) : {}
-      fileName = String(body?.package?.fileName || '')
+      packageId = String(body?.package_id || '')
+      contentVersion = String(body?.content_version || '')
     } catch {
       // The invalid request is still logged without retaining request content.
     }
     return {
       category: 'remote_question_bank' as const,
       stage: 'download_hash_and_import_preview',
-      context: { fileName },
+      context: { packageId, contentVersion },
     }
   }
   return null

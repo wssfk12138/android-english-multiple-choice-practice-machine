@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BookOpenText, Moon, PackageCheck, Sun, Trash2 } from 'lucide-vue-next'
+import { BookOpenText, Download, Moon, PackageCheck, Settings2, Sun, Trash2 } from 'lucide-vue-next'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { App as CapacitorApp } from '@capacitor/app'
 import type { PluginListenerHandle } from '@capacitor/core'
@@ -14,6 +14,7 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+const ANDROID_ONBOARDING_KEY = 'linjian-android-onboarding-v1'
 // 初始化时同步读取主题偏好，避免暗色用户在首帧渲染前闪一下浅色（FOUC）。
 const dark = ref(
   localStorage.getItem('linjian-theme') === 'dark'
@@ -25,7 +26,25 @@ const installerCleanup = ref<PendingInstallerCleanup | null>(null)
 const installerCleanupBusy = ref(false)
 const installerCleanupError = ref('')
 const retainInstallerButton = ref<HTMLButtonElement | null>(null)
+const onboardingOpen = ref(false)
+const onboardingPrimaryButton = ref<HTMLButtonElement | null>(null)
 let appStateListener: PluginListenerHandle | null = null
+let androidStartupPrepared = false
+let startSyncAfterAndroidStartup: (() => void) | null = null
+
+async function showAndroidOnboardingIfNeeded() {
+  if (!platformRuntime.isAndroid || installerCleanup.value) return
+  if (localStorage.getItem(ANDROID_ONBOARDING_KEY) === 'done') return
+  onboardingOpen.value = true
+  await nextTick()
+  onboardingPrimaryButton.value?.focus()
+}
+
+async function finishAndroidOnboarding(destination = '') {
+  localStorage.setItem(ANDROID_ONBOARDING_KEY, 'done')
+  onboardingOpen.value = false
+  if (destination) await router.push(destination)
+}
 function detectPortrait() {
   // Android WebView can briefly report a stale CSS orientation while a
   // tablet is rotating. Prefer the native screen orientation, then use the
@@ -61,6 +80,7 @@ function updateWindowMode() {
 }
 
 watch(() => route.path, () => {
+  dark.value = document.documentElement.classList.contains('dark')
   if (platformRuntime.isAndroid && document.documentElement.dataset.orientation === 'landscape' && route.path === '/mobile-settings') {
     void router.replace('/settings')
   }
@@ -71,7 +91,7 @@ function applyTheme() {
 }
 
 function toggleTheme() {
-  dark.value = !dark.value
+  dark.value = !document.documentElement.classList.contains('dark')
   applyTheme()
 }
 
@@ -87,6 +107,7 @@ async function finishInstallerCleanup(shouldDelete: boolean) {
   try {
     await resolveInstallerCleanup(shouldDelete)
     installerCleanup.value = null
+    await showAndroidOnboardingIfNeeded()
   } catch (cause) {
     installerCleanupError.value = String(cause)
   } finally {
@@ -95,6 +116,28 @@ async function finishInstallerCleanup(shouldDelete: boolean) {
 }
 
 function handleInstallerCleanupKeydown(event: KeyboardEvent) {
+  if (onboardingOpen.value) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      void finishAndroidOnboarding()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const buttons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.android-onboarding-dialog button:not(:disabled)'),
+    )
+    if (!buttons.length) return
+    const first = buttons[0]
+    const last = buttons[buttons.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+    return
+  }
   if (!installerCleanup.value) return
   if (event.key === 'Escape') {
     event.preventDefault()
@@ -130,6 +173,15 @@ onMounted(async () => {
   if (platformRuntime.isAndroid) {
     const { resumeVocabularyTranslations } = await import('./platform/android/vocabulary-translation-runner')
     resumeVocabularyTranslations()
+    startSyncAfterAndroidStartup = () => {
+      if (androidStartupPrepared) return
+      androidStartupPrepared = true
+      void import('./platform/android/sync-scheduler').then(({ startAutoSync }) => startAutoSync())
+    }
+    window.addEventListener('android-startup-prepared', startSyncAfterAndroidStartup, { once: true })
+    if ((window as any).__LINJIAN_ANDROID_STARTUP_PREPARED__) {
+      startSyncAfterAndroidStartup()
+    }
     appStateListener = await CapacitorApp.addListener('appStateChange', ({ isActive }) => {
       if (isActive) {
         updateWindowMode()
@@ -148,9 +200,12 @@ onMounted(async () => {
         installerCleanup.value = pending
         await nextTick()
         retainInstallerButton.value?.focus()
+      } else {
+        await showAndroidOnboardingIfNeeded()
       }
     } catch (cause) {
       console.warn('Unable to inspect downloaded update package:', String(cause))
+      await showAndroidOnboardingIfNeeded()
     }
   }
   window.addEventListener('keydown', handleInstallerCleanupKeydown)
@@ -162,6 +217,12 @@ onBeforeUnmount(() => {
   window.visualViewport?.removeEventListener('resize', updateWindowMode)
   window.removeEventListener('keydown', handleInstallerCleanupKeydown)
   void appStateListener?.remove()
+  if (platformRuntime.isAndroid) {
+    if (startSyncAfterAndroidStartup) {
+      window.removeEventListener('android-startup-prepared', startSyncAfterAndroidStartup)
+    }
+    void import('./platform/android/sync-scheduler').then(({ stopAutoSync }) => stopAutoSync())
+  }
 })
 </script>
 
@@ -170,6 +231,32 @@ onBeforeUnmount(() => {
     class="app-shell"
     :class="{ 'practice-shell': route.path.startsWith('/practice') }"
   >
+    <section
+      v-if="onboardingOpen"
+      class="android-onboarding-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="android-onboarding-title"
+      aria-describedby="android-onboarding-description"
+    >
+      <div class="android-onboarding-dialog card">
+        <div class="android-onboarding-heading">
+          <span class="android-onboarding-icon"><Settings2 :size="26" /></span>
+          <div>
+            <h2 id="android-onboarding-title">开始前完成两步设置</h2>
+            <p id="android-onboarding-description">先配置可用模型，再获取需要的题库。</p>
+          </div>
+        </div>
+        <ol class="android-onboarding-steps">
+          <li><Settings2 :size="19" /><span><strong>模型与 API</strong><small>选择模型并填写对应的 API Key。</small></span></li>
+          <li><Download :size="19" /><span><strong>更新与日志</strong><small>配置完成后，从这里检查并获取远程题库。</small></span></li>
+        </ol>
+        <div class="android-onboarding-actions">
+          <button class="button ghost" type="button" @click="finishAndroidOnboarding()">稍后设置</button>
+          <button ref="onboardingPrimaryButton" class="button" type="button" @click="finishAndroidOnboarding('/settings')">去配置模型与 API</button>
+        </div>
+      </div>
+    </section>
     <section
       v-if="installerCleanup"
       class="installer-cleanup-overlay"
@@ -181,7 +268,6 @@ onBeforeUnmount(() => {
       <div class="installer-cleanup-dialog card">
         <span class="installer-cleanup-icon"><PackageCheck :size="28" /></span>
         <div>
-          <span class="eyebrow">UPDATE COMPLETE</span>
           <h2 id="installer-cleanup-title">是否删除安装包？</h2>
           <p class="lead">
             {{ installerCleanup.versionName ? `${installerCleanup.versionName} 已完成更新。` : '应用已完成更新。' }}

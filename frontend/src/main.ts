@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
 import './styles.css'
+import './study-theme.css'
 import { platformRuntime } from './platform/runtime'
 
 // 关注西安财经大学吧喵，谢谢喵。
@@ -13,6 +14,8 @@ document.documentElement.classList.toggle('native-app', platformRuntime.isNative
 async function runAndroidStartupPreparation() {
   await platformRuntime.ready()
   if (platformRuntime.isAndroid) {
+    const { ensureContentRemediation } = await import('./platform/android/content-remediation')
+    await ensureContentRemediation()
     const { purgeExpiredTrash } = await import('./platform/android/question-bank-profiles')
     await purgeExpiredTrash()
     if (import.meta.env.VITE_BUNDLED_QUESTION_BANKS === '1') {
@@ -39,5 +42,6 @@ void runAndroidStartupPreparation().catch(error => {
     ).catch(() => undefined)
   }
 }).finally(() => {
+  ;(window as any).__LINJIAN_ANDROID_STARTUP_PREPARED__ = true
   window.dispatchEvent(new CustomEvent('android-startup-prepared'))
 })

@@ -4,6 +4,7 @@ import { row, rows, run, transaction } from './database'
 import { extractDocument, type ExtractedDocument } from './document-extractor'
 import { LocalApiError } from './errors'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
+import { saveImportDraft } from './import-destination'
 import { extractOrderingFixedSlots } from './ordering-fixed-slots'
 
 type JsonRecord = Record<string, any>
@@ -92,7 +93,7 @@ function answerMap(text: string): Record<string, string> {
 function ensureBlanks(passage: string, first: number, last: number): string {
   let cursor = 0
   for (let number = first; number <= last; number++) {
-    const pattern = new RegExp(`(?<![\\d_])(?:\\(\\s*)?${number}(?:\\s*\\))?(?:\\s*_{2,})?(?![\\d_])`, 'g')
+    const pattern = new RegExp(`(?<![\\w{])(?:\\(\\s*${number}\\s*\\)|${number})(?:[ \\t]*_{2,})?(?![\\w}%％]|[.,]\\d)`, 'g')
     pattern.lastIndex = cursor
     const match = pattern.exec(passage)
     if (!match || match.index == null) continue
@@ -161,7 +162,7 @@ function parseCompactClozeOptions(text: string): Array<Array<{ key: string; cont
   return []
 }
 
-function parseCloze(blocks: string[], answers: Record<string, string>): JsonRecord {
+function parseCloze(blocks: string[], answers: Record<string, string>): JsonRecord | null {
   const start = findIndex(blocks, /Section\s*[ⅠI1]\s*Use\s+of\s+English/i)
   const reading = findIndex(blocks, /Section\s*[ⅡI2]\s*Reading\s+Comprehension|Reading\s+Comprehension/i, Math.max(start, 0))
   const section = blocks.slice(Math.max(0, start + 1), reading > start ? reading : blocks.length)
@@ -202,6 +203,7 @@ function parseCloze(blocks: string[], answers: Record<string, string>): JsonReco
       optionIndexes.add(index)
     }
   })
+  if (start < 0 && optionRows.size === 0) return null
   const passage = ensureBlanks(
     section
       .filter((text, index) =>
@@ -220,12 +222,11 @@ function parseCloze(blocks: string[], answers: Record<string, string>): JsonReco
     sequence: 1,
     passage,
     shared_data: {},
-    questions: Array.from({ length: 20 }, (_, index) => {
-      const number = index + 1
+    questions: [...optionRows.keys()].sort((left, right) => left - right).map(number => {
       return {
         number,
         stem: '',
-        options: optionRows.get(number) || [],
+        options: optionRows.get(number)!,
         answer: answers[String(number)] || '',
         score: 0.5,
       }
@@ -237,9 +238,17 @@ function unlabeledQuestionGroups(
   segment: string[],
   firstNumber: number,
 ): { passage: string; questions: JsonRecord[] } {
-  const content = segment.filter(text => !/^(Directions:|Part [ABC]|Section )/i.test(text))
+  const content: string[] = []
+  for (const text of segment.filter(text => !/^(Directions:|Part [ABC]|Section )/i.test(text))) {
+    if (/^[.．?？]+$/.test(text.trim()) && content.length) content[content.length - 1] += text.trim()
+    else content.push(text)
+  }
   if (content.length < 25) return { passage: content.join('\n\n'), questions: [] }
   const tail = content.slice(-25)
+  if ([0, 5, 10, 15, 20].some(index =>
+    (tail[index].match(/[A-Za-z]+/g) || []).length < 3 || !/[.．?？_]$/.test(tail[index]))) {
+    return { passage: content.join('\n\n'), questions: [] }
+  }
   return {
     passage: content.slice(0, -25).join('\n\n'),
     questions: Array.from({ length: 5 }, (_, index) => {
@@ -269,7 +278,7 @@ function readingMarkers(blocks: string[]) {
 
 function parseReading(blocks: string[], answers: Record<string, string>): JsonRecord[] {
   const markers = readingMarkers(blocks).slice(0, 4)
-  const partB = findIndex(blocks, /^\s*Part\s*B\s*$/i)
+  const partB = findIndex(blocks, /^\s*Part\s*B(?:\s+Directions[:：]?)?\s*$/i)
   return markers.map((marker, markerOffset) => {
     const end = markers[markerOffset + 1]?.index
       ?? (partB > marker.index ? partB : blocks.length)
@@ -296,12 +305,17 @@ function parseReading(blocks: string[], answers: Record<string, string>): JsonRe
       }
       const options = splitOptions(text)
       if (current && options.length) current.options.push(...options)
+      else if (current && !/^(Directions:|Part [ABC]|Section )/i.test(text)) {
+        if (!current.options.length) current.stem = clean(current.stem + ' ' + text)
+        else current.options[current.options.length - 1].content = clean(current.options[current.options.length - 1].content + ' ' + text)
+      }
       else if (!started && !/^(Directions:|Part [ABC]|Section )/i.test(text)) passage.push(text)
     }
     if (current) questions.push(current)
     let finalPassage = passage.join('\n\n')
     let finalQuestions = questions
-    if (questions.length !== 5 || questions.some(question => question.options.length !== 4)) {
+    // A layout fallback must not discard explicitly recognized questions.
+    if (questions.length === 0) {
       const fallback = unlabeledQuestionGroups(segment, firstNumber)
       finalPassage = fallback.passage
       finalQuestions = fallback.questions
@@ -323,7 +337,7 @@ function parseReading(blocks: string[], answers: Record<string, string>): JsonRe
 }
 
 function hasObjectivePartB(blocks: string[]): boolean {
-  const index = findIndex(blocks, /^\s*Part\s*B\s*$/i)
+  const index = findIndex(blocks, /^\s*Part\s*B(?:\s+Directions[:：]?)?\s*$/i)
   if (index < 0) return false
   const context = blocks.slice(index, index + 6).join(' ').toLowerCase()
   if (/translate\s+the\s+underlined|translation/.test(context)) return false
@@ -333,7 +347,7 @@ function hasObjectivePartB(blocks: string[]): boolean {
 function readingPartBBounds(blocks: string[]): { partB: number; sectionEnd: number } {
   let reading = findIndex(blocks, /Section\s*(?:II|Ⅱ|2)\s*Reading\s+Comprehension/i)
   if (reading < 0) reading = findIndex(blocks, /Reading\s+Comprehension/i)
-  const partB = findIndex(blocks, /^\s*Part\s*B\s*$/i, Math.max(reading, 0))
+  const partB = findIndex(blocks, /^\s*Part\s*B(?:\s+Directions[:：]?)?\s*$/i, Math.max(reading, 0))
   const sectionEnd = findIndex(
     blocks,
     /^\s*Section\s*(?:III|Ⅲ|3)\s*(?:Translation)?\s*$/i,
@@ -398,34 +412,42 @@ function parsePartB(blocks: string[], answers: Record<string, string>): JsonReco
       return parseTrueFalsePartB(blocks, answers, bounds.partB, bounds.sectionEnd)
     }
   }
-  const partB = findIndex(blocks, /^\s*Part\s*B\s*$/i)
+  const partB = findIndex(blocks, /^\s*Part\s*B(?:\s+Directions[:：]?)?\s*$/i)
   const partC = findIndex(blocks, /^\s*Part\s*C(?:\s+Directions:)?\s*$/i, Math.max(0, partB + 1))
-  const section = blocks.slice(partB + 1, partC > partB ? partC : blocks.length)
-  const directionEnd = Math.min(
-    section.length,
-    Math.max(1, section.findIndex(text => /^\s*\[?[A-H]\]?/.test(text))),
-  )
-  const direction = clean(section.slice(0, directionEnd).join(' '))
+  const ends = [partC, bounds.sectionEnd].filter(index => index > partB)
+  const section = blocks.slice(partB + 1, ends.length ? Math.min(...ends) : blocks.length).flatMap(block => block.split(/\r?\n/).map(clean).filter(Boolean))
+  const directionParts: string[] = []
+  for (const text of section) {
+    if (/^Directions[:：]?$/i.test(text) || /questions?.*41.*45|list\s+A|numbered|extra choices|wrong order|reorganize|subheading|ANSWER SHEET/i.test(text)) {
+      directionParts.push(text)
+    } else break
+  }
+  const direction = clean(directionParts.join(' '))
   const candidates: Record<string, string> = {}
   const material: string[] = []
-  for (const text of section.slice(directionEnd)) {
-    const match = text.match(/^\s*\[([A-H])\]\s*(.*)$/is)
-    if (match) candidates[match[1].toUpperCase()] = clean(match[2])
-    else if (!/^(Directions:|Part [ABC]|Section )/i.test(text)) material.push(text)
-  }
-  if (Object.keys(candidates).length < 7) {
-    const candidateCount = /wrong order|reorganize/i.test(direction) ? 8 : 7
-    const tail = material.slice(-candidateCount)
-    if (tail.length === candidateCount) {
-      tail.forEach((text, index) => { candidates[String.fromCharCode(65 + index)] = text })
-      material.splice(material.length - candidateCount, candidateCount)
+  const opinionMatching = /people|person|comments|name|left column.*right column/i.test(direction)
+  const names: Record<string, string> = {}
+  let candidate = ''
+  for (const text of section.slice(directionParts.length)) {
+    if (/^\s*(?:46[.．]\s*)?Directions[:：]/i.test(text)) break
+    const name = text.match(/^\s*(4[1-5])[.．)]\s*(.+)$/)
+    if (opinionMatching && name) { names[name[1]] = clean(name[2]); candidate = ''; continue }
+    const match = text.match(/^\s*(?:\[([A-H])\]|([A-H])[.．、)])\s*(.*)$/is)
+    if (match) {
+      candidate = (match[1] || match[2]).toUpperCase()
+      candidates[candidate] = clean(match[3])
+    } else if (!/^(Directions:|Part [ABC]|Section )/i.test(text)) {
+      if (/^\s*(?:\(?4[1-5]\)?[.．_]|\{\{blank:)/.test(text)) candidate = ''
+      if (candidate && (!/subheading/i.test(direction) || Object.keys(candidates).length < 7)) candidates[candidate] = clean(candidates[candidate] + ' ' + text)
+      else material.push(text)
     }
   }
+  // Missing labels require correction; never invent candidates from body paragraphs.
   const subtype = /wrong order|reorganize/i.test(direction)
     ? 'paragraph_reordering'
     : /subheading/i.test(direction)
       ? 'heading_matching'
-      : /people|person|comments|name/i.test(direction)
+      : opinionMatching
         ? 'opinion_matching'
         : /paragraphs from the list/i.test(direction)
           ? 'paragraph_insertion'
@@ -449,7 +471,7 @@ function parsePartB(blocks: string[], answers: Record<string, string>): JsonReco
       const number = 41 + index
       return {
         number,
-        stem: `位置 ${number}`,
+        stem: names[String(number)] || `位置 ${number}`,
         options,
         answer: answers[String(number)] || '',
         score: 2,
@@ -477,6 +499,21 @@ function applyAnswers(draft: JsonRecord) {
 export function validateDocumentDraft(draft: JsonRecord): string[] {
   const warnings: string[] = []
   applyAnswers(draft)
+  for (const unit of draft.units) {
+    if (unit.unit_type === 'cloze') {
+      const blanks = [...String(unit.passage || '').matchAll(/\{\{blank:(\d+)\}\}|(?<![\w])([1-9]|1\d|20)\s*_{2,}/g)].map(match => Number(match[1] || match[2]))
+      const expected = unit.questions.map((q: JsonRecord) => Number(q.number))
+      if (blanks.length !== expected.length || expected.some((n: number) => blanks.filter(value => value === n).length !== 1)) {
+        warnings.push('完型空位缺失或重复，请对照原文校对')
+      }
+    }
+    for (const question of unit.questions) {
+      const options = question.options || []
+      if (new Set(options.map((o: JsonRecord) => o.key)).size !== options.length
+        || options.some((o: JsonRecord) => !clean(o.content) || /^\d+[.．]?$/u.test(clean(o.content)))) warnings.push('第' + question.number + '题选项为空、重复或混入题号')
+      if (unit.unit_type === 'reading' && (clean(question.stem).match(/[A-Za-z]+/g) || []).length < 3) warnings.push('第' + question.number + '题题干疑似截断，请校对')
+    }
+  }
   const numbers = expectedNumbers(draft)
   const missing = numbers.filter(number => !draft.answers[String(number)])
   if (missing.length) warnings.push(`缺少标准答案：${missing.join('、')}`)
@@ -733,6 +770,7 @@ export function parseExtractedExam(
           shellUnit('reading', 'reading_a', '阅读 Section C — Passage Two', 7, 51, 55, answers),
         ]
       : [parseCloze(source.blocks, answers), ...parseReading(source.blocks, answers)]
+        .filter((unit): unit is JsonRecord => unit !== null)
   if (!isCet4 && !isCet6 && hasObjectivePartB(source.blocks)) units.push(parsePartB(source.blocks, answers))
   const month = Number(fileName.match(/(?:年|[._-])\s*(\d{1,2})\s*月?/)?.[1]) || 0
   const setNumber = Number(fileName.match(/第\s*([1-9])\s*套/)?.[1]) || 1
@@ -789,7 +827,14 @@ async function modelIdentity(profileId?: number, model?: string) {
       `SELECT * FROM ai_profiles WHERE enabled = 1 AND TRIM(default_model) <> ''
        ORDER BY is_default DESC, id LIMIT 1`,
     )
-  if (!profile) throw new LocalApiError(400, '请先配置并启用一个模型')
+  if (!profile) {
+    if (profileId) throw new LocalApiError(400, '所选模型配置不存在或已停用，请重新选择')
+    const enabledProfile = await row<JsonRecord>('SELECT id FROM ai_profiles WHERE enabled = 1 LIMIT 1')
+    if (enabledProfile) {
+      throw new LocalApiError(400, '已启用模型配置，但尚未设置默认模型；请在设置中选择默认模型，或选择模型重试')
+    }
+    throw new LocalApiError(400, '请先配置并启用一个模型')
+  }
   const selectedModel = String(model || profile.default_model || '').trim()
   if (!selectedModel) throw new LocalApiError(400, '请选择用于导入校对的模型')
   return { profile, selectedModel }
@@ -1112,7 +1157,9 @@ export async function createDocumentImport(form: FormData): Promise<JsonRecord> 
   const source = await extractDocument(file)
   const answerSource = answerFile instanceof File
     ? { fileName: answerFile.name, extracted: await extractDocument(answerFile) } : undefined
-  const profileId = Number(form.get('profile_id') || 0) || await activeQuestionBankProfileId()
+  const profileId = Number(form.get('profile_id') || 0) || undefined
+  const newName = form.get('new_profile_name')
+  const newProfileName = newName === null ? undefined : String(newName)
   const toBase64 = async (input: File) => {
     const bytes = new Uint8Array(await input.arrayBuffer())
     let binary = ''
@@ -1135,6 +1182,7 @@ export async function createDocumentImport(form: FormData): Promise<JsonRecord> 
   const detectedPaperCount = split.papers.length
   const ignoredPaperCount = Math.max(0, detectedPaperCount - 1)
   const selectedPapers = split.papers.slice(0, 1)
+  if (!selectedPapers.length) throw new LocalApiError(422, '文档中未识别到试卷，未创建题库配置')
   const createdJobs: JsonRecord[] = []
   for (let index = 0; index < selectedPapers.length; index++) {
     const section = selectedPapers[index]
@@ -1178,32 +1226,35 @@ export async function createDocumentImport(form: FormData): Promise<JsonRecord> 
       name: audio.name,
       type: audio.type || 'application/octet-stream',
     }))
-    const created = await run(
-      `INSERT INTO document_import_jobs
-        (profile_id, filename, answer_filename, source_file_base64,
-         answer_file_base64, audio_files_base64, detected_year, detected_format, status,
-         draft_data, warnings)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
-      [
-        profileId,
-        sectionFileName,
-        answerFile instanceof File ? answerFile.name : '',
-        sourceBase64,
-        answerBase64,
-        JSON.stringify(audioPayload),
-        draft.year,
-        draft.detected_format,
-        JSON.stringify(draft),
-        JSON.stringify(draft.warnings || []),
-      ],
-    )
+    const saved = await saveImportDraft(profileId, newProfileName, async (db, targetId) => {
+      const created = await db.run(
+        `INSERT INTO document_import_jobs
+          (profile_id, filename, answer_filename, source_file_base64,
+           answer_file_base64, audio_files_base64, detected_year, detected_format, status,
+           draft_data, warnings)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
+        [
+          targetId,
+          sectionFileName,
+          answerFile instanceof File ? answerFile.name : '',
+          sourceBase64,
+          answerBase64,
+          JSON.stringify(audioPayload),
+          draft.year,
+          draft.detected_format,
+          JSON.stringify(draft),
+          JSON.stringify(draft.warnings || []),
+        ], false,
+      )
+      return { id: Number(created.changes?.lastId), profileId: targetId }
+    })
     createdJobs.push({
-      id: Number(created.lastId),
+      id: saved.id,
       filename: sectionFileName,
       draft: Object.fromEntries(Object.entries(draft).filter(([key]) => !['source_text', 'answer_text'].includes(key))),
       warnings: draft.warnings,
       model_assist: draft.model_assist,
-      profile_id: profileId,
+      profile_id: saved.profileId,
       paper_index: index + 1,
       paper_count: 1,
       has_objective_questions: section.has_objective_questions,

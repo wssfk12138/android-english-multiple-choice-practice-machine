@@ -34,13 +34,13 @@ export interface QuestionBankRemotePackage {
   fileName: string
   downloadUrl: string
   sha256: string
-  size?: number
-  license?: string
-  years?: number[]
+  size: number
+  license: string
+  years: number[]
 }
 
 export interface QuestionBankRemoteCatalog {
-  catalogVersion: number
-  updatedAt: string
+  catalogVersion: 1
+  updatedAt?: string
   packages: QuestionBankRemotePackage[]
 }

@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { splitPassageBlanks } from '../passage-blanks'
+import PassageBlank from './PassageBlank.vue'
 
 const props = withDefaults(defineProps<{
   blocks?: any[]
   packageId?: string
   contentVersion?: string
+  blankNumbers?: number[]
 }>(), {
   blocks: () => [],
   packageId: '',
   contentVersion: '',
+  blankNumbers: () => [],
 })
 
 const hasBlocks = computed(() => props.blocks.length > 0)
@@ -19,17 +23,7 @@ function assetUrl(assetId: string) {
 }
 
 function textParts(text: string) {
-  const parts: Array<{ type: 'text' | 'blank', text: string, number?: number }> = []
-  const pattern = /\{\{blank:(\d+)\}\}/g
-  let cursor = 0
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > cursor) parts.push({ type: 'text', text: text.slice(cursor, match.index) })
-    parts.push({ type: 'blank', text: match[1], number: Number(match[1]) })
-    cursor = match.index + match[0].length
-  }
-  if (cursor < text.length) parts.push({ type: 'text', text: text.slice(cursor) })
-  return parts
+  return splitPassageBlanks(text, props.blankNumbers)
 }
 </script>
 
@@ -38,7 +32,7 @@ function textParts(text: string) {
     <template v-for="block in blocks" :key="block.blockKey">
       <p v-if="block.type === 'paragraph' || block.type === 'quote'" class="content-block-text" :class="{quote:block.type === 'quote'}">
         <template v-for="(part, index) in textParts(block.text || '')" :key="`${block.blockKey}-${index}`">
-          <span v-if="part.type === 'blank'" class="passage-blank" :aria-label="`第 ${part.number} 空`"><span class="blank-number">{{ part.number }}</span></span>
+          <PassageBlank v-if="part.type === 'blank'" :number="part.number" />
           <template v-else>{{ part.text }}</template>
         </template>
       </p>
@@ -48,7 +42,12 @@ function textParts(text: string) {
       </figure>
       <div v-else-if="block.type === 'table'" class="content-block-table">
         <div v-if="block.caption" class="content-block-caption">{{ block.caption }}</div>
-        <table><tbody><tr v-for="(row, rowIndex) in block.rows || []" :key="`${block.blockKey}-${rowIndex}`"><td v-for="(cell, cellIndex) in row" :key="`${block.blockKey}-${rowIndex}-${cellIndex}`">{{ cell }}</td></tr></tbody></table>
+        <table><tbody><tr v-for="(row, rowIndex) in block.rows || []" :key="`${block.blockKey}-${rowIndex}`"><td v-for="(cell, cellIndex) in row" :key="`${block.blockKey}-${rowIndex}-${cellIndex}`">
+          <template v-for="(part, partIndex) in textParts(String(cell ?? ''))" :key="partIndex">
+            <PassageBlank v-if="part.type === 'blank'" :number="part.number" />
+            <template v-else>{{ part.text }}</template>
+          </template>
+        </td></tr></tbody></table>
       </div>
       <div v-else-if="block.type === 'audio' && assetUrl(block.assetId)" class="content-block-audio">
         <audio controls :src="assetUrl(block.assetId)"></audio>

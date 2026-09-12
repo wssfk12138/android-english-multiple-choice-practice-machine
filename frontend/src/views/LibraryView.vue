@@ -112,10 +112,10 @@ async function deleteSelected() {
 
 <template>
   <div class="page">
-    <div class="page-head"><div><span class="eyebrow">QUESTION LIBRARY</span><h1>按年份练习</h1><p class="lead">完成整年45道客观题后统一判分，中途自动保存。</p></div></div>
+    <div class="page-head"><div><h1>按年份练习</h1></div></div>
     <QuestionBankSwitcher @changed="loadPapers" />
     <div class="batch-toolbar">
-      <span class="lead">{{ batchMode ? `已选择 ${selectedIds.size} 套试卷` : '长按试卷或点击“批量管理”可移动、删除多套试卷。' }}</span>
+      <span v-if="batchMode" class="lead">已选择 {{ selectedIds.size }} 套试卷</span>
       <span style="display:flex;gap:8px;flex-wrap:wrap">
         <button v-if="!batchMode" class="button secondary compact" type="button" @click="batchMode=true"><CheckSquare :size="16" />批量管理</button>
         <template v-else>
@@ -141,9 +141,9 @@ async function deleteSelected() {
         <h3>{{ paper.title }}</h3>
         <p class="lead">{{ paper.subject }} · {{ paper.unit_count }}篇 · {{ paper.question_count }}题</p>
         <div class="paper-actions">
-  <button class="button" style="flex:1" :disabled="paper.status !== 'published' || batchMode" @click.stop="startPaper(paper.id)"><Play :size="16" />{{ paper.active_session_id ? '继续练习' : '开始整卷' }}</button>
-  <button v-if="paper.active_session_id" class="button ghost" :disabled="batchMode" @click.stop="restartPaper(paper.id)">重新开始</button>
-</div>
+          <button class="button paper-primary-action" :disabled="paper.status !== 'published' || batchMode" @click.stop="startPaper(paper.id)"><Play :size="16" />{{ paper.active_session_id ? '继续练习' : '开始整卷' }}</button>
+          <button v-if="paper.active_session_id" class="button ghost paper-restart-action" :disabled="batchMode" @click.stop="restartPaper(paper.id)">重新开始</button>
+        </div>
       </article>
     </div>
     <div v-else class="card empty illustrated-empty">

@@ -1,6 +1,9 @@
+import { agentTurn, saveAgentExchange, conversation } from './ai'
+import { studyTodos } from './study-todos'
 import { analyzeWrongQuestions, analyzeWrongStatus, createProfile, createConversation, deleteConversation, deleteProfile, listConversations, listProfiles, selectorModels, sendChat, setAllModelVisibility, setModelVisibility, syncModels, testProfile, updateProfile } from './ai'
 import { LocalApiError } from './errors'
-import { archiveWrongUnits, createSession, dashboard, getSession, listWrong, saveAnswer, submitSession, submitUnit } from './practice'
+import { chooseSnapshot } from './practice-snapshots'
+import { abandonIfEmpty, archiveWrongUnits, createSession, dashboard, getSession, listWrong, saveAnswer, submitSession, submitUnit } from './practice'
 import { createEsqImport, listEsqImports, listPapers, publishEsqImport, readEsqImport } from './question-bank'
 import { addVocabulary, deleteVocabulary, homeVocabulary, listVocabulary, reviewVocabulary, retryVocabulary, serializeEntry, updateVocabulary } from './vocabulary'
 import { checkAppUpdate, checkQuestionBankCatalog, downloadQuestionBankPackage, installAppUpdate, readUpdateSettings, updateSettings } from './app-update'
@@ -17,9 +20,13 @@ import {
   labelingStatus,
   labelNextUnit,
   listQuestionLabels,
+  failLabelRun,
+  pauseLabelRun,
   updateQuestionLabel,
 } from './question-labeling'
 import { queueAndStartVocabularyTranslations } from './vocabulary-translation-runner'
+import { lanSyncStatus, pushAuthoritativeModelConfiguration, tombstoneVocabularyEntry, tombstoneWrongUnit, updateLanSyncSettings } from './lan-sync'
+import { notifyLocalChange, refreshSyncState, syncNow } from './sync-scheduler'
 import {
   activateQuestionBankProfile,
   createQuestionBankProfile,
@@ -51,16 +58,32 @@ function match(pathname: string, pattern: RegExp): RegExpMatchArray | null {
 }
 
 export async function androidLocalApi<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const { ensureContentRemediation } = await import('./content-remediation')
+  // Vocabulary, AI, settings and sync stay responsive while content repair runs.
+  // Question-bank routes still wait so they never observe a partial remediation.
+  const independent = /^\/(?:vocabulary|ai|android|settings|models)(?:[/?]|$)/.test(path)
+  if (independent) {
+    void ensureContentRemediation().catch(() => {})
+  } else {
+    await ensureContentRemediation()
+  }
   const method = String(options.method || 'GET').toUpperCase()
   const url = new URL(path, 'https://local.english-practice.invalid')
   const pathname = url.pathname
   const body = options.body instanceof FormData ? null : bodyJson(options)
   let params: RegExpMatchArray | null
 
+  if (method === 'GET' && pathname === '/study-todos') return await studyTodos() as T
   if (method === 'GET' && pathname === '/startup') return await dashboard() as T
   if (method === 'GET' && pathname === '/papers') return await listPapers() as T
   if (method === 'GET' && pathname === '/wrong') return await listWrong(url.searchParams.get('view') || 'current') as T
-  if (method === 'POST' && pathname === '/wrong/archive-delete') return await archiveWrongUnits(body?.unit_ids || []) as T
+  if (method === 'POST' && pathname === '/wrong/archive-delete') {
+    const unitIds = (body?.unit_ids || []).map(Number).filter(Boolean)
+    for (const unitId of unitIds) await tombstoneWrongUnit(unitId)
+    const result = await archiveWrongUnits(unitIds)
+    notifyLocalChange()
+    return result as T
+  }
   if (method === 'GET' && pathname === '/question-bank-profiles') {
     return await listQuestionBankProfiles() as T
   }
@@ -82,20 +105,38 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (params && method === 'DELETE') return await purgeTrash(Number(params[1])) as T
 
   if (method === 'POST' && pathname === '/practice/sessions') {
-    return await createSession(body!) as T
+    const result = await createSession(body!)
+    notifyLocalChange()
+    return result as T
+  }
+  params = match(pathname, /^\/practice\/sessions\/(\d+)\/content-choice$/)
+  if (params && method === 'POST') {
+    const result = await chooseSnapshot(Number(params[1]), String(body?.choice || ''))
+    notifyLocalChange()
+    return result as T
   }
   params = match(pathname, /^\/practice\/sessions\/(\d+)$/)
   if (params && method === 'GET') return await getSession(Number(params[1])) as T
   params = match(pathname, /^\/practice\/sessions\/(\d+)\/answers\/(\d+)$/)
   if (params && method === 'PUT') {
-    return await saveAnswer(Number(params[1]), Number(params[2]), body!) as T
+    const result = await saveAnswer(Number(params[1]), Number(params[2]), body!)
+    notifyLocalChange()
+    return result as T
   }
   params = match(pathname, /^\/practice\/sessions\/(\d+)\/units\/(\d+)\/submit$/)
   if (params && method === 'POST') {
-    return await submitUnit(Number(params[1]), Number(params[2])) as T
+    const result = await submitUnit(Number(params[1]), Number(params[2]))
+    notifyLocalChange()
+    return result as T
   }
+  params = match(pathname, /^\/practice\/sessions\/(\d+)\/abandon-if-empty$/)
+  if (params && method === 'POST') return await abandonIfEmpty(Number(params[1])) as T
   params = match(pathname, /^\/practice\/sessions\/(\d+)\/submit$/)
-  if (params && method === 'POST') return await submitSession(Number(params[1])) as T
+  if (params && method === 'POST') {
+    const result = await submitSession(Number(params[1]))
+    notifyLocalChange()
+    return result as T
+  }
 
   if (pathname === '/question-banks/imports' && method === 'GET') {
     return await listEsqImports() as T
@@ -104,7 +145,11 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
     if (!(options.body instanceof FormData)) throw new LocalApiError(400, '请选择 ESQ 文件')
     const file = options.body.get('file')
     if (!(file instanceof File)) throw new LocalApiError(400, '请选择 ESQ 文件')
-    return await createEsqImport(file, Number(options.body.get('profile_id') || 0) || undefined) as T
+    const newName = options.body.get('new_profile_name')
+    return await createEsqImport(
+      file, Number(options.body.get('profile_id') || 0) || undefined,
+      newName === null ? undefined : String(newName),
+    ) as T
   }
   params = match(pathname, /^\/question-banks\/imports\/(\d+)$/)
   if (params && method === 'GET') return await readEsqImport(Number(params[1])) as T
@@ -132,9 +177,25 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (pathname === '/vocabulary' && method === 'GET') {
     return await listVocabulary(url.searchParams) as T
   }
-  if (pathname === '/vocabulary' && method === 'POST') return await addVocabulary(body!) as T
+  if (pathname === '/vocabulary' && method === 'POST') {
+    const result = await addVocabulary(body!)
+    notifyLocalChange()
+    return result as T
+  }
   if (pathname === '/vocabulary/home' && method === 'GET') {
     return await homeVocabulary(Number(url.searchParams.get('limit') || 20)) as T
+  }
+  if (pathname === '/vocabulary/translation-status' && method === 'GET') {
+    const { rows } = await import('./database')
+    const groups = await rows<{ status: string; count: number }>(
+      `SELECT translation_status AS status, COUNT(*) AS count FROM vocabulary_entries
+       WHERE user_edited = 0 GROUP BY translation_status`,
+    )
+    const enrichment = await rows<{status:string;count:number}>(
+      "SELECT state AS status,COUNT(*) AS count FROM vocabulary_enrichment_jobs GROUP BY state",
+    )
+    return Object.fromEntries([...groups.map(group => [group.status, Number(group.count)]),
+      ...enrichment.map(group => ['enrichment_' + group.status, Number(group.count)])]) as T
   }
   if (pathname === '/vocabulary/translation-runs' && method === 'POST') {
     let ids = (body?.entry_ids || []).map(Number).filter(Boolean)
@@ -144,28 +205,84 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
       const pending = await rows<{ id: number }>(
         `SELECT id FROM vocabulary_entries
          WHERE user_edited = 0 AND translation_status IN ('pending', 'queued')
-         ORDER BY updated_at, id LIMIT 100`,
+         ORDER BY updated_at, id`,
       )
-      ids = [...new Set([...ids, ...pending.map(item => Number(item.id))])].slice(0, 100)
+      ids = [...new Set([...ids, ...pending.map(item => Number(item.id))])]
     }
     const queued = await queueAndStartVocabularyTranslations(ids)
     return queued as T
   }
   params = match(pathname, /^\/vocabulary\/(\d+)$/)
   if (params && method === 'GET') return await serializeEntry(Number(params[1])) as T
-  if (params && method === 'PUT') return await updateVocabulary(Number(params[1]), body!) as T
-  if (params && method === 'DELETE') return await deleteVocabulary(Number(params[1])) as T
+  if (params && method === 'PUT') {
+    const result = await updateVocabulary(Number(params[1]), body!)
+    notifyLocalChange()
+    return result as T
+  }
+  if (params && method === 'DELETE') {
+    const id = Number(params[1])
+    await tombstoneVocabularyEntry(id)
+    const result = await deleteVocabulary(id)
+    notifyLocalChange()
+    return result as T
+  }
+  if (pathname === '/vocabulary/retry-pending' && method === 'POST') {
+    await retryVocabulary(0)
+    const result = await queueAndStartVocabularyTranslations([])
+    const { retryPendingVocabularyEnrichments } = await import('./vocabulary-enrichment-runner')
+    void retryPendingVocabularyEnrichments().catch(() => { /* Durable job status is shown by polling. */ })
+    notifyLocalChange()
+    return result as T
+  }
+  params = match(pathname, /^\/vocabulary\/(\d+)\/enrichment$/)
+  if (params && method === 'POST') {
+    const { requestVocabularyEnrichment } = await import('./vocabulary-enrichment-runner')
+    await requestVocabularyEnrichment(Number(params[1]))
+    notifyLocalChange()
+    return await serializeEntry(Number(params[1])) as T
+  }
   params = match(pathname, /^\/vocabulary\/(\d+)\/retry$/)
   if (params && method === 'POST') {
     const id = Number(params[1])
     await retryVocabulary(id)
-    return await queueAndStartVocabularyTranslations([id]) as T
+    const result = await queueAndStartVocabularyTranslations([id])
+    const { retryPendingVocabularyEnrichments } = await import('./vocabulary-enrichment-runner')
+    void retryPendingVocabularyEnrichments().catch(() => { /* Durable job status is shown by polling. */ })
+    notifyLocalChange()
+    return result as T
   }
   params = match(pathname, /^\/vocabulary\/(\d+)\/review$/)
-  if (params && method === 'POST') return await reviewVocabulary(Number(params[1]), body?.rating, body?.mode) as T
+  if (params && method === 'POST') {
+    const result = await reviewVocabulary(Number(params[1]), body?.rating, body?.mode, body?.expected_revision)
+    notifyLocalChange()
+    return result as T
+  }
+
+  if (pathname === '/android/lan-sync/status' && method === 'GET') {
+    return { ...(await lanSyncStatus()), runtime: await refreshSyncState() } as T
+  }
+  if (pathname === '/android/lan-sync/settings' && method === 'PUT') {
+    const result = await updateLanSyncSettings({
+      lan_sync_host: body?.host,
+      lan_sync_passcode: body?.passcode,
+      pairing: body?.pairing,
+      categories: body?.categories,
+      lan_sync_auto: body?.auto ? '1' : '0',
+    })
+    return { ...result, runtime: await refreshSyncState() } as T
+  }
+  if (pathname === '/android/lan-sync/run' && method === 'POST') {
+    return await syncNow() as T
+  }
+  if (pathname === '/android/lan-sync/models/authoritative' && method === 'POST') {
+    if (body?.confirm !== true) throw new LocalApiError(400, '请先确认以本机模型配置发送到电脑')
+    return await pushAuthoritativeModelConfiguration() as T
+  }
 
   if (pathname === '/ai/profiles' && method === 'GET') return await listProfiles() as T
   if (pathname === '/ai/profiles' && method === 'POST') return await createProfile(body!) as T
+  const keyRoute = /^\/ai\/profiles\/(\d+)\/keys$/.exec(pathname)
+  if (keyRoute && method === 'POST') return await editNamedKey(Number(keyRoute[1]), body!) as T
   params = match(pathname, /^\/ai\/profiles\/(\d+)$/)
   if (params && method === 'PUT') return await updateProfile(Number(params[1]), body!) as T
   if (params && method === 'DELETE') return await deleteProfile(Number(params[1])) as T
@@ -181,20 +298,10 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (pathname === '/ai/conversations' && method === 'GET') return await listConversations() as T
   if (pathname === '/ai/conversations' && method === 'POST') return await createConversation() as T
   params = match(pathname, /^\/ai\/conversations\/(\d+)$/)
-  if (params && method === 'GET') {
-    const conversations = await listConversations()
-    const found = conversations.find(item => item.id === Number(params![1]))
-    if (!found) throw new LocalApiError(404, '对话不存在')
-    const { rows } = await import('./database')
-    return {
-      ...found,
-      messages: await rows(
-        'SELECT * FROM ai_messages WHERE conversation_id = ? ORDER BY id',
-        [Number(params[1])],
-      ),
-    } as T
-  }
+  if (params && method === 'GET') return await conversation(Number(params[1])) as T
   if (params && method === 'DELETE') return await deleteConversation(Number(params[1])) as T
+  if (pathname === '/ai/agent-turn' && method === 'POST') return await agentTurn(body!) as T
+  if (pathname === '/ai/agent-exchange' && method === 'POST') return await saveAgentExchange(body!) as T
   if (pathname === '/ai/chat' && method === 'POST') return await sendChat(body!) as T
   if (pathname === '/ai/wrong-analysis-status' && method === 'GET') {
     return await analyzeWrongStatus() as T
@@ -214,8 +321,15 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
       return await listQuestionLabels(url.searchParams) as T
     }
     if (pathname === '/ai/question-labels/next' && method === 'POST') {
-      return await labelNextUnit(body || {}) as T
+      try {
+        return await labelNextUnit(body || {}) as T
+      } catch (error) {
+        try { await failLabelRun(String(body?.run_id || ''), error) } catch { /* 状态记录失败时保留原始模型错误 */ }
+        throw error
+      }
     }
+    params = match(pathname, /^\/ai\/question-labels\/runs\/([^/]+)\/pause$/)
+    if (params && method === 'POST') return await pauseLabelRun(decodeURIComponent(params[1])) as T
     params = match(pathname, /^\/ai\/question-labels\/(\d+)$/)
     if (params && method === 'PUT') return await updateQuestionLabel(Number(params[1]), body || {}) as T
   }
@@ -238,12 +352,6 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (pathname === '/android/updates/question-banks/download' && method === 'POST') {
     return await downloadQuestionBankPackage(body || {}) as T
   }
-  if (pathname === '/android/diagnostics/settings' && method === 'GET') {
-    return await readUpdateSettings() as T
-  }
-  if (pathname === '/android/diagnostics/settings' && method === 'PUT') {
-    return await updateSettings(body || {}) as T
-  }
-
   throw new LocalApiError(501, `Android 本地接口尚未实现：${method} ${pathname}`)
 }
+import { editNamedKey } from './model-key-store'
