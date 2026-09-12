@@ -14,7 +14,7 @@
 
 ## 剩余事项
 
-- [门禁收尾与工作树归档](history/2026-09-gates-cleanup.md)（2026-09-12）已完成：61 个测试全部入库并挂接 `test:all`（57 通过 / 4 个 Playwright PREREQ 需 `PLAYWRIGHT_MODULE`）；修复 6 个失败测试（含 `test:document-draft-persistence` 8/8）；`chooseSnapshot` 批量化、`sessionId` 兜底硬化；孤儿行/冗余索引只读统计落档；平板测试包残留数据已按备份恢复；手机端只读诊断完成。窄范围本地提交按白名单执行（不推送）。
+- [门禁收尾与工作树归档](history/2026-09-gates-cleanup.md)（2026-09-12）已完成：61 个测试全部入库并挂接 `test:all`；Playwright 已随仓库安装，4 个浏览器测试默认真跑（支持 `--strict` 让 PREREQ 阻断）；修复 6 个失败测试（含 `test:document-draft-persistence` 8/8）；`chooseSnapshot` 批量化、`sessionId` 兜底硬化；孤儿行/冗余索引只读统计落档；平板测试包残留数据已按备份恢复；手机端只读诊断完成。窄范围本地提交按白名单执行（不推送）。
 
 - [AI助手基础Agent与切页修复](history/2026-09-assistant-agent.md)：Windows/Android开发仓源码与合成验证完成。DOCX受限工具、多轮结果反馈、本机副本、任务步骤与切页状态保留已实现；未同步公测或覆盖安装。待一次真实模型和Android系统分享体验；不重跑无关验收。
 

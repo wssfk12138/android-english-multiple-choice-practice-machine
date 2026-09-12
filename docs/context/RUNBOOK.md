@@ -36,14 +36,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-android-debug.ps
 
 ## 定向测试
 
-- 一条命令跑全部门禁：在 frontend 运行 `corepack.cmd pnpm run test:all`（tests/run-all.mjs 汇总 61 个 .mjs，PREREQ 项显式标注而非静默通过；CONTENT_MANIFEST 缺省指向 `public/content-remediation.json`）。4 个 Playwright 测试（assistant-agent、barcode-scanner-layout、lan-s6-ui、vocabulary-layout）需以 `PLAYWRIGHT_MODULE` 指定本机 playwright 模块绝对路径，否则计入 PREREQ。
+- 一条命令跑全部门禁：在 frontend 运行 `corepack.cmd pnpm run test:all`（tests/run-all.mjs 汇总 61 个 .mjs，PREREQ 项显式标注而非静默通过；CONTENT_MANIFEST 缺省指向 `public/content-remediation.json`）。Playwright 已随仓库作为 devDependency 安装（pnpm add -D playwright，浏览器缓存位于 `%LOCALAPPDATA%/ms-playwright`），4 个 Playwright 测试（assistant-agent、barcode-scanner-layout、lan-s6-ui、vocabulary-layout）默认真跑；如需回退旧环境，仍可用 `PLAYWRIGHT_MODULE` 指定本机 playwright 模块绝对路径。附加 `--strict`（或 `PLAYWRIGHT_STRICT=1`）时 PREREQ>0 即非零退出，默认模式 PREREQ 不阻断。
 - `test:document-draft-persistence` 已修复（2026-09-12 补 `./content-remediation` 沙箱映射），可独立运行并通过 8 项。
 - 61 个测试文件自 2026-09-12 起全部纳入版本管理与 `package.json` 脚本（`test:<文件名>` 逐个可跑）；更新 mock 时注意 connection.run 返回插件形状 `{changes:{changes,lastId}}`。
 
 - 诊断串行队列：`corepack.cmd pnpm run test:diagnostics`
 - 单词退出流程：`corepack.cmd pnpm run test:vocabulary-exit-flow`
 - 词条手动编辑：`corepack.cmd pnpm run test:vocabulary-manual-edit`
-- 单词横屏详情/复习布局：在frontend运行`node tests/vocabulary-layout.mjs`；需可用Playwright，未本地安装时以`PLAYWRIGHT_MODULE`指定其模块绝对路径。`VOCAB_LAYOUT_OUTPUT`可指向私有截图目录；`VOCAB_LAYOUT_STYLES`只用于指定改前CSS快照复现。56场景使用合成数据与隔离浏览器，覆盖4尺寸、明暗主题、3词长、两个复习入口及显示答案前后的卡片密度，不替代真机旋转验收。
+- 单词横屏详情/复习布局：在frontend运行`node tests/vocabulary-layout.mjs`；Playwright 已随仓库安装，旧环境未安装时以`PLAYWRIGHT_MODULE`指定其模块绝对路径。`VOCAB_LAYOUT_OUTPUT`可指向私有截图目录；`VOCAB_LAYOUT_STYLES`只用于指定改前CSS快照复现。56场景使用合成数据与隔离浏览器，覆盖4尺寸、明暗主题、3词长、两个复习入口及显示答案前后的卡片密度，不替代真机旋转验收。
 - 导入草稿保存/确认答案/失败门禁：`corepack.cmd pnpm run test:document-draft-persistence`
 - 数据库迁移：`corepack.cmd pnpm run test:database-migration`
 - ESQ 兼容性：`corepack.cmd pnpm run test:esq-compatibility`

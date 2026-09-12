@@ -1,6 +1,6 @@
 # 有效设计决策
 
-> 最后核验：2026-09-08。只记录仍有效的决策；实施进度见 NOW.md。
+> 最后核验：2026-09-12。只记录仍有效的决策；实施进度见 NOW.md。
 
 
 ## 项目与发行
@@ -53,7 +53,7 @@
 
 ## 性能与门禁收尾决策（2026-09-12）
 
-- `idx_answers_session` 暂不删除（A1）：已在真实库副本实测，无该索引时 `UNIQUE(session_id, question_id)` 自动索引顶替同一查询计划（`SEARCH ... USING sqlite_autoindex_practice_answers_1 (session_id=?)`），300 次查询中位耗时 47.8ms vs 有索引 56.5ms，无退化。删除收益为零，留待下轮与孤儿行策略一起决策。
+- `idx_answers_session` 暂不删除（A1）：已在真实库副本实测，无该索引时 `UNIQUE(session_id, question_id)` 自动索引顶替同一查询计划（`SEARCH ... USING sqlite_autoindex_practice_answers_1 (session_id=?)`）。读侧收益约等于零，删掉只省少量写入维护开销；300 次查询 47.8ms vs 56.5ms 发生在 55 行的小表上，属噪声范围，仅作佐证而非测量证据。留待下轮与孤儿行策略一起决策。
 - `idx_vocab_due` 不建（B5）：EXPLAIN 证明清单里 6 条候选索引中只有它没有被任何真实查询使用；review 过滤与首页到期排序实际走 `idx_vocab_status`。
 - 单词翻译状态轮询保持 5000ms（A3，原 2500ms）：翻译补全为异步流程，5 秒刷新对体验无感，减少全量重取与 DOM 重建。
 - `journal_mode` 保持 delete，不转 WAL（B10）：改 WAL 会改变掉电/被杀时的持久性语义并引入 `-wal`/`-shm` 副文件，属产品级决策；事务化已把丢失窗口从「一次开始练习」压到「单次逻辑动作」。剩余风险：单次逻辑动作内的最后提交若正好被杀仍会整体回滚（数据库不损坏）。
