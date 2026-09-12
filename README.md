@@ -39,9 +39,6 @@
 
 ## Android 版不提供的功能
 
-- Word、PDF 题库解析。
-- Android 端题库模型智能标注。
-- Windows 与 Android 实时同步。
 - 普通应用无法实现的静默 APK 安装。
 
 题库可以先在 Windows 电脑版完成 Word/PDF 导入和人工校正，再导出为 ESQ 供 Android 使用。

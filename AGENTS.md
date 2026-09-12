@@ -1,51 +1,35 @@
 # 英语刷题机 Android 开发规则
 
-## 项目定位
+本仓为 Android 本地开发权威树；公开副本及 Windows 树独立，准确路径和边界按需查 docs/context/MAP.md。
+技术栈：Vue 3、TypeScript、Vite、Capacitor 8、SQLite 原生适配、Java；JDK 21、SDK 36，包管理器以 frontend/package.json 为准。复用现有 API、类型和样式约定。
 
-- 本仓库是英语刷题机 Android 的独立开发与发行项目。
-- Windows 电脑版仅作为产品功能和 ESQ 兼容性的上游参考。
-- Android 与 Windows 不共享数据库、版本号、签名证书、提交历史或发布节奏。
+## 产品与安全边界
 
-## 技术栈
+- Android 与 Windows 不共享数据库、版本号、签名证书、提交历史或发布节奏；共享逻辑只按获批文件或逻辑逐项处理并保留平台差异。
+- 导入支持 DOC、DOCX、文本型 PDF 答案附件、模型辅助定位、逐字段草稿校对和批准入库；无可靠文字层的扫描 PDF 应明确提示人工处理，不伪装 OCR 成功。
+- 智能标注保留本次导入、按年份和全部题库三种范围。
+- API Key 仅通过原生 SecureStore 保存，不进入 SQLite、日志、源码或公开上下文。
+- APK、AAB、数据库、签名文件、signing.properties、日志、私有题库和用户数据不得提交。
+- ESQ 改动说明 Windows 兼容性并运行对应检查；不得整仓覆盖不同版本。
 
-- Vue 3、TypeScript、Vite
-- Capacitor 8
-- `@capacitor-community/sqlite`
-- Android Java 原生插件
-- JDK 21、Android SDK 36
+## 按需上下文
 
-## 固定边界
+- 使用已加载的适用规则，不重复读取。需要定位时读 PROJECT_INDEX.md；列表是条件路由，不是全文必读清单。
+- 大文件先查标题或关键词，再读命中片段和必要上下文；证据不足再扩读，足够即停。历史仅在追溯、回归或当前材料不能解释冲突时搜索。
+- 按任务检查目标源码、相关测试和 Git 状态；必要时参考同类实现。文档咨询不机械检查无关源码、构建或设备。
+- 优先用仓库权威资料；用户私人或跨项目背景按已配置的个人记忆路由查询，不默认加载私人记忆或全部历史。
 
-- Android 的题库导入工作流与 Windows 版保持功能一致：支持 DOC、DOCX、文本型 PDF
-  答案附件、模型辅助定位题目与答案、逐字段草稿校对和批准入库。
-- Android 支持题库模型智能标注，并保留按本次导入、按年份和全部题库三种范围。
-- 扫描版或水印严重且没有可靠文字层的 PDF 必须明确提示人工处理；不得把 OCR
-  失败伪装成成功导入。
-- API Key 必须通过原生 SecureStore 保存，不得进入 SQLite、日志或源码。
-- APK、AAB、数据库、签名文件、`signing.properties`、日志和用户数据不得提交。
-- ESQ 兼容性改动需要说明是否仍与 Windows 电脑版格式兼容。
-- 不得从 Windows 仓库整体覆盖本项目；共享功能必须按明确提交或文件逐项移植。
+- 接续工作或排期读 docs/context/NOW.md 对应事项；路径/版本/同步读 MAP.md；运行验收读 RUNBOOK.md；设计冲突读 DECISIONS.md；相关高风险操作读 RISKS.md。
+- PROJECT_NOTES.md 是旧入口，不默认读取。仅有实质状态变化时更新权威专题；旧过程归档，不在入口追加流水账。
 
-## 开发流程
+## 授权与阶段成果
 
-1. 所有 Android 功能和修复只在本项目完成。
-2. 每个完整功能或 Bug 修复单独提交。
-3. 使用精简验收：
-   - `corepack.cmd pnpm run build`
-   - `corepack.cmd pnpm exec cap sync android`
-   - `frontend\android\gradlew.bat assembleDebug`
-4. 有真机时，再执行与改动相关的荣耀平板核心交互验证。
-5. 发布前检查应用 ID、签名证书、递增的 `versionCode`、APK SHA-256 和更新清单。
+- 暂存、本地提交、推送、发布、通道更新、跨仓同步和永久删除分别判断授权。已有明确范围的阶段授权持续有效，不因步骤变化反复询问；正常授权编辑直接推进。
+- 可验收成果需要保存时主动建议本地提交或回退安排；未获授权不执行，不强求每个小改动单独提交。完成功能不自动发起同步或发布。
+- 不丢弃用户已有修改，不整仓覆盖其他版本；清理先核对对象、引用和回退方法，不把工作树干净理解为删除全部本地内容。
 
-## 常用命令
+## 验证
 
-- 安装依赖：`cd frontend; corepack.cmd pnpm install`
-- 构建 APK：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-android-debug.ps1`
-- 打开 Android Studio：`cd frontend; corepack.cmd pnpm run android:open`
-
-## 当前第一版限制
-
-- 远程题库支持目录检查、ESQ 下载、SHA-256 校验与导入预览；仍需用户确认冲突处理后发布。
-- ESQ 多媒体资产尚未落盘。
-- Word/PDF 解析和智能标注在 Android 本机执行，模型密钥仍只由 SecureStore 提供。
-- 尚未完成荣耀平板 9 真机验收。
+- 按风险选择检查；构建前置和命令按需查 docs/context/RUNBOOK.md。涉及 APK/原生交付时才使用对应前端构建、Capacitor 同步与 Gradle 链路，文档改动不触发应用构建。
+- UI、布局或原生交互变化需要时做相关设备横竖屏、旋转与核心交互验证；不因设备存在就重跑，不重复用户已完成且实现未变的验收。
+- 发布前核验应用 ID、签名、递增 versionCode、APK SHA-256、更新清单及公开内容扫描。未执行的必要验证明确报告，不以历史记录代替。

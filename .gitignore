@@ -41,3 +41,6 @@ outputs/internal-channel/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local agent working notes and device evidence
+.codex-local/

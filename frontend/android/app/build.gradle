@@ -1,5 +1,6 @@
 apply plugin: 'com.android.application'
 
+def applicationIdOverride = providers.gradleProperty("appApplicationId").getOrElse("").trim()
 def signingProperties = new Properties()
 def signingPropertiesFile = rootProject.file('signing.properties')
 def hasReleaseSigning = signingPropertiesFile.isFile()
@@ -11,7 +12,7 @@ android {
     namespace = "com.wssfk.englishpracticemachine"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.wssfk.englishpracticemachine"
+        applicationId applicationIdOverride ?: "com.wssfk.englishpracticemachine"
         // Apache POI uses MethodHandle APIs that Android supports natively
         // from API 26. The primary target is Android 14, and Android 8.0+
         // remains a practical compatibility floor for this document-import build.
@@ -75,12 +76,14 @@ repositories {
 }
 
 dependencies {
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
+    testImplementation 'org.json:json:20240303'
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')

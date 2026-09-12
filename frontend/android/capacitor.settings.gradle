@@ -5,6 +5,9 @@ project(':capacitor-android').projectDir = new File('../node_modules/.pnpm/@capa
 include ':capacitor-community-sqlite'
 project(':capacitor-community-sqlite').projectDir = new File('../node_modules/.pnpm/@capacitor-community+sqlite@8.1.0_@capacitor+core@8.5.0/node_modules/@capacitor-community/sqlite/android')
 
+include ':capacitor-mlkit-barcode-scanning'
+project(':capacitor-mlkit-barcode-scanning').projectDir = new File('../node_modules/.pnpm/@capacitor-mlkit+barcode-sc_aa5bc617502b4cd634f4d05a907b72ef/node_modules/@capacitor-mlkit/barcode-scanning/android')
+
 include ':capacitor-app'
 project(':capacitor-app').projectDir = new File('../node_modules/.pnpm/@capacitor+app@8.0.1_@capacitor+core@8.5.0/node_modules/@capacitor/app/android')
 
