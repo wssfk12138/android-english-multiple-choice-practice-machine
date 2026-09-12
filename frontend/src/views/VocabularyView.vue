@@ -1,28 +1,85 @@
 <script setup lang="ts">
+import VocabularyEnrichment from '../components/VocabularyEnrichment.vue'
 import { BookOpen, Check, ChevronDown, RefreshCw, Search, Star, Trash2 } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { del, get, post, put } from '../api'
+import { reconcileDueQueue, orderedDueKeys, completeDueWord, wordKey, type DueQueue } from '../vocabulary-due-queue'
 
 const route = useRoute()
 const items = ref<any[]>([])
 const counts = ref<any>({ total:0, frequent:0, mastered:0, pending:0, review:0 })
 const selected = ref<any>(null)
-const filter = ref('all')
+const filter = ref(route.query.review === 'scheduled' ? 'review' : 'all')
+const currentBankScope = route.query.scope === 'current'
 const search = ref('')
 const error = ref('')
 const notice = ref('')
 const editing = ref(false)
 const editForm = reactive<any>({})
+const hasSelectedContent = computed(() => selected.value?.translation_status === 'ready'
+  || ['phonetic', 'part_of_speech', 'contextual_meaning', 'common_meaning', 'note']
+    .some(field => String(selected.value?.[field] || '').trim()))
 const reviewMode = ref(false)
 const reviewKind = ref<'scheduled' | 'reinforcement'>('scheduled')
 const reinforcementSize = ref(10)
 const reveal = ref(false)
 const reviewIndex = ref(0)
+const scheduledWords = ref<any[]>([])
+let dueQueue: DueQueue = reconcileDueQueue(null, [])
+let dueQueueStorageKey = ''
+const reviewSaving = ref(false)
+function persistDueQueue() {
+  try { localStorage.setItem(dueQueueStorageKey, JSON.stringify(dueQueue)) }
+  catch { error.value = '无法保存复习进度，请检查设备存储空间' }
+}
+let dueRefreshPromise: Promise<void> | null = null
+let reviewDisposed = false
+function reviewRevision(word: any) {
+  return word?.review_revision || (word ? JSON.stringify([wordKey(word), word.last_reviewed_at, word.next_review_at, word.review_count, word.updated_at]) : '')
+}
+function refreshDueQueue(): Promise<void> {
+  if (dueRefreshPromise) return dueRefreshPromise
+  dueRefreshPromise = loadDueQueue().finally(() => { dueRefreshPromise = null })
+  return dueRefreshPromise
+}
+async function loadDueQueue() {
+  const previous = reviewRevision(reviewWord.value)
+  // Review needs the complete due set; paging applies only to the browsing list.
+  const result: any = await get(`/vocabulary?status=review${currentBankScope ? '&scope=current' : ''}&limit=all`)
+  if (reviewDisposed) return
+  counts.value = result.counts || counts.value
+  dueQueueStorageKey = `vocab-due-queue:v1:${result.scope_key || (currentBankScope ? 'current' : 'all')}`
+  let saved = null
+  try { saved = JSON.parse(localStorage.getItem(dueQueueStorageKey) || 'null') } catch { /* Rebuild from durable reviews. */ }
+  dueQueue = reconcileDueQueue(saved, result.items || [])
+  persistDueQueue()
+  const words = new Map<string, any>((result.items || []).map((word: any) => [wordKey(word), word]))
+  scheduledWords.value = orderedDueKeys(dueQueue).map(key => words.get(key)).filter(Boolean)
+  if (previous !== reviewRevision(reviewWord.value)) reveal.value = false
+}
 const reviewItems = computed(() => {
+  if (reviewKind.value === 'scheduled') return scheduledWords.value
   const ready = items.value.filter(item => item.translation_status === 'ready')
-  return reviewKind.value === 'reinforcement' ? ready.slice(0, reinforcementSize.value) : ready
+  return reviewKind.value === 'reinforcement' ? ready.slice(0, reinforcementSize.value) : scheduledWords.value
 })
+// The browsing list pages (PAGE_SIZE rows per step); review flows fetch the
+// complete due set through limit=all so paging never truncates a queue.
+const PAGE_SIZE = 100
+const hasMore = ref(false)
+const loadingMore = ref(false)
+const listSentinel = ref<HTMLElement | null>(null)
+let listObserver: IntersectionObserver | null = null
+function listUrl(limitClause: string) {
+  return `/vocabulary?status=${filter.value}&search=${encodeURIComponent(search.value)}${currentBankScope ? '&scope=current' : ''}&${limitClause}`
+}
+function applyLoadedPage(result: any) {
+  const rows = result.items || []
+  const more = rows.length > PAGE_SIZE
+  items.value = more ? rows.slice(0, PAGE_SIZE) : rows
+  counts.value = result.counts || counts.value
+  hasMore.value = more
+}
 const reviewWord = computed(() => reviewItems.value[reviewIndex.value])
 const DISPLAY_DEFAULTS: Record<string, boolean> = {
   common_meaning: true,
@@ -32,6 +89,7 @@ const DISPLAY_DEFAULTS: Record<string, boolean> = {
   synonyms: false,
   antonyms: false,
   similar_forms: false,
+  morphology: true,
 }
 function loadDisplayConfig(): Record<string, boolean> {
   try {
@@ -43,6 +101,21 @@ function loadDisplayConfig(): Record<string, boolean> {
 }
 const displayConfig = ref<Record<string, boolean>>(loadDisplayConfig())
 const expandedAll = ref(false)
+const enrichmentPending = ref(false)
+async function enrichSelected() {
+  if (!selected.value || enrichmentPending.value) return
+  enrichmentPending.value = true
+  const id = selected.value.id
+  try {
+    const result = await post(`/vocabulary/${id}/enrichment`)
+    if (selected.value?.id === id) selected.value = result
+    notice.value = (result as any).enrichment_status === 'ready' ? '词形和例句已补全，手动释义已保留' : '补全任务已保存，稍后可查看结果'
+  } catch (cause) { error.value = String(cause) }
+  finally {
+    enrichmentPending.value = false
+    if (!translationRefreshTimer) translationRefreshTimer = window.setInterval(refreshTranslationStatuses, 5000)
+  }
+}
 
 function isAndroidPortrait() {
   return document.documentElement.dataset.platform === 'android'
@@ -57,27 +130,42 @@ function translationStatusText(status: string, detail = false) {
 }
 
 let translationRefreshTimer = 0
-let translationRefreshAttempts = 0
+let translationRefreshBusy = false
+const translationProgress = ref<any>({})
 
 async function refreshTranslationStatuses() {
-  if (editing.value || reviewMode.value) return
+  if (translationRefreshBusy || reviewDisposed || reviewMode.value) return
+  translationRefreshBusy = true
   try {
-    const result: any = await get(`/vocabulary?status=${filter.value}&search=${encodeURIComponent(search.value)}`)
-    items.value = result.items || []
-    counts.value = result.counts || counts.value
-    if (selected.value && selected.value.translation_status !== 'ready') {
-      selected.value = await get(`/vocabulary/${selected.value.id}`)
-      Object.assign(editForm, selected.value)
-    }
-    translationRefreshAttempts += 1
-    if (!(counts.value.pending > 0) || translationRefreshAttempts >= 24) {
+    const next: any = await get('/vocabulary/translation-status')
+    const previous = translationProgress.value
+    translationProgress.value = next
+    if (!(next.queued > 0 || next.translating > 0 || next.enrichment_queued > 0 || next.enrichment_inflight > 0)) {
       window.clearInterval(translationRefreshTimer)
       translationRefreshTimer = 0
+    }
+    if (editing.value || reviewMode.value) return
+    const countsChanged = JSON.stringify(previous || {}) !== JSON.stringify(next)
+    const selectedPending = selected.value
+      && (selected.value.translation_status !== 'ready' || ['queued','inflight'].includes(selected.value.enrichment_status))
+    if (!countsChanged && !selectedPending) return
+    if (countsChanged) {
+      // Refresh only the already-loaded window (plus one probe row) so the
+      // list does not jump: replacing rows in place keeps the scroll position.
+      const result: any = await get(listUrl(`limit=${items.value.length + 1}&offset=0`))
+      const rows = result.items || []
+      hasMore.value = rows.length > items.value.length
+      items.value = hasMore.value ? rows.slice(0, items.value.length) : rows
+      counts.value = result.counts || counts.value
+    }
+    if (selected.value && selectedPending) {
+      selected.value = await get(`/vocabulary/${selected.value.id}`)
+      Object.assign(editForm, selected.value)
     }
   } catch {
     window.clearInterval(translationRefreshTimer)
     translationRefreshTimer = 0
-  }
+  } finally { translationRefreshBusy = false }
 }
 
 async function startPendingTranslations() {
@@ -87,9 +175,8 @@ async function startPendingTranslations() {
       trigger: 'vocabulary_open',
     })
     await load()
-    if (result.workerStarted && counts.value.pending > 0 && !translationRefreshTimer) {
-      translationRefreshAttempts = 0
-      translationRefreshTimer = window.setInterval(refreshTranslationStatuses, 2500)
+    if (!translationRefreshTimer) {
+      translationRefreshTimer = window.setInterval(refreshTranslationStatuses, 5000)
     }
   } catch (cause) {
     error.value = String(cause)
@@ -97,21 +184,40 @@ async function startPendingTranslations() {
   }
 }
 
-async function load() {
+async function load(preferredId?: number, options: { all?: boolean } = {}) {
   try {
-    const result: any = await get(`/vocabulary?status=${filter.value}&search=${encodeURIComponent(search.value)}`)
+    const result: any = await get(listUrl(options.all ? 'limit=all' : `limit=${PAGE_SIZE + 1}&offset=0`))
     error.value = ''
-    items.value = result.items || []
-    counts.value = result.counts || counts.value
-    const requested = Number(route.query.word)
+    if (options.all) {
+      items.value = result.items || []
+      counts.value = result.counts || counts.value
+      hasMore.value = false
+    } else {
+      applyLoadedPage(result)
+    }
+    const requested = preferredId ?? Number(route.query.word)
     const target = items.value.find(item => item.id === requested) || items.value[0]
-    if (target) await select(target.id)
+    if (target) await select(target.id, false)
     else selected.value = null
   } catch (e) { error.value = String(e) }
 }
 
-async function select(id: number) {
-  if (selected.value?.id === id && isAndroidPortrait()) {
+async function loadMore() {
+  if (loadingMore.value || reviewMode.value || !hasMore.value) return
+  loadingMore.value = true
+  try {
+    const result: any = await get(listUrl(`limit=${PAGE_SIZE + 1}&offset=${items.value.length}`))
+    const rows = result.items || []
+    const more = rows.length > PAGE_SIZE
+    items.value = [...items.value, ...(more ? rows.slice(0, PAGE_SIZE) : rows)]
+    counts.value = result.counts || counts.value
+    hasMore.value = more
+  } catch (cause) { error.value = String(cause) }
+  finally { loadingMore.value = false }
+}
+
+async function select(id: number, toggle = true) {
+  if (toggle && selected.value?.id === id && isAndroidPortrait()) {
     selected.value = null
     editing.value = false
     return
@@ -139,7 +245,7 @@ async function saveEdit() {
   })
   editing.value = false
   notice.value = '词条已保存'
-  await load()
+  await load(selected.value.id)
 }
 
 async function removeEntry() {
@@ -150,44 +256,86 @@ async function removeEntry() {
 }
 
 async function retryTranslation() {
-  const result: any = await post(`/vocabulary/${selected.value.id}/retry`)
-  notice.value = result.workerStarted ? '已重新提交后台翻译' : '已重新提交翻译'
+  const result: any = await post('/vocabulary/retry-pending')
+  notice.value = '已将整个单词本中等待及失败的词条加入翻译队列'
   await load()
   if (!translationRefreshTimer) {
-    translationRefreshAttempts = 0
-    translationRefreshTimer = window.setInterval(refreshTranslationStatuses, 2500)
+    translationRefreshTimer = window.setInterval(refreshTranslationStatuses, 5000)
   }
 }
 
 async function rate(rating: string) {
-  if (!reviewWord.value) return
-  await post(`/vocabulary/${reviewWord.value.id}/review`, { rating, mode: reviewKind.value })
-  reveal.value = false
-  await load()
-  if (reviewKind.value === 'reinforcement') reviewIndex.value += 1
-  if (!reviewItems.value.length || reviewIndex.value >= reviewItems.value.length) {
-    reviewMode.value = false
-    reviewIndex.value = 0
-    notice.value = reviewKind.value === 'scheduled' ? '今日到期复习已完成' : '本轮额外巩固已完成'
-  }
+  if (!reviewWord.value || reviewSaving.value) return
+  const initialTarget = reviewWord.value
+  const initialKey = wordKey(initialTarget)
+  const initialRevision = reviewRevision(initialTarget)
+  const targetMode = reviewKind.value
+  reviewSaving.value = true
+  try {
+    // Reconcile the durable queue before submitting a scheduled review so a
+    // card removed or changed by another device cannot receive a stale rating.
+    if (targetMode === 'scheduled') await refreshDueQueue()
+    const target = reviewWord.value
+    if (!target || reviewDisposed || !reviewMode.value || targetMode !== reviewKind.value
+      || wordKey(target) !== initialKey || reviewRevision(target) !== initialRevision) {
+      reveal.value = false
+      notice.value = '复习列表已更新，请查看当前单词后重新评分'
+      return
+    }
+    const completedKey = wordKey(target)
+    const revision = reviewRevision(target)
+    if (targetMode === 'scheduled' && revision !== reviewRevision(reviewWord.value)) {
+      reveal.value = false
+      notice.value = '复习列表已更新，请查看当前单词后重新评分'
+      return
+    }
+    await post(`/vocabulary/${target.id}/review`, { rating, mode: targetMode, expected_revision: target.review_revision })
+    if (reviewDisposed || !reviewMode.value || revision !== reviewRevision(reviewWord.value) || targetMode !== reviewKind.value) return
+    if (targetMode === 'scheduled') {
+      dueQueue = completeDueWord(dueQueue, completedKey)
+      persistDueQueue()
+      scheduledWords.value = scheduledWords.value.filter(word => wordKey(word) !== completedKey)
+      reveal.value = false
+    }
+    reveal.value = false
+    if (targetMode === 'reinforcement') {
+      await load()
+      reviewIndex.value += 1
+    }
+    if (!reviewItems.value.length || reviewIndex.value >= reviewItems.value.length) {
+      reviewMode.value = false
+      reviewIndex.value = 0
+      notice.value = targetMode === 'scheduled' ? '今日到期复习已完成' : '本轮额外巩固已完成'
+      await load()
+    }
+  } catch (cause) { error.value = String(cause) }
+  finally { reviewSaving.value = false }
 }
 
 async function startReview() {
-  filter.value = 'review'
+  if (reviewSaving.value) return
   reviewKind.value = 'scheduled'
   reveal.value = false
   reviewIndex.value = 0
-  await load()
+  await refreshDueQueue()
   reviewMode.value = true
 }
 
+async function closeReview() {
+  if (reviewSaving.value) return
+  reviewMode.value = false
+  reviewIndex.value = 0
+  await load(selected.value?.id)
+}
+
 async function startReinforcement(size: number) {
+  if (reviewSaving.value) return
   reinforcementSize.value = size
   reviewKind.value = 'reinforcement'
   reveal.value = false
   reviewIndex.value = 0
   filter.value = 'all'
-  await load()
+  await load(undefined, { all: true })
   reviewMode.value = true
 }
 
@@ -196,21 +344,49 @@ watch(search, () => {
   window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(load, 250)
 })
-watch(filter, load)
-onMounted(startPendingTranslations)
+watch(filter, () => load())
+async function refreshReviewOnForeground() {
+  if (document.visibilityState === 'hidden' || !reviewMode.value || reviewSaving.value || !(reviewKind.value === 'scheduled')) return
+  try { await refreshDueQueue() } catch (cause) { error.value = String(cause) }
+}
+onMounted(() => {
+  document.addEventListener('visibilitychange', refreshReviewOnForeground)
+  window.addEventListener('focus', refreshReviewOnForeground)
+  window.addEventListener('storage', refreshReviewOnForeground)
+  if (typeof IntersectionObserver === 'function') {
+    listObserver = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) void loadMore()
+    }, { rootMargin: '400px' })
+    if (listSentinel.value) listObserver.observe(listSentinel.value)
+  }
+})
+onBeforeUnmount(() => {
+  reviewDisposed = true
+  document.removeEventListener('visibilitychange', refreshReviewOnForeground)
+  window.removeEventListener('focus', refreshReviewOnForeground)
+  window.removeEventListener('storage', refreshReviewOnForeground)
+  window.clearTimeout(searchTimer)
+  listObserver?.disconnect()
+  listObserver = null
+})
+onMounted(async () => {
+  if (route.query.review === 'scheduled') await startReview()
+  else await startPendingTranslations()
+})
 onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
 </script>
 
 <template>
   <div class="page vocabulary-page">
     <div class="page-head">
-      <div><span class="eyebrow">VOCABULARY BOOK</span><h1>我的单词本</h1><p class="lead">从真题语境中收集、理解并复习真正困扰你的词。</p></div>
+      <div><h1>我的单词本</h1><span v-if="currentBankScope" class="muted">当前题库</span></div>
       <div style="display:flex;gap:8px;align-items:center">
         <button class="button" @click="startReview"><BookOpen :size="17" />今日到期 {{ counts.review || 0 }}</button>
       </div>
     </div>
     <div v-if="error" class="warning">{{ error }}</div>
     <div v-if="notice" class="card vocab-notice">{{ notice }}</div>
+    <div v-if="translationProgress.queued || translationProgress.translating || translationProgress.failed" class="card vocab-notice" role="status">翻译进度：排队 {{ translationProgress.queued || 0 }} · 正在翻译 {{ translationProgress.translating || 0 }} · 失败 {{ translationProgress.failed || 0 }}</div>
     <div class="vocab-stats">
       <button class="card" @click="filter='all'"><span>全部单词</span><strong>{{ counts.total || 0 }}</strong></button>
       <button class="card amber" @click="filter='frequent'"><span>🌟 高频生词</span><strong>{{ counts.frequent || 0 }}</strong></button>
@@ -226,39 +402,42 @@ onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
       </div>
     </section>
 
-    <section v-if="reviewMode" class="review-overlay">
-      <div class="review-card" v-if="reviewWord">
+    <section v-if="reviewMode" class="review-overlay vocabulary-review-overlay">
+      <div v-if="reviewWord" class="review-card vocabulary-review-card" data-review-fullscreen>
         <header class="review-header">
           <strong>{{ reviewKind === 'scheduled' ? '到期复习' : '额外巩固' }} <span>{{ String(reviewIndex + 1).padStart(2, '0') }} / {{ String(reviewItems.length).padStart(2, '0') }}</span></strong>
-          <button class="review-close" type="button" title="退出复习" aria-label="退出复习" @click="reviewMode=false">×</button>
+          <button class="review-close" type="button" title="退出复习" aria-label="退出复习" :disabled="reviewSaving" @click="closeReview">×</button>
         </header>
         <div class="review-content">
-          <div class="review-term"><span v-if="reviewWord.is_frequent">🌟</span>{{ reviewWord.lemma || reviewWord.term }}</div>
+          <div class="review-term"><span v-if="reviewWord.is_frequent">🌟</span>{{ reviewWord.term }}</div>
           <div class="review-phonetic">{{ reviewWord.phonetic }}</div>
           <button v-if="!reveal" class="button secondary reveal-button" @click="reveal=true">显示释义和原句</button>
-          <div v-else class="review-answer">
+        <div v-else class="review-answer">
+          <VocabularyEnrichment :entry="reviewWord" :show-morphology="displayConfig.morphology" :show-sentence="displayConfig.sentence" />
             <section class="review-meaning-block">
               <small>普通释义</small>
               <strong>{{ reviewWord.common_meaning || reviewWord.contextual_meaning }}</strong>
             </section>
-            <section v-if="reviewWord.contextual_meaning && reviewWord.contextual_meaning !== reviewWord.common_meaning" class="review-meaning-block">
+            <section v-if="displayConfig.contextual && reviewWord.contextual_meaning && reviewWord.contextual_meaning !== reviewWord.common_meaning" class="review-meaning-block">
               <small>本句语境</small>
               <p>{{ reviewWord.contextual_meaning }}</p>
             </section>
-            <section v-if="reviewWord.latest_sentence" class="review-sentence-block">
+            <section v-if="reviewWord.latest_sentence && displayConfig.sentence" class="review-sentence-block">
               <small>真题原句</small>
-              <blockquote>{{ reviewWord.latest_sentence }}</blockquote>
+              <blockquote v-if="reviewWord.latest_sentence && displayConfig.sentence">{{ reviewWord.latest_sentence }}</blockquote>
             </section>
           </div>
         </div>
         <footer v-if="reveal" class="review-actions">
-          <button class="button danger" @click="rate('again')">再来一次</button>
           <button class="button secondary" @click="rate('hard')">困难</button>
           <button class="button secondary" @click="rate('know')">认识</button>
           <button class="button" @click="rate('fluent')">熟练</button>
         </footer>
       </div>
-      <div v-else class="card empty">今天没有待复习的单词。</div>
+      <div v-else class="card empty vocab-review-empty">
+        <p>今天没有待复习的单词。</p>
+        <button class="button secondary" type="button" :disabled="reviewSaving" @click="closeReview">退出复习</button>
+      </div>
     </section>
 
     <div v-else class="vocabulary-layout">
@@ -274,70 +453,79 @@ onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
         <template v-for="word in items" :key="word.id">
           <button class="vocab-list-item" :class="{active:selected?.id===word.id}" :aria-expanded="selected?.id===word.id" @click="select(word.id)">
             <div class="vocab-list-head"><strong><span v-if="word.is_frequent">🌟 </span>{{ word.lemma || word.term }}</strong><small>遇到 {{ word.encounter_count }} 次</small></div>
-            <p v-if="word.translation_status==='ready'">{{ word.common_meaning || word.contextual_meaning }}</p>
+            <p v-if="word.translation_status==='ready' || word.common_meaning || word.contextual_meaning">{{ word.common_meaning || word.contextual_meaning }}</p>
             <p v-else class="pending-text">{{ translationStatusText(word.translation_status) }}</p>
             <div class="vocab-list-meta"><span>{{ word.part_of_speech }}</span><span>{{ word.study_status === 'mastered' ? '已掌握' : '学习中' }}</span><ChevronDown class="vocab-expand-icon" :size="17" /></div>
           </button>
           <section v-if="selected?.id===word.id" class="portrait-vocab-detail" aria-label="单词详情">
             <div class="vocab-detail-head">
-              <div><span class="eyebrow">{{ selected.is_frequent ? '🌟 HIGH FREQUENCY' : 'VOCABULARY' }}</span><h2>{{ selected.lemma || selected.term }}</h2><p>{{ selected.phonetic }} <span v-if="selected.part_of_speech">· {{ selected.part_of_speech }}</span></p></div>
+              <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2>{{ selected.lemma || selected.term }}</h2><p>{{ selected.phonetic }}<span v-if="selected.part_of_speech">{{ selected.phonetic ? ' · ' : '' }}{{ selected.part_of_speech }}</span></p></div>
               <div class="vocab-tools"><button class="button ghost" @click="expandedAll=!expandedAll">{{ expandedAll ? '收起' : '展开全部' }}</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" aria-label="删除单词" @click="removeEntry"><Trash2 :size="17" /></button></div>
             </div>
-            <div v-if="selected.translation_status!=='ready'" class="vocab-pending-panel">
+            <div v-if="!editing && selected.translation_status!=='ready'" class="vocab-pending-panel">
               <RefreshCw :size="22" /><strong>{{ translationStatusText(selected.translation_status, true) }}</strong>
               <p>单词和真题原句已经安全保存。</p>
-              <button v-if="selected.translation_status==='failed'" class="button secondary" @click="retryTranslation">重新翻译</button>
+              <button v-if="selected.translation_status==='failed' || selected.translation_status==='pending'" class="button secondary" @click="retryTranslation">重试全部待翻译</button>
             </div>
-            <template v-else-if="!editing">
+            <template v-if="!editing && hasSelectedContent">
               <div v-if="displayConfig.common_meaning || expandedAll" class="detail-section"><label>常用释义</label><strong>{{ selected.common_meaning || selected.contextual_meaning }}</strong></div>
               <div v-if="selected.synonyms?.length && (displayConfig.synonyms || expandedAll)" class="detail-section discrimination-section"><label>同义词辨析</label><ul class="discrimination-list"><li v-for="item in selected.synonyms" :key="`ps-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}</span></li></ul></div>
               <div v-if="selected.antonyms?.length && (displayConfig.antonyms || expandedAll)" class="detail-section discrimination-section"><label>反义词辨析</label><ul class="discrimination-list"><li v-for="item in selected.antonyms" :key="`pa-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}</span></li></ul></div>
               <div v-if="(selected.local_similar?.length || selected.similar_forms?.length) && (displayConfig.similar_forms || expandedAll)" class="detail-section discrimination-section"><label>形近词辨析</label><ul class="discrimination-list"><li v-for="item in selected.local_similar" :key="`pl-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}<em class="source-tag">本地</em></span></li><li v-for="item in selected.similar_forms" :key="`pm-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}</span></li></ul></div>
               <div v-if="selected.memory_hint && (displayConfig.memory_hint || expandedAll)" class="detail-section memory-hint"><label>记忆提示</label><p>{{ selected.memory_hint }}</p></div>
               <div v-if="selected.note" class="detail-section"><label>我的笔记</label><p>{{ selected.note }}</p></div>
-              <div v-if="(displayConfig.contextual || expandedAll) || (displayConfig.sentence || expandedAll)" class="detail-section"><label>真题中的遇见</label><div v-if="selected.contextual_meaning && (displayConfig.contextual || expandedAll)" class="occurrence-context-meaning"><small>语境释义</small><strong>{{ selected.contextual_meaning }}</strong></div><template v-if="displayConfig.sentence || expandedAll"><article v-for="occurrence in selected.occurrences" :key="`p-${occurrence.id}`" class="occurrence"><p>{{ occurrence.context_sentence }}</p><small>{{ occurrence.year || '未知年份' }} · {{ occurrence.unit_title || occurrence.unit_type }}</small></article></template></div>
+          <VocabularyEnrichment :entry="selected" :show-morphology="displayConfig.morphology" :show-sentence="displayConfig.sentence || expandedAll" />
+          <p v-if="selected.enrichment_status === 'failed'" class="error">补全失败：{{ selected.enrichment_error }}，可点击下方按钮重试。</p>
+          <p v-else-if="['queued','inflight'].includes(selected.enrichment_status)">词形与例句补全任务已保存，正在排队或处理中。</p>
+          <button class="button secondary" :disabled="enrichmentPending" @click="enrichSelected">{{ enrichmentPending ? '正在补全…' : '补全词形与例句' }}</button>
+              <div v-if="selected.latest_sentence && (displayConfig.contextual || displayConfig.sentence || expandedAll)" class="detail-section"><label>真题中的遇见</label><div v-if="selected.contextual_meaning && (displayConfig.contextual || expandedAll)" class="occurrence-context-meaning"><small>语境释义</small><strong>{{ selected.contextual_meaning }}</strong></div><template v-if="displayConfig.sentence || expandedAll"><article v-for="occurrence in selected.occurrences" :key="`p-${occurrence.id}`" class="occurrence"><p>{{ occurrence.context_sentence }}</p><small>{{ occurrence.year || '未知年份' }} · {{ occurrence.unit_title || occurrence.unit_type }}</small></article></template></div>
               <div class="detail-actions"><button class="button secondary" @click="put(`/vocabulary/${selected.id}`,{manually_frequent:!selected.manually_frequent}).then(()=>load())"><Star :size="16" />{{ selected.manually_frequent ? '取消重点' : '标记重点' }}</button><button class="button" @click="put(`/vocabulary/${selected.id}`,{study_status:selected.study_status==='mastered'?'learning':'mastered'}).then(()=>load())"><Check :size="16" />{{ selected.study_status === 'mastered' ? '恢复学习' : '标记已掌握' }}</button></div>
             </template>
-            <div v-else class="vocab-edit"><label>音标<input v-model="editForm.phonetic"></label><label>词性<input v-model="editForm.part_of_speech"></label><label>当前语境释义<textarea rows="3" v-model="editForm.contextual_meaning"></textarea></label><label>常用释义<textarea rows="3" v-model="editForm.common_meaning"></textarea></label><label>我的笔记<textarea rows="4" v-model="editForm.note"></textarea></label><div><button class="button" @click="saveEdit">保存修改</button><button class="button ghost" @click="editing=false">取消</button></div></div>
+            <div v-else-if="editing" class="vocab-edit"><label>音标<input v-model="editForm.phonetic"></label><label>词性<input v-model="editForm.part_of_speech"></label><label>当前语境释义<textarea rows="3" v-model="editForm.contextual_meaning"></textarea></label><label>常用释义<textarea rows="3" v-model="editForm.common_meaning"></textarea></label><label>我的笔记<textarea rows="4" v-model="editForm.note"></textarea></label><div><button class="button" @click="saveEdit">保存修改</button><button class="button ghost" @click="editing=false">取消</button></div></div>
           </section>
         </template>
         <div v-if="!items.length" class="empty">这里还没有符合条件的单词。</div>
+        <div ref="listSentinel" aria-hidden="true"></div>
       </section>
 
       <section class="vocab-detail desktop-vocab-detail card" v-if="selected">
         <div class="vocab-detail-head">
-          <div><span class="eyebrow">{{ selected.is_frequent ? '🌟 HIGH FREQUENCY' : 'VOCABULARY' }}</span><h2>{{ selected.lemma || selected.term }}</h2><p>{{ selected.phonetic }} <span v-if="selected.part_of_speech">· {{ selected.part_of_speech }}</span></p></div>
+          <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2>{{ selected.lemma || selected.term }}</h2><p>{{ selected.phonetic }}<span v-if="selected.part_of_speech">{{ selected.phonetic ? ' · ' : '' }}{{ selected.part_of_speech }}</span></p></div>
           <div class="vocab-tools"><button class="button ghost" @click="expandedAll=!expandedAll">{{ expandedAll ? '收起全部' : '展开全部' }}</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" @click="removeEntry"><Trash2 :size="17" /></button></div>
         </div>
-        <div v-if="selected.translation_status!=='ready'" class="vocab-pending-panel">
+        <div v-if="!editing && selected.translation_status!=='ready'" class="vocab-pending-panel">
           <RefreshCw :size="22" /><strong>{{ translationStatusText(selected.translation_status, true) }}</strong>
           <p>单词和真题原句已经安全保存。</p>
-          <button v-if="selected.translation_status==='failed'" class="button secondary" @click="retryTranslation">重新翻译</button>
+          <button v-if="selected.translation_status==='failed' || selected.translation_status==='pending'" class="button secondary" @click="retryTranslation">重试全部待翻译</button>
         </div>
-        <template v-else-if="!editing">
-          <div class="detail-section"><label>常用释义</label><strong>{{ selected.common_meaning || selected.contextual_meaning }}</strong></div>
-          <div v-if="selected.synonyms?.length" class="detail-section discrimination-section">
+        <template v-if="!editing && hasSelectedContent">
+          <div v-if="displayConfig.common_meaning || expandedAll" class="detail-section"><label>常用释义</label><strong>{{ selected.common_meaning || selected.contextual_meaning }}</strong></div>
+          <div v-if="selected.synonyms?.length && (displayConfig.synonyms || expandedAll)" class="detail-section discrimination-section">
             <label>同义词辨析</label>
             <ul class="discrimination-list">
               <li v-for="item in selected.synonyms" :key="`s-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}</span></li>
             </ul>
           </div>
-          <div v-if="selected.antonyms?.length" class="detail-section discrimination-section">
+          <div v-if="selected.antonyms?.length && (displayConfig.antonyms || expandedAll)" class="detail-section discrimination-section">
             <label>反义词辨析</label>
             <ul class="discrimination-list">
               <li v-for="item in selected.antonyms" :key="`a-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}</span></li>
             </ul>
           </div>
-          <div v-if="selected.local_similar?.length || selected.similar_forms?.length" class="detail-section discrimination-section">
+          <div v-if="(selected.local_similar?.length || selected.similar_forms?.length) && (displayConfig.similar_forms || expandedAll)" class="detail-section discrimination-section">
             <label>形近词辨析</label>
             <ul class="discrimination-list">
               <li v-for="item in selected.local_similar" :key="`l-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}<em class="source-tag">本地</em></span></li>
               <li v-for="item in selected.similar_forms" :key="`m-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}</span></li>
             </ul>
           </div>
-          <div v-if="selected.memory_hint" class="detail-section memory-hint"><label>记忆提示</label><p>{{ selected.memory_hint }}</p></div>
+          <div v-if="selected.memory_hint && (displayConfig.memory_hint || expandedAll)" class="detail-section memory-hint"><label>记忆提示</label><p>{{ selected.memory_hint }}</p></div>
           <div v-if="selected.note" class="detail-section"><label>我的笔记</label><p>{{ selected.note }}</p></div>
-          <div class="detail-section"><label>真题中的遇见</label>
+          <VocabularyEnrichment :entry="selected" :show-morphology="displayConfig.morphology" :show-sentence="displayConfig.sentence || expandedAll" />
+          <p v-if="selected.enrichment_status === 'failed'" class="error">补全失败：{{ selected.enrichment_error }}，可点击下方按钮重试。</p>
+          <p v-else-if="['queued','inflight'].includes(selected.enrichment_status)">词形与例句补全任务已保存，正在排队或处理中。</p>
+          <button class="button secondary" :disabled="enrichmentPending" @click="enrichSelected">{{ enrichmentPending ? '正在补全…' : '补全词形与例句' }}</button>
+          <div v-if="selected.latest_sentence && (displayConfig.contextual || displayConfig.sentence || expandedAll)" class="detail-section"><label>真题中的遇见</label>
             <div v-if="selected.contextual_meaning" class="occurrence-context-meaning">
               <small>语境释义</small>
               <strong>{{ selected.contextual_meaning }}</strong>
@@ -352,7 +540,7 @@ onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
             <button class="button" @click="put(`/vocabulary/${selected.id}`,{study_status:selected.study_status==='mastered'?'learning':'mastered'}).then(()=>load())"><Check :size="16" />{{ selected.study_status === 'mastered' ? '恢复学习' : '标记已掌握' }}</button>
           </div>
         </template>
-        <div v-else class="vocab-edit">
+        <div v-else-if="editing" class="vocab-edit">
           <label>音标<input v-model="editForm.phonetic"></label>
           <label>词性<input v-model="editForm.part_of_speech"></label>
           <label>当前语境释义<textarea rows="3" v-model="editForm.contextual_meaning"></textarea></label>

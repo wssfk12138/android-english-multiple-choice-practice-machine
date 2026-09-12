@@ -1,5 +1,9 @@
-import { row, rows, run } from './database'
+import { queueVocabularyEnrichment } from './vocabulary-enrichment-runner'
+import { vocabularyProfileCondition } from './study-todos'
+import { activeQuestionBankProfileId } from './question-bank-profiles'
+import { row, rows, run, transaction } from './database'
 import { LocalApiError } from './errors'
+import { projectVocabulary } from '../../vocabulary-context'
 
 type JsonRecord = Record<string, any>
 
@@ -8,27 +12,8 @@ function normalizeTerm(value: string): string {
 }
 
 function vocabularyKey(value: string): string {
-  const normalized = normalizeTerm(value)
-  if (normalized.includes(' ') || normalized.includes("'") || normalized.length < 5) return normalized
-  if (normalized.endsWith('ies') && normalized.length > 5) return `${normalized.slice(0, -3)}y`
-  if (normalized.endsWith('ing') && normalized.length > 6) {
-    let stem = normalized.slice(0, -3)
-    if (stem.length >= 3 && stem.at(-1) === stem.at(-2)) stem = stem.slice(0, -1)
-    return stem
-  }
-  if (normalized.endsWith('ed') && normalized.length > 5) {
-    let stem = normalized.slice(0, -2)
-    if (stem.endsWith('i')) return `${stem.slice(0, -1)}y`
-    if (stem.length >= 3 && stem.at(-1) === stem.at(-2)) stem = stem.slice(0, -1)
-    return stem
-  }
-  if (normalized.endsWith('es') && normalized.length > 5) {
-    return /(ses|xes|zes|ches|shes)$/.test(normalized)
-      ? normalized.slice(0, -2)
-      : normalized.slice(0, -1)
-  }
-  if (normalized.endsWith('s') && !normalized.endsWith('ss')) return normalized.slice(0, -1)
-  return normalized
+  // Model morphology is descriptive; it must never merge selected surface forms.
+  return normalizeTerm(value)
 }
 
 function validateTerm(value: string): string {
@@ -93,45 +78,95 @@ async function localSimilarMatches(
   id: number,
   excludeWords: string[],
 ): Promise<{ word: string; note: string; source: string }[]> {
-  const pool = await rows<{ id: number; term: string }>(
-    'SELECT id, term FROM vocabulary_entries',
-  )
-  const own = pool.find(row => Number(row.id) === id)
+  const pool = await vocabularyTermPool()
+  const own = pool.find(row => row.id === id)
   if (!own) return []
-  const ownKey = matchKey(own.term)
+  const cacheKey = `${vocabularyTermPoolVersion}:${own.term.toLowerCase()}|${excludeWords.slice().sort().join(',')}`
+  const cached = localSimilarCache.get(cacheKey)
+  if (cached) return cached
   const excluded = new Set(excludeWords.map(word => word.toLowerCase()))
-  const buckets = new Map<number, { id: number; key: string; term: string }[]>()
-  for (const row of pool) {
-    const key = matchKey(row.term)
-    const bucket = buckets.get(key.length) || []
-    bucket.push({ id: Number(row.id), key, term: row.term })
-    buckets.set(key.length, bucket)
-  }
   const candidates: { distance: number; term: string }[] = []
-  for (let length = Math.max(1, ownKey.length - 2); length <= ownKey.length + 2; length++) {
-    for (const item of buckets.get(length) || []) {
-      if (item.id === id || excluded.has(item.term.toLowerCase())) continue
-      if (Math.abs(item.key.length - ownKey.length) > 2) continue
-      const distance = editDistance(ownKey, item.key)
-      if (distance <= 2) candidates.push({ distance, term: item.term })
-    }
+  for (const item of pool) {
+    if (item.id === id || excluded.has(item.term.toLowerCase())) continue
+    if (Math.abs(item.key.length - own.key.length) > 2) continue
+    // Shared-2gram shortfall > 2*2 proves edit distance > 2, so this filter
+    // never removes a candidate the exact DP below would accept. It only
+    // bounds how many candidates reach the O(len^2) dynamic program.
+    let common = 0
+    for (const [gram, count] of own.grams) common += Math.min(count, item.grams.get(gram) || 0)
+    if (own.gramTotal - common > 4 || item.gramTotal - common > 4) continue
+    const distance = editDistance(own.key, item.key)
+    if (distance <= 2) candidates.push({ distance, term: item.term })
   }
   candidates.sort((left, right) => left.distance - right.distance || left.term.localeCompare(right.term))
-  return candidates.slice(0, 4).map(item => ({
+  const result = candidates.slice(0, 4).map(item => ({
     word: item.term,
     note: '本地匹配',
     source: '本地匹配',
   }))
+  if (localSimilarCache.size >= 50) {
+    const oldest = localSimilarCache.keys().next().value
+    if (oldest !== undefined) localSimilarCache.delete(oldest)
+  }
+  localSimilarCache.set(cacheKey, result)
+  return result
+}
+
+type VocabularyPoolEntry = { id: number; term: string; key: string; grams: Map<string, number>; gramTotal: number }
+let vocabularyTermPoolCache: Promise<VocabularyPoolEntry[]> | null = null
+let vocabularyTermPoolVersion = 0
+let vocabularyTermPoolCacheVersion = -1
+const localSimilarCache = new Map<string, { word: string; note: string; source: string }[]>()
+async function vocabularyTermPool(): Promise<VocabularyPoolEntry[]> {
+  if (!vocabularyTermPoolCache || vocabularyTermPoolCacheVersion !== vocabularyTermPoolVersion) {
+    const version = vocabularyTermPoolVersion
+    vocabularyTermPoolCache = rows<{ id: number; term: string }>('SELECT id, term FROM vocabulary_entries')
+      .then(list => list.map(row => {
+        const key = matchKey(String(row.term))
+        const grams = new Map<string, number>()
+        for (let index = 0; index + 2 <= key.length; index++) {
+          const gram = key.slice(index, index + 2)
+          grams.set(gram, (grams.get(gram) || 0) + 1)
+        }
+        return { id: Number(row.id), term: String(row.term), key, grams, gramTotal: [...grams.values()].reduce((sum, count) => sum + count, 0) }
+      }))
+    vocabularyTermPoolCacheVersion = version
+  }
+  return vocabularyTermPoolCache
+}
+// Only a real insert or delete changes the (id, term) pool; encounter/review
+// writes must not force the next detail view to rebuild it.
+function bumpVocabularyTermPool() {
+  vocabularyTermPoolVersion += 1
 }
 
 async function serializeEntry(id: number): Promise<JsonRecord> {
-  const entry = await row<JsonRecord>('SELECT * FROM vocabulary_entries WHERE id = ?', [id])
+  const entry = await reviewEntry(id)
+  const job = await row<JsonRecord>('SELECT state,error FROM vocabulary_enrichment_jobs WHERE entry_id=?', [id])
+  entry.enrichment_status = job?.state || ''
+  entry.enrichment_error = job?.error || ''
+  return serializeDetails(entry)
+}
+
+function reviewRevision(entry: JsonRecord): string {
+  return JSON.stringify([entry.normalized_term, entry.last_reviewed_at, entry.next_review_at, entry.updated_at, entry.review_count || 0])
+}
+
+async function reviewEntry(id: number): Promise<JsonRecord> {
+  const entry = await row<JsonRecord>('SELECT *, (SELECT COUNT(*) FROM vocabulary_reviews WHERE entry_id=vocabulary_entries.id) AS review_count FROM vocabulary_entries WHERE id = ?', [id])
   if (!entry) throw new LocalApiError(404, '单词不存在')
+  entry.review_revision = reviewRevision(entry)
+  return entry
+}
+
+async function serializeDetails(entry: JsonRecord): Promise<JsonRecord> {
+  const id = Number(entry.id)
   const synonyms = discriminationList(entry.synonyms)
   const antonyms = discriminationList(entry.antonyms)
   const similarForms = discriminationList(entry.similar_forms)
+  const projection = projectVocabulary(entry, await rows('SELECT * FROM vocabulary_occurrences WHERE entry_id = ?', [id]))
   return {
-    ...entry,
+    ...projection,
     synonyms,
     antonyms,
     similar_forms: similarForms,
@@ -140,10 +175,7 @@ async function serializeEntry(id: number): Promise<JsonRecord> {
       similarForms.map(item => item.word),
     ),
     is_frequent: Boolean(entry.manually_frequent) || Number(entry.encounter_count) >= 2,
-    occurrences: await rows(
-      'SELECT * FROM vocabulary_occurrences WHERE entry_id = ? ORDER BY id DESC',
-      [id],
-    ),
+    occurrences: projection.occurrences,
   }
 }
 
@@ -151,7 +183,7 @@ export async function addVocabulary(body: JsonRecord): Promise<JsonRecord> {
   const term = validateTerm(String(body.term || ''))
   const normalized = vocabularyKey(term)
   const existing = await row<JsonRecord>(
-    'SELECT * FROM vocabulary_entries WHERE normalized_term = ?',
+    "SELECT * FROM vocabulary_entries WHERE lower(replace(trim(term), '’', char(39))) = ? ORDER BY id LIMIT 1",
     [normalized],
   )
   let id: number
@@ -174,17 +206,18 @@ export async function addVocabulary(body: JsonRecord): Promise<JsonRecord> {
     )
   } else {
     const created = await run(
-      `INSERT INTO vocabulary_entries (term, normalized_term, translation_status)
-       VALUES (?, ?, 'pending')`,
-      [term, normalized],
+      `INSERT INTO vocabulary_entries (term, normalized_term, translation_status, updated_at)
+       VALUES (?, ?, 'pending', CURRENT_TIMESTAMP)`,
+      [term, 'surface:v1:' + normalized],
     )
     id = Number(created.lastId)
+    bumpVocabularyTermPool()
   }
   await run(
     `INSERT INTO vocabulary_occurrences
       (entry_id, surface_form, context_sentence, context_before, context_after,
-       unit_id, question_id, year, unit_title, unit_type)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       unit_id, question_id, year, unit_title, unit_type, source_kind, selection_start, sync_id, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
     [
       id,
       term,
@@ -196,9 +229,14 @@ export async function addVocabulary(body: JsonRecord): Promise<JsonRecord> {
       body.year || null,
       body.unit_title || '',
       body.unit_type || '',
+      ['passage','option','question','fragment'].includes(body.source_kind) ? body.source_kind : 'unknown',
+      Number.isInteger(body.selection_start) && body.selection_start >= 0 ? body.selection_start : -1,
     ],
   )
   const entry = await serializeEntry(id)
+  if (existing?.translation_status === 'ready' && entry.context_key && entry.context_key !== existing.contextual_occurrence_key) {
+    await queueVocabularyEnrichment(id, true)
+  }
   return {
     entry_id: id,
     is_new: isNew,
@@ -211,12 +249,25 @@ export async function addVocabulary(body: JsonRecord): Promise<JsonRecord> {
 export async function listVocabulary(searchParams: URLSearchParams): Promise<JsonRecord> {
   const status = searchParams.get('status') || 'all'
   const search = searchParams.get('search') || ''
+  const profileOnly = searchParams.get('scope') === 'current'
+  // Review flows (due queue, reinforcement) must see the complete due set, so
+  // they pass limit=all; the browsing list pages instead. The response shape
+  // is identical in both cases.
+  const limitAll = searchParams.get('limit') === 'all'
+  const limit = limitAll ? 0 : Math.max(1, Math.min(Number(searchParams.get('limit')) || 100, 500))
+  const offset = limitAll ? 0 : Math.max(0, Number(searchParams.get('offset')) || 0)
+  const dueNow = new Date().toISOString()
   const conditions = ['1 = 1']
   const values: unknown[] = []
+  if (profileOnly) {
+    conditions.push(vocabularyProfileCondition)
+    values.push(await activeQuestionBankProfileId())
+  }
   if (status === 'frequent') conditions.push('(encounter_count >= 2 OR manually_frequent = 1)')
   else if (status === 'review') {
-    conditions.push("(next_review_at IS NULL OR next_review_at <= CURRENT_TIMESTAMP)")
+    conditions.push("(next_review_at IS NULL OR next_review_at <= ?)")
     conditions.push("translation_status = 'ready'")
+    values.push(dueNow)
   } else if (status === 'learning') conditions.push("study_status = 'learning'")
   else if (status === 'mastered') conditions.push("study_status = 'mastered'")
   else if (status === 'pending') conditions.push("translation_status != 'ready'")
@@ -226,30 +277,54 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
   }
   const items = await rows<JsonRecord>(
     `SELECT *,
-       (SELECT context_sentence FROM vocabulary_occurrences
-        WHERE entry_id = vocabulary_entries.id ORDER BY id DESC LIMIT 1) AS latest_sentence,
+       (SELECT COUNT(*) FROM vocabulary_reviews WHERE entry_id=vocabulary_entries.id) AS review_count,
        CASE WHEN encounter_count >= 2 OR manually_frequent = 1 THEN 1 ELSE 0 END AS is_frequent
      FROM vocabulary_entries
      WHERE ${conditions.join(' AND ')}
      ORDER BY
        CASE WHEN datetime(last_seen_at) >= datetime('now', '-7 days') THEN 0 ELSE 1 END,
-       is_frequent DESC, encounter_count DESC, last_seen_at DESC`,
-    values,
+       is_frequent DESC, encounter_count DESC, last_seen_at DESC
+     ${limitAll ? '' : 'LIMIT ? OFFSET ?'}`,
+    limitAll ? values : [...values, limit, offset],
   )
+  // The due comparison uses the same ISO format the app writes, so the counts
+  // aggregate and the list filter always agree.
   const counts = await row<JsonRecord>(
     `SELECT COUNT(*) AS total,
        COALESCE(SUM(CASE WHEN encounter_count >= 2 OR manually_frequent = 1 THEN 1 ELSE 0 END), 0) AS frequent,
        COALESCE(SUM(CASE WHEN study_status = 'mastered' THEN 1 ELSE 0 END), 0) AS mastered,
        COALESCE(SUM(CASE WHEN translation_status != 'ready' THEN 1 ELSE 0 END), 0) AS pending,
        COALESCE(SUM(CASE WHEN translation_status = 'ready'
-         AND (next_review_at IS NULL OR next_review_at <= CURRENT_TIMESTAMP)
+         AND (next_review_at IS NULL OR next_review_at <= ?)
        THEN 1 ELSE 0 END), 0) AS review
-     FROM vocabulary_entries`,
+     FROM vocabulary_entries
+     WHERE ${profileOnly ? vocabularyProfileCondition : '1 = 1'}`,
+    profileOnly ? [dueNow, values[0]] : [dueNow],
   )
-  return { items, counts }
+  const byEntry = new Map<number, JsonRecord[]>()
+  const itemIds = items.map(item => Number(item.id)).filter(Number.isInteger)
+  for (let offset = 0; offset < itemIds.length; offset += 500) {
+    const batch = itemIds.slice(offset, offset + 500)
+    if (!batch.length) continue
+    const placeholders = batch.map(() => '?').join(', ')
+    const occurrences = await rows<JsonRecord>(
+      `SELECT * FROM vocabulary_occurrences WHERE entry_id IN (${placeholders})`,
+      batch,
+    )
+    for (const occurrence of occurrences) {
+      const history = byEntry.get(Number(occurrence.entry_id)) || []
+      history.push(occurrence)
+      byEntry.set(Number(occurrence.entry_id), history)
+    }
+  }
+  return { items: items.map(item => projectVocabulary({...item, review_revision: reviewRevision(item)}, byEntry.get(Number(item.id)) || [])), counts, scope_key: profileOnly ? `profile:${await activeQuestionBankProfileId()}` : 'all' }
 }
 
 export async function homeVocabulary(limit: number): Promise<JsonRecord> {
+  // next_review_at is written with JS toISOString(), so comparing against an
+  // ISO parameter keeps due words (whose dates equal today) ahead of future
+  // ones — the old unwritten comparison ranked today's due words last.
+  const dueNow = new Date().toISOString()
   const items = await rows<JsonRecord>(
     `SELECT id, term, lemma, contextual_meaning, common_meaning,
        encounter_count, study_status,
@@ -259,10 +334,10 @@ export async function homeVocabulary(limit: number): Promise<JsonRecord> {
      ORDER BY
        CASE WHEN datetime(created_at) >= datetime('now', '-7 days') THEN 0 ELSE 1 END,
        is_frequent DESC,
-       CASE WHEN next_review_at IS NULL OR next_review_at <= CURRENT_TIMESTAMP THEN 0 ELSE 1 END,
+       CASE WHEN next_review_at IS NULL OR next_review_at <= ? THEN 0 ELSE 1 END,
        encounter_count DESC, RANDOM()
      LIMIT ?`,
-    [Math.max(1, Math.min(limit, 50))],
+    [dueNow, Math.max(1, Math.min(limit, 50))],
   )
   return { items }
 }
@@ -285,6 +360,11 @@ export async function updateVocabulary(id: number, body: JsonRecord): Promise<Js
     values.push(key === 'manually_frequent' ? (value ? 1 : 0) : value)
   }
   if (assignments.length) {
+    if (typeof body.contextual_meaning === 'string') {
+      const projection = projectVocabulary({}, await rows('SELECT * FROM vocabulary_occurrences WHERE entry_id = ?', [id]))
+      assignments.push('contextual_occurrence_key = ?')
+      values.push(projection.context_key ?? '')
+    }
     assignments.push('user_edited = 1', 'updated_at = CURRENT_TIMESTAMP')
     values.push(id)
     await run(`UPDATE vocabulary_entries SET ${assignments.join(', ')} WHERE id = ?`, values)
@@ -294,20 +374,30 @@ export async function updateVocabulary(id: number, body: JsonRecord): Promise<Js
 
 export async function deleteVocabulary(id: number): Promise<{ ok: true }> {
   await run('DELETE FROM vocabulary_entries WHERE id = ?', [id])
+  bumpVocabularyTermPool()
   return { ok: true }
 }
 
-export async function retryVocabulary(id: number): Promise<{ ok: true }> {
+export async function retryVocabulary(_id: number): Promise<{ ok: true }> {
   await run(
     `UPDATE vocabulary_entries SET translation_status = 'queued',
-      translation_error = '', user_edited = 0, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`,
-    [id],
+      translation_error = '', updated_at = CURRENT_TIMESTAMP
+     WHERE user_edited = 0 AND translation_status IN ('pending', 'failed')`,
   )
   return { ok: true }
 }
 
-export async function reviewVocabulary(id: number, rating: string, mode = 'scheduled'): Promise<JsonRecord> {
+export async function reviewVocabulary(id: number, rating: string, mode = 'scheduled', expectedRevision?: string): Promise<JsonRecord> {
+  return transaction(async () => {
+    const current = await reviewEntry(id)
+    if (expectedRevision !== undefined && expectedRevision !== current.review_revision) {
+      throw new LocalApiError(409, '复习记录已更新，请刷新当前单词后重新评分')
+    }
+    return applyVocabularyReview(id, rating, mode)
+  })
+}
+
+async function applyVocabularyReview(id: number, rating: string, mode = 'scheduled'): Promise<JsonRecord> {
   if (!['again', 'hard', 'know', 'fluent'].includes(rating)) throw new LocalApiError(400, '无效的复习评价')
   if (!['scheduled', 'reinforcement'].includes(mode)) throw new LocalApiError(400, '无效的复习模式')
   const entry = await row<{ review_stage: number }>('SELECT review_stage FROM vocabulary_entries WHERE id = ?', [id])
@@ -315,7 +405,7 @@ export async function reviewVocabulary(id: number, rating: string, mode = 'sched
   const now = new Date()
   if (mode === 'reinforcement') {
     await run(
-      "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at) VALUES (?, ?, 'reinforcement', ?)",
+      "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, 'reinforcement', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)",
       [id, rating, now.toISOString()],
     )
     return serializeEntry(id)
@@ -330,24 +420,25 @@ export async function reviewVocabulary(id: number, rating: string, mode = 'sched
     [stage, rating, rating === 'fluent' ? 'mastered' : 'learning', rating === 'again' ? 1 : 0, now.toISOString(), next, id],
   )
   await run(
-    "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at) VALUES (?, ?, 'scheduled', ?)",
+    "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, 'scheduled', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)",
     [id, rating, next],
   )
   return serializeEntry(id)
 }
 
 export async function queueTranslations(entryIds: number[]): Promise<JsonRecord> {
-  const ids = [...new Set(entryIds.map(Number).filter(id => id > 0))].slice(0, 100)
+  const allIds = [...new Set(entryIds.map(Number).filter(id => Number.isInteger(id) && id > 0))]
   let queuedCount = 0
-  if (ids.length) {
+  for (let offset = 0; offset < allIds.length; offset += 400) {
+    const ids = allIds.slice(offset, offset + 400)
     const result = await run(
       `UPDATE vocabulary_entries SET translation_status = 'queued',
         translation_error = '', updated_at = CURRENT_TIMESTAMP
        WHERE id IN (${ids.map(() => '?').join(',')})
-         AND user_edited = 0 AND translation_status IN ('pending','queued','failed')`,
+         AND user_edited = 0 AND translation_status IN ('pending','failed')`,
       ids,
     )
-    queuedCount = result.changes
+    queuedCount += result.changes
   }
   return { accepted: true, queuedCount }
 }

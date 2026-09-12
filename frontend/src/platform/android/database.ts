@@ -4,7 +4,14 @@ import {
   type SQLiteDBConnection,
 } from '@capacitor-community/sqlite'
 import { createSerialQueue } from './serial-queue'
+import { ensureSyncVersions } from './lan-sync-versions'
 import { orderingFixedSlotsForPaperUnit } from './ordering-fixed-slots'
+import {
+  repairLearningHistoryRebindDrift,
+  runLearningHistoryRebindV1,
+  runLearningHistoryRebindV2,
+  runLearningHistoryRebindV3,
+} from './learning-history-rebind'
 
 const DB_NAME = 'english_practice_machine'
 const DB_VERSION = 1
@@ -202,7 +209,10 @@ CREATE TABLE IF NOT EXISTS vocabulary_entries (
   common_meaning TEXT NOT NULL DEFAULT '',
   synonyms TEXT NOT NULL DEFAULT '[]',
   antonyms TEXT NOT NULL DEFAULT '[]',
-  similar_forms TEXT NOT NULL DEFAULT '[]',
+    similar_forms TEXT NOT NULL DEFAULT '[]',
+    morphology TEXT NOT NULL DEFAULT '{}',
+    generated_example TEXT NOT NULL DEFAULT '{}',
+    contextual_occurrence_key TEXT NOT NULL DEFAULT '',
   memory_hint TEXT NOT NULL DEFAULT '',
   note TEXT NOT NULL DEFAULT '',
   translation_status TEXT NOT NULL DEFAULT 'queued',
@@ -220,10 +230,18 @@ CREATE TABLE IF NOT EXISTS vocabulary_entries (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS vocabulary_enrichment_jobs (
+  entry_id INTEGER PRIMARY KEY REFERENCES vocabulary_entries(id) ON DELETE CASCADE,
+  state TEXT NOT NULL DEFAULT 'queued',
+  error TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS vocabulary_occurrences (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   entry_id INTEGER NOT NULL,
   surface_form TEXT NOT NULL,
+  source_kind TEXT NOT NULL DEFAULT 'unknown',
+  selection_start INTEGER NOT NULL DEFAULT -1,
   context_sentence TEXT NOT NULL DEFAULT '',
   context_before TEXT NOT NULL DEFAULT '',
   context_after TEXT NOT NULL DEFAULT '',
@@ -246,12 +264,14 @@ CREATE TABLE IF NOT EXISTS vocabulary_reviews (
 CREATE TABLE IF NOT EXISTS ai_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
+  adapter TEXT NOT NULL DEFAULT 'openai-chat',
   base_url TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   is_default INTEGER NOT NULL DEFAULT 0,
   default_model TEXT NOT NULL DEFAULT '',
   temperature REAL NOT NULL DEFAULT 0.2,
   max_tokens INTEGER NOT NULL DEFAULT 1200,
+  reasoning_effort TEXT NOT NULL DEFAULT '',
   system_prompt TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -278,6 +298,7 @@ CREATE TABLE IF NOT EXISTS ai_messages (
   conversation_id INTEGER NOT NULL,
   role TEXT NOT NULL,
   content TEXT NOT NULL,
+  attachments TEXT,
   profile_id INTEGER,
   model_id TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -302,6 +323,20 @@ CREATE TABLE IF NOT EXISTS question_label_run_items (
   run_id TEXT NOT NULL,
   question_id INTEGER NOT NULL,
   PRIMARY KEY (run_id, question_id)
+);
+CREATE TABLE IF NOT EXISTS question_label_runs (
+  run_id TEXT PRIMARY KEY,
+  question_bank_profile_id INTEGER NOT NULL,
+  scope_kind TEXT NOT NULL DEFAULT 'all',
+  year INTEGER,
+  paper_ids TEXT NOT NULL DEFAULT '[]',
+  overwrite_unlocked INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'running',
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at TEXT,
+  last_error TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY (question_bank_profile_id) REFERENCES question_bank_profiles(id)
 );
 CREATE TABLE IF NOT EXISTS document_import_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -370,13 +405,27 @@ CREATE INDEX IF NOT EXISTS idx_questions_unit ON questions(unit_id);
 CREATE INDEX IF NOT EXISTS idx_answers_session ON practice_answers(session_id);
 CREATE INDEX IF NOT EXISTS idx_wrong_count ON wrong_stats(wrong_count DESC);
 CREATE INDEX IF NOT EXISTS idx_vocab_priority ON vocabulary_entries(encounter_count DESC, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_vocab_occurrences_entry ON vocabulary_occurrences(entry_id, id);
+CREATE INDEX IF NOT EXISTS idx_vocab_reviews_entry ON vocabulary_reviews(entry_id);
 CREATE INDEX IF NOT EXISTS idx_trash_purge ON trash_entries(purge_after, restored_at);
+CREATE INDEX IF NOT EXISTS idx_vocab_status ON vocabulary_entries(translation_status, next_review_at);
+CREATE INDEX IF NOT EXISTS idx_events_question ON practice_answer_events(question_id, changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_session ON practice_answer_events(session_id, changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_paper ON practice_sessions(paper_id, status);
+CREATE INDEX IF NOT EXISTS idx_enrichment_state ON vocabulary_enrichment_jobs(state);
 CREATE TABLE IF NOT EXISTS sync_tombstones (
   table_name TEXT NOT NULL,
   object_key TEXT NOT NULL,
   profile_name TEXT NOT NULL DEFAULT '',
   deleted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (table_name, object_key, profile_name)
+);
+CREATE TABLE IF NOT EXISTS sync_id_aliases (
+  table_name TEXT NOT NULL,
+  alias_sync_id TEXT NOT NULL,
+  canonical_sync_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (table_name, alias_sync_id)
 );
 INSERT OR IGNORE INTO schema_version(version) VALUES (1);
 `
@@ -665,6 +714,8 @@ async function migrateQuestionBankProfiles(db: SQLiteDBConnection) {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         entry_id INTEGER NOT NULL,
         surface_form TEXT NOT NULL,
+  source_kind TEXT NOT NULL DEFAULT 'unknown',
+  selection_start INTEGER NOT NULL DEFAULT -1,
         context_sentence TEXT NOT NULL DEFAULT '',
         context_before TEXT NOT NULL DEFAULT '',
         context_after TEXT NOT NULL DEFAULT '',
@@ -831,7 +882,7 @@ async function backfillEnglishOneOrderingFixedSlots(db: SQLiteDBConnection) {
     } catch {
       continue
     }
-    if (Array.isArray(sharedData.fixed_slots) && sharedData.fixed_slots.length) continue
+    if (Array.isArray(sharedData.fixed_slots) || Array.isArray(sharedData.fixedSlots)) continue
     const fixedSlots = orderingFixedSlotsForPaperUnit(row, row)
     if (!fixedSlots.length) continue
     await db.run(
@@ -856,12 +907,20 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       if (!(await db.isDBOpen()).result) await db.open()
       await recoverInterruptedPaperTable(db)
       await db.execute(SCHEMA)
+      await ensureColumn(db, 'ai_profiles', 'adapter', "TEXT NOT NULL DEFAULT 'openai-chat'")
+      await ensureColumn(db, 'ai_profiles', 'reasoning_effort', "TEXT NOT NULL DEFAULT ''")
       await restorePaperMigrationSnapshots(db)
       await migratePaperExamMetadata(db)
       await migrateQuestionBankProfiles(db)
       await repairStalePaperForeignKey(db)
       await cleanupInterruptedPaperMigration(db)
       await createQuestionBankProfileIndexes(db)
+      await db.execute(`
+        CREATE INDEX IF NOT EXISTS idx_question_label_run_items_question
+          ON question_label_run_items(question_id, run_id);
+        CREATE INDEX IF NOT EXISTS idx_question_label_runs_profile_status
+          ON question_label_runs(question_bank_profile_id, status, updated_at DESC);
+      `)
       await backfillEnglishOneOrderingFixedSlots(db)
       const questionColumns = await db.query('PRAGMA table_info(questions)')
       if (!(questionColumns.values || []).some(column => column.name === 'content_hash')) {
@@ -871,8 +930,32 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       if ((stateColumns.values || []).length && !(stateColumns.values || []).some(column => column.name === 'analyzed_session_id')) {
         await db.execute('ALTER TABLE wrong_analysis_states ADD COLUMN analyzed_session_id INTEGER NOT NULL DEFAULT 0')
       }
+      const aiMessageColumns = await db.query('PRAGMA table_info(ai_messages)')
+      if ((aiMessageColumns.values || []).length && !(aiMessageColumns.values || []).some(column => column.name === 'attachments')) {
+        await db.execute('ALTER TABLE ai_messages ADD COLUMN attachments TEXT')
+      }
       const vocabColumns = await db.query('PRAGMA table_info(vocabulary_entries)')
+      const sessionColumns = await db.query('PRAGMA table_info(practice_sessions)')
+      if (!(sessionColumns.values || []).some(column => column.name === 'candidate_policy_version')) {
+        await db.execute('ALTER TABLE practice_sessions ADD COLUMN candidate_policy_version INTEGER NOT NULL DEFAULT 0')
+      }
+      if (!(sessionColumns.values || []).some(column => column.name === 'content_snapshot')) {
+        await db.execute("ALTER TABLE practice_sessions ADD COLUMN content_snapshot TEXT NOT NULL DEFAULT '{}'")
+      }
+      if (!(sessionColumns.values || []).some(column => column.name === 'snapshot_accepted_revision')) {
+        await db.execute("ALTER TABLE practice_sessions ADD COLUMN snapshot_accepted_revision TEXT NOT NULL DEFAULT ''")
+      }
+      if (!(sessionColumns.values || []).some(column => column.name === 'content_revisions')) {
+        await db.execute("ALTER TABLE practice_sessions ADD COLUMN content_revisions TEXT NOT NULL DEFAULT '{}'")
+      }
+      const occurrenceColumns = await db.query('PRAGMA table_info(vocabulary_occurrences)')
+      const occurrenceNames = new Set((occurrenceColumns.values || []).map(column => column.name))
+      if (!occurrenceNames.has('source_kind')) await db.execute("ALTER TABLE vocabulary_occurrences ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'unknown'")
+      if (!occurrenceNames.has('selection_start')) await db.execute('ALTER TABLE vocabulary_occurrences ADD COLUMN selection_start INTEGER NOT NULL DEFAULT -1')
       const vocabNames = new Set((vocabColumns.values || []).map(column => column.name))
+      for (const [name, fallback] of [['morphology', '{}'], ['generated_example', '{}'], ['contextual_occurrence_key', '']]) {
+        if (!vocabNames.has(name)) await db.execute(`ALTER TABLE vocabulary_entries ADD COLUMN ${name} TEXT NOT NULL DEFAULT '${fallback}'`)
+      }
       if (!vocabNames.has('synonyms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN synonyms TEXT NOT NULL DEFAULT '[]'")
       if (!vocabNames.has('antonyms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN antonyms TEXT NOT NULL DEFAULT '[]'")
       if (!vocabNames.has('similar_forms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN similar_forms TEXT NOT NULL DEFAULT '[]'")
@@ -903,6 +986,27 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
         await db.execute("ALTER TABLE question_ai_labels ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
         await db.execute("UPDATE question_ai_labels SET updated_at = CURRENT_TIMESTAMP WHERE updated_at = ''")
       }
+      const labelLockMigration = await db.query(
+        "SELECT 1 FROM app_migrations WHERE migration_key = 'question-label-auto-lock-v1' LIMIT 1",
+      )
+      if (!(labelLockMigration.values || []).length) {
+        await db.run(
+          `UPDATE question_ai_labels
+           SET locked = 1, updated_at = CURRENT_TIMESTAMP
+           WHERE locked = 0
+             AND EXISTS (SELECT 1 FROM questions WHERE questions.id = question_ai_labels.question_id)
+             AND (TRIM(COALESCE(primary_skill, '')) <> ''
+                  OR TRIM(COALESCE(model_name, '')) <> ''
+                  OR user_edited = 1)`,
+          [],
+          false,
+        )
+        await db.run(
+          "INSERT INTO app_migrations (migration_key) VALUES ('question-label-auto-lock-v1')",
+          [],
+          false,
+        )
+      }
       for (const table of [
         'practice_sessions',
         'practice_answers',
@@ -926,6 +1030,9 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       for (const table of ['wrong_stats']) {
         const syncColumns = await db.query(`PRAGMA table_info(${table})`)
         const names = new Set((syncColumns.values || []).map(column => column.name))
+        if (!names.has('attempt_ledger')) {
+          await db.execute('ALTER TABLE wrong_stats ADD COLUMN attempt_ledger TEXT')
+        }
         if (!names.has('updated_at')) {
           await db.execute(`ALTER TABLE ${table} ADD COLUMN updated_at TEXT`)
         }
@@ -959,6 +1066,17 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
         [],
         false,
       )
+      // A new database connection has no surviving in-process translation worker.
+      await db.run(
+        "UPDATE vocabulary_entries SET translation_status = 'queued', translation_error = '' WHERE user_edited = 0 AND translation_status = 'translating'",
+        [], false,
+      )
+      await db.run("UPDATE vocabulary_enrichment_jobs SET state='queued' WHERE state='inflight'", [], false)
+      await ensureSyncVersions(db)
+      await runLearningHistoryRebindV1(db)
+      await runLearningHistoryRebindV2(db)
+      await runLearningHistoryRebindV3(db)
+      await repairLearningHistoryRebindDrift(db)
       return db
     })()
   }

@@ -1,9 +1,14 @@
+import { frequentQuestionIds, resumablePracticeSession } from './study-todos'
+import { preservesCandidateOrder } from './candidate-order-policy'
+import { readSnapshot, restoreUnit, historicalRetrySnapshot, snapshotGradeMany, requireSnapshotChoice, snapshotChoiceRequired } from './practice-snapshots'
 import type { SQLiteDBConnection } from '@capacitor-community/sqlite'
 import { Capacitor } from '@capacitor/core'
 import { Directory, Filesystem } from '@capacitor/filesystem'
 import { row, rows, run, transaction } from './database'
+import { aggregateAttempts } from './attempt-stats'
 import { incompleteSubmission, LocalApiError } from './errors'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
+import { selectResumableWrongSession, type WrongSessionCandidate } from './practice-session-resume'
 
 type JsonRecord = Record<string, any>
 type TransactionDb = Pick<SQLiteDBConnection, 'query' | 'run'>
@@ -100,11 +105,12 @@ async function serializeQuestion(
   return payload
 }
 
-async function serializeUnit(
+export async function serializeUnit(
   unitId: number,
   options: {
     shuffleOptions: boolean
     answerOrders?: Map<number, string[]>
+    candidatePolicyVersion?: number
     includeAnswers?: boolean
     onlyQuestionIds?: Set<number>
   },
@@ -123,12 +129,18 @@ async function serializeUnit(
   if (options.onlyQuestionIds) {
     questions = questions.filter(question => options.onlyQuestionIds!.has(question.id))
   }
-  let sharedPartBOrder: string[] | undefined
-  if (unit.unit_type === 'part_b'
+  let sharedCandidateOrder: string[] | undefined
+  const sharedData = parseJson<JsonRecord>(unit.shared_data, {})
+  const preserveCandidateOrder = preservesCandidateOrder(unit, sharedData)
+  const usesSharedCandidates = ['part_b', 'word_bank', 'paragraph_matching'].includes(
+    String(unit.unit_type || ''),
+  )
+  if (usesSharedCandidates
     && questions.length
     && options.shuffleOptions
+    && !preserveCandidateOrder
     && !options.answerOrders?.size) {
-    sharedPartBOrder = shuffled(
+    sharedCandidateOrder = shuffled(
       (await rows<{ stable_key: string }>(
         'SELECT stable_key FROM options WHERE question_id = ? ORDER BY sequence',
         [questions[0].id],
@@ -139,13 +151,12 @@ async function serializeUnit(
   for (const question of questions) {
     serializedQuestions.push(await serializeQuestion(
       question,
-      options.shuffleOptions && !sharedPartBOrder,
-      options.answerOrders?.get(question.id) || sharedPartBOrder,
+      options.shuffleOptions && !sharedCandidateOrder && !preserveCandidateOrder,
+      options.answerOrders?.get(question.id) || sharedCandidateOrder,
       Boolean(options.includeAnswers),
-      unit.subtype === 'true_false',
+      unit.subtype === 'true_false' || (preserveCandidateOrder && ((options.candidatePolicyVersion ?? 1) >= 1 || !options.answerOrders?.get(question.id)?.length)),
     ))
   }
-  const sharedData = parseJson<JsonRecord>(unit.shared_data, {})
   if (unit.unit_type === 'listening') {
     if (!Array.isArray(sharedData.audio_tracks) || !sharedData.audio_tracks.length) {
       const { repairPublishedDocumentAudio } = await import('./document-import')
@@ -323,46 +334,22 @@ function normalizeListeningAudio(units: JsonRecord[]) {
   })
 }
 
-export async function createSession(body: JsonRecord): Promise<JsonRecord> {
-  const { unitIds, paperId } = await selectUnitIds(body)
-  if (!unitIds.length) throw new LocalApiError(400, '没有符合条件的练习篇目')
-  if (body.mode === 'paper' && paperId != null) {
-    if (body.force_new) {
-      await run(
-        `UPDATE practice_sessions SET status = 'abandoned' WHERE paper_id = ? AND status = 'active' AND mode = 'paper'`,
-        [paperId],
-      )
-    } else {
-      const existing = await row<{ id: number }>(
-        `SELECT id FROM practice_sessions WHERE paper_id = ? AND status = 'active' AND mode = 'paper' ORDER BY id DESC LIMIT 1`,
-        [paperId],
-      )
-      if (existing) return { ...(await getSession(Number(existing.id))), resumed: true }
-    }
-  }
-
-  const shuffleOptions = body.shuffle_options !== false
-  const created = await run(
-    `INSERT INTO practice_sessions (mode, paper_id, unit_ids, shuffle_options)
-     VALUES (?, ?, ?, ?)`,
-    [body.mode, paperId, JSON.stringify(unitIds), shuffleOptions ? 1 : 0],
-  )
-  const sessionId = Number(created.lastId)
-  const requestedWrongQuestions = new Set<number>((body.question_ids || []).map(Number))
-  const onlyByUnit = new Map<number, Set<number>>()
+async function wrongQuestionIdsByUnit(body: JsonRecord, unitIds: number[]): Promise<Map<number, Set<number>>> {
+  const result = new Map<number, Set<number>>()
   if (body.mode === 'wrong') {
+    const requested = new Set<number>((body.question_ids || []).map(Number))
     let sql = `SELECT q.id, q.unit_id FROM wrong_current_questions wc
       JOIN questions q ON q.id = wc.question_id
       WHERE wc.deleted_at IS NULL AND q.unit_id IN (${unitIds.map(() => '?').join(',')})`
     const values: unknown[] = [...unitIds]
-    if (requestedWrongQuestions.size) {
-      sql += ` AND q.id IN (${[...requestedWrongQuestions].map(() => '?').join(',')})`
-      values.push(...requestedWrongQuestions)
+    if (requested.size) {
+      sql += ` AND q.id IN (${[...requested].map(() => '?').join(',')})`
+      values.push(...requested)
     }
     for (const question of await rows<{ id: number; unit_id: number }>(sql, values)) {
-      const set = onlyByUnit.get(question.unit_id) || new Set<number>()
+      const set = result.get(question.unit_id) || new Set<number>()
       set.add(question.id)
-      onlyByUnit.set(question.unit_id, set)
+      result.set(question.unit_id, set)
     }
   } else if (body.mode === 'wrong_history') {
     for (const question of await rows<{ id: number; unit_id: number }>(
@@ -373,28 +360,138 @@ export async function createSession(body: JsonRecord): Promise<JsonRecord> {
        WHERE rq.round_id = ? AND rq.is_correct = 0 AND r.deleted_at IS NULL`,
       [Number(body.history_round_id)],
     )) {
-      const set = onlyByUnit.get(question.unit_id) || new Set<number>()
+      const set = result.get(question.unit_id) || new Set<number>()
       set.add(question.id)
-      onlyByUnit.set(question.unit_id, set)
+      result.set(question.unit_id, set)
     }
   }
-  const units = []
-  for (const unitId of unitIds) {
-    const unit = await serializeUnit(unitId, {
-      shuffleOptions,
-      onlyQuestionIds: ['wrong', 'wrong_history'].includes(String(body.mode))
-        ? onlyByUnit.get(unitId)
-        : undefined,
-    })
-    units.push(unit)
-    for (const question of unit.questions) {
+  return result
+}
+
+async function resumableWrongSession(
+  mode: string,
+  unitIds: number[],
+  questionIds: number[],
+): Promise<WrongSessionCandidate | null> {
+  const candidates = await rows<Omit<WrongSessionCandidate, 'question_ids'>>(
+    `SELECT s.id, s.mode, s.unit_ids, s.started_at, s.updated_at,
+       SUM(CASE WHEN TRIM(COALESCE(pa.user_answer, '')) <> '' THEN 1 ELSE 0 END) AS answered_rows
+     FROM practice_sessions s
+     LEFT JOIN practice_answers pa ON pa.session_id = s.id
+     WHERE s.status = 'active' AND s.mode = ?
+     GROUP BY s.id, s.mode, s.unit_ids, s.started_at, s.updated_at`,
+    [mode],
+  )
+  if (!candidates.length) return null
+  const answers = await rows<{ session_id: number; question_id: number }>(
+    `SELECT session_id, question_id FROM practice_answers
+     WHERE session_id IN (${candidates.map(() => '?').join(',')})`,
+    candidates.map(candidate => Number(candidate.id)),
+  )
+  const questionIdsBySession = new Map<number, number[]>()
+  for (const answer of answers) {
+    const ids = questionIdsBySession.get(Number(answer.session_id)) || []
+    ids.push(Number(answer.question_id))
+    questionIdsBySession.set(Number(answer.session_id), ids)
+  }
+  return selectResumableWrongSession(
+    candidates.map(candidate => ({
+      ...candidate,
+      question_ids: questionIdsBySession.get(Number(candidate.id)) || [],
+    })),
+    mode,
+    unitIds,
+    questionIds,
+  )
+}
+
+export async function createSession(body: JsonRecord): Promise<JsonRecord> {
+  const { unitIds, paperId } = await selectUnitIds(body)
+  if (!unitIds.length) throw new LocalApiError(400, '没有符合条件的练习篇目')
+  const isWrongMode = ['wrong', 'wrong_history'].includes(String(body.mode))
+  const onlyByUnit = isWrongMode ? await wrongQuestionIdsByUnit(body, unitIds) : new Map<number, Set<number>>()
+  if (body.mode === 'wrong' && !body.force_new) {
+    const questionIds = [...onlyByUnit.values()].flatMap(ids => [...ids])
+    const existing = await resumableWrongSession(String(body.mode), unitIds, questionIds)
+    if (existing) return { ...(await getSession(Number(existing.id))), resumed: true }
+  }
+  if (body.mode === 'paper' && paperId != null) {
+    if (body.force_new) {
       await run(
-        `INSERT OR IGNORE INTO practice_answers
-          (session_id, question_id, user_answer, option_order)
-         VALUES (?, ?, '', ?)`,
-        [sessionId, question.id, JSON.stringify(question.option_order)],
+        `UPDATE practice_sessions SET status = 'abandoned', updated_at = CURRENT_TIMESTAMP WHERE paper_id = ? AND status = 'active' AND mode = 'paper'`,
+        [paperId],
       )
+    } else {
+      const existing = await row<{ id: number }>(
+        `SELECT s.id FROM practice_sessions s
+         WHERE s.paper_id = ? AND s.status = 'active' AND s.mode = 'paper'
+         ORDER BY
+           (SELECT COUNT(*) FROM practice_unit_submissions pus WHERE pus.session_id = s.id) DESC,
+           (SELECT COUNT(*) FROM practice_answers pa
+            WHERE pa.session_id = s.id AND TRIM(COALESCE(pa.user_answer, '')) <> '') DESC,
+           COALESCE(s.updated_at, s.started_at) DESC, s.id DESC
+         LIMIT 1`,
+        [paperId],
+      )
+      if (existing) return { ...(await getSession(Number(existing.id))), resumed: true }
     }
+  }
+
+  const inheritedSnapshot = body.mode === 'wrong_history'
+    ? await historicalRetrySnapshot(Number(body.history_round_id), onlyByUnit) : {}
+  const shuffleOptions = body.shuffle_options !== false
+  // One logical action = one transaction: session row, content revisions and
+  // every per-question answer row commit together. In rollback-journal mode N
+  // autocommit inserts previously meant N fsync commits (and a half-initialised
+  // session if the process died mid-loop).
+  let sessionId = 0
+  const units: JsonRecord[] = []
+  await transaction(async db => {
+    const created = await db.run(
+      `INSERT INTO practice_sessions (mode, paper_id, unit_ids, shuffle_options, sync_id, updated_at, candidate_policy_version)
+       VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP, 1)`,
+      [body.mode, paperId, JSON.stringify(unitIds), shuffleOptions ? 1 : 0],
+      false,
+    )
+    // The Capacitor plugin returns { changes: { changes, lastId } }; tests and
+    // alternative drivers may return the node:sqlite shape, so read both.
+    // A missing id must fail loudly: a silent 0 would insert an orphan session.
+    const createdShape = created as { changes?: { changes?: number; lastId?: number }; lastInsertRowid?: number | bigint } | undefined
+    sessionId = Number(createdShape?.changes?.lastId ?? createdShape?.lastInsertRowid ?? 0)
+    if (!Number.isInteger(sessionId) || sessionId <= 0) throw new LocalApiError(500, '练习会话创建失败，请重试')
+    const {currentContentRevisions} = await import('./practice-snapshots')
+    await db.run('UPDATE practice_sessions SET content_revisions=? WHERE id=?',[await currentContentRevisions(unitIds),sessionId], false)
+    for (const unitId of unitIds) {
+      const unit = await restoreUnit(inheritedSnapshot, unitId) || await serializeUnit(unitId, {
+        shuffleOptions,
+        onlyQuestionIds: ['wrong', 'wrong_history'].includes(String(body.mode))
+          ? onlyByUnit.get(unitId)
+          : undefined,
+      })
+      units.push(unit)
+      const questions = unit.questions
+      for (let offset = 0; offset < questions.length; offset += 50) {
+        const batch = questions.slice(offset, offset + 50)
+        const rowsSql = batch.map(() => `(?, ?, '', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`).join(', ')
+        const values: unknown[] = []
+        for (const question of batch) {
+          values.push(sessionId, question.id, JSON.stringify(question.option_order))
+        }
+        await db.run(
+          `INSERT OR IGNORE INTO practice_answers
+            (session_id, question_id, user_answer, option_order, sync_id, updated_at)
+           VALUES ${rowsSql}`,
+          values,
+          false,
+        )
+      }
+    }
+    if (inheritedSnapshot.revision) {
+      await db.run('UPDATE practice_sessions SET content_snapshot=? WHERE id=?', [JSON.stringify(inheritedSnapshot), sessionId], false)
+    }
+  })
+  if (inheritedSnapshot.revision) {
+    return getSession(sessionId)
   }
   normalizeListeningAudio(units)
   return {
@@ -411,12 +508,32 @@ export async function createSession(body: JsonRecord): Promise<JsonRecord> {
   }
 }
 
+export async function abandonIfEmpty(sessionId: number): Promise<JsonRecord> {
+  const answered = await row<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM practice_answers
+     WHERE session_id = ? AND TRIM(COALESCE(user_answer, '')) <> ''`,
+    [sessionId],
+  )
+  const submitted = await row<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM practice_unit_submissions WHERE session_id = ?`,
+    [sessionId],
+  )
+  if (Number(answered?.n || 0) > 0 || Number(submitted?.n || 0) > 0) return { kept: true }
+  await run(
+    `UPDATE practice_sessions SET status = 'abandoned', updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status = 'active' AND mode = 'paper'`,
+    [sessionId],
+  )
+  return { kept: false }
+}
+
 export async function getSession(sessionId: number): Promise<JsonRecord> {
   const session = await row<JsonRecord>(
     'SELECT * FROM practice_sessions WHERE id = ?',
     [sessionId],
   )
   if (!session) throw new LocalApiError(404, '练习记录不存在')
+  const snapshot = readSnapshot(session.content_snapshot)
   const unitIds = parseJson<number[]>(session.unit_ids, [])
   const answerRows = await rows<JsonRecord>(
     `SELECT a.*, q.unit_id, q.score AS question_score
@@ -444,9 +561,10 @@ export async function getSession(sessionId: number): Promise<JsonRecord> {
   }
   const units = []
   for (const unitId of unitIds) {
-    const unit = await serializeUnit(unitId, {
+    const unit = await restoreUnit(snapshot, unitId) || await serializeUnit(unitId, {
       shuffleOptions: Boolean(session.shuffle_options),
       answerOrders,
+      candidatePolicyVersion: Number(session.candidate_policy_version || 0),
       // Correct answers remain in the local database. Submitted practice
       // sessions expose only the user's selection and whether it was correct.
       includeAnswers: false,
@@ -469,7 +587,7 @@ export async function getSession(sessionId: number): Promise<JsonRecord> {
         .filter(Boolean) as JsonRecord[]
       const score = unitSubmission?.score ?? unitAnswers
         .filter(answer => answer.is_correct === 1)
-        .reduce((sum, answer) => sum + Number(answer.question_score), 0)
+        .reduce((sum, answer) => sum + Number(unit.questions.find((q: JsonRecord) => q.id === answer.question_id)?.score || 0), 0)
       unit.submission = {
         submitted: true,
         submitted_at: unitSubmission?.submitted_at || session.submitted_at,
@@ -500,6 +618,8 @@ export async function getSession(sessionId: number): Promise<JsonRecord> {
     paper_id: session.paper_id,
     status: session.status,
     shuffle_options: Boolean(session.shuffle_options),
+    content_revision: snapshot.revision || null,
+    content_choice_required: snapshotChoiceRequired(session),
     started_at: session.started_at,
     submitted_at: session.submitted_at,
     score: session.score,
@@ -518,28 +638,22 @@ export async function saveAnswer(
   questionId: number,
   body: JsonRecord,
 ): Promise<{ saved: true }> {
-  const session = await row<JsonRecord>(
-    'SELECT status FROM practice_sessions WHERE id = ?',
-    [sessionId],
+  // One round trip covers session state, the question's unit, the submitted
+  // flag and the previous answer; the two writes commit in one transaction so
+  // a kill between them can no longer store the answer without its event.
+  const row_ = await row<JsonRecord>(
+    `SELECT s.id AS session_id, s.status, s.content_snapshot, s.snapshot_accepted_revision,
+       (SELECT unit_id FROM questions WHERE id = ?) AS unit_id,
+       (SELECT 1 FROM practice_unit_submissions WHERE session_id = s.id AND unit_id = (SELECT unit_id FROM questions WHERE id = ?)) AS submitted,
+       (SELECT user_answer FROM practice_answers WHERE session_id = s.id AND question_id = ?) AS previous_answer
+     FROM practice_sessions s WHERE s.id = ?`,
+    [questionId, questionId, questionId, sessionId],
   )
-  if (!session) throw new LocalApiError(404, '练习记录不存在')
-  if (session.status !== 'active') throw new LocalApiError(400, '已经提交的练习不能修改')
-  const question = await row<{ unit_id: number }>(
-    'SELECT unit_id FROM questions WHERE id = ?',
-    [questionId],
-  )
-  if (!question) throw new LocalApiError(404, '题目不存在')
-  const submitted = await row(
-    `SELECT 1 AS found FROM practice_unit_submissions
-     WHERE session_id = ? AND unit_id = ?`,
-    [sessionId, question.unit_id],
-  )
-  if (submitted) throw new LocalApiError(400, '这一篇已经提交，不能继续修改')
-  const previous = await row<{ user_answer: string }>(
-    `SELECT user_answer FROM practice_answers
-     WHERE session_id = ? AND question_id = ?`,
-    [sessionId, questionId],
-  )
+  if (!row_ || !row_.session_id) throw new LocalApiError(404, '练习记录不存在')
+  requireSnapshotChoice(row_)
+  if (row_.status !== 'active') throw new LocalApiError(400, '已经提交的练习不能修改')
+  if (!row_.unit_id) throw new LocalApiError(404, '题目不存在')
+  if (row_.submitted) throw new LocalApiError(400, '这一篇已经提交，不能继续修改')
   let optionOrder = Array.isArray(body.option_order) ? body.option_order : []
   if (!optionOrder.length) {
     // Part B / 排序题若前端未带 option_order，回退到题目原始选项顺序，
@@ -549,26 +663,31 @@ export async function saveAnswer(
       [questionId],
     )).map(item => item.stable_key)
   }
-  const result = await run(
-    `UPDATE practice_answers
-     SET user_answer = ?, option_order = ?, answered_at = CURRENT_TIMESTAMP
-     WHERE session_id = ? AND question_id = ?`,
-    [
-      String(body.answer || ''),
-      JSON.stringify(optionOrder),
-      sessionId,
-      questionId,
-    ],
-  )
-  if (!result.changes) throw new LocalApiError(404, '题目不属于该练习')
-  if (body.answer && previous?.user_answer !== body.answer) {
-    await run(
-      `INSERT INTO practice_answer_events
-        (session_id, question_id, user_answer, option_order)
-       VALUES (?, ?, ?, ?)`,
-      [sessionId, questionId, body.answer, JSON.stringify(optionOrder)],
+  await transaction(async db => {
+    const result = await db.run(
+      `UPDATE practice_answers
+       SET user_answer = ?, option_order = ?, answered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE session_id = ? AND question_id = ?`,
+      [
+        String(body.answer || ''),
+        JSON.stringify(optionOrder),
+        sessionId,
+        questionId,
+      ],
+      false,
     )
-  }
+    const changed = Number(result?.changes?.changes ?? result?.changes ?? 0)
+    if (!changed) throw new LocalApiError(404, '题目不属于该练习')
+    if (body.answer && row_.previous_answer !== body.answer) {
+      await db.run(
+        `INSERT INTO practice_answer_events
+          (session_id, question_id, user_answer, option_order, sync_id, updated_at)
+         VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
+        [sessionId, questionId, body.answer, JSON.stringify(optionOrder)],
+        false,
+      )
+    }
+  })
   return { saved: true }
 }
 
@@ -580,6 +699,16 @@ async function transactionRow<T>(
   if (!db) return row<T>(statement, values)
   const result = await db.query(statement, values)
   return (result.values?.[0] as T | undefined) || null
+}
+
+async function transactionRows<T>(
+  db: TransactionDb | undefined,
+  statement: string,
+  values: unknown[] = [],
+): Promise<T[]> {
+  if (!db) return rows<T>(statement, values)
+  const result = await db.query(statement, values)
+  return (result.values || []) as T[]
 }
 
 async function transactionRun(
@@ -594,56 +723,6 @@ async function transactionRun(
   await run(statement, values)
 }
 
-async function updateWrongStat(
-  questionId: number,
-  isCorrect: boolean,
-  db?: TransactionDb,
-) {
-  const current = await transactionRow<JsonRecord>(
-    db,
-    'SELECT * FROM wrong_stats WHERE question_id = ?',
-    [questionId],
-  )
-  const now = new Date().toISOString()
-  if (!current) {
-    await transactionRun(
-      db,
-      `INSERT INTO wrong_stats
-        (question_id, attempt_count, wrong_count, recent_results,
-         consecutive_correct, last_wrong_at, last_attempt_at)
-       VALUES (?, 1, ?, ?, ?, ?, ?)`,
-      [
-        questionId,
-        isCorrect ? 0 : 1,
-        JSON.stringify([isCorrect]),
-        isCorrect ? 1 : 0,
-        isCorrect ? null : now,
-        now,
-      ],
-    )
-    return
-  }
-  const recent = [...parseJson<boolean[]>(current.recent_results, []), isCorrect].slice(-10)
-  await transactionRun(
-    db,
-    `UPDATE wrong_stats SET
-       attempt_count = attempt_count + 1,
-       wrong_count = wrong_count + ?,
-       recent_results = ?,
-       consecutive_correct = ?,
-       last_wrong_at = ?,
-       last_attempt_at = ?
-     WHERE question_id = ?`,
-    [
-      isCorrect ? 0 : 1,
-      JSON.stringify(recent),
-      isCorrect ? Number(current.consecutive_correct) + 1 : 0,
-      isCorrect ? current.last_wrong_at : now,
-      now,
-      questionId,
-    ],
-  )
-}
 
 async function gradeRows(
   answerRows: JsonRecord[],
@@ -653,13 +732,41 @@ async function gradeRows(
   let score = 0
   let maxScore = 0
   const results: JsonRecord[] = []
+  // One snapshot read + one parse per submission; every validation rule of
+  // snapshotGrade (including the missing-evidence throw) is preserved by
+  // snapshotGradeMany.
+  const gradeTable = await snapshotGradeMany(answerRows, <T>(sql: string, values: unknown[]) => transactionRow<T>(db, sql, values), <T>(sql: string, values: unknown[]) => transactionRows<T>(db, sql, values))
+  const wrongRows = answerRows.filter(row => updateStats && row.is_correct == null)
+  let sessionSyncId: string | null = null
+  if (wrongRows.length) {
+    let session = await transactionRow<JsonRecord>(db, 'SELECT sync_id FROM practice_sessions WHERE id=?', [wrongRows[0].session_id])
+    if (!session?.sync_id) {
+      await transactionRun(db, 'UPDATE practice_sessions SET sync_id=lower(hex(randomblob(16))) WHERE id=?', [wrongRows[0].session_id])
+      session = await transactionRow<JsonRecord>(db, 'SELECT sync_id FROM practice_sessions WHERE id=?', [wrongRows[0].session_id])
+    }
+    sessionSyncId = String(session!.sync_id)
+  }
+  const currentStats = new Map<number, JsonRecord>()
+  if (wrongRows.length) {
+    const ids = [...new Set(wrongRows.map(row => Number(row.question_id)))]
+    for (let offset = 0; offset < ids.length; offset += 400) {
+      const batch = ids.slice(offset, offset + 400)
+      const placeholders = batch.map(() => '?').join(', ')
+      for (const item of await transactionRows<JsonRecord>(db, `SELECT * FROM wrong_stats WHERE question_id IN (${placeholders})`, batch)) {
+        currentStats.set(Number(item.question_id), item)
+      }
+    }
+    const placeholders = wrongRows.map(() => '?').join(', ')
+    await transactionRun(db, `INSERT OR IGNORE INTO wrong_stats(question_id) VALUES (${wrongRows.map(row => '(?)').join(', ')})`, wrongRows.map(row => Number(row.question_id)))
+  }
   for (const answerRow of answerRows) {
-    maxScore += Number(answerRow.score)
+    const original = gradeTable.get(Number(answerRow.question_id))!
+    maxScore += original.score
     const user = String(answerRow.user_answer || '').trim().toUpperCase().split('').sort().join('')
-    const answer = String(answerRow.answer || '').trim().toUpperCase().split('').sort().join('')
+    const answer = String(original.answer || '').trim().toUpperCase().split('').sort().join('')
     const correct = Boolean(user) && user === answer
-    if (correct) score += Number(answerRow.score)
-    await transactionRun(db, 'UPDATE practice_answers SET is_correct = ? WHERE id = ?', [
+    if (correct) score += original.score
+    await transactionRun(db, 'UPDATE practice_answers SET is_correct = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [
       correct ? 1 : 0,
       answerRow.id,
     ])
@@ -669,7 +776,9 @@ async function gradeRows(
       is_correct: correct,
     })
     if (updateStats && answerRow.is_correct == null) {
-      await updateWrongStat(answerRow.question_id, correct, db)
+      const current = currentStats.get(Number(answerRow.question_id))
+      const values = aggregateAttempts(current || {}, undefined, [sessionSyncId!, new Date().toISOString(), correct])
+      await transactionRun(db, `UPDATE wrong_stats SET ${Object.keys(values).map(key => `${key}=?`).join(', ')}, updated_at=CURRENT_TIMESTAMP WHERE question_id=?`, [...Object.values(values), answerRow.question_id])
     }
   }
   return { score, maxScore, results }
@@ -682,9 +791,9 @@ async function addCurrentWrongQuestions(
 ) {
   for (const result of results.filter(item => !item.is_correct)) {
     await db.run(
-      `INSERT INTO wrong_current_questions (unit_id, question_id, deleted_at)
-       VALUES (?, ?, NULL)
-       ON CONFLICT(unit_id, question_id) DO UPDATE SET deleted_at = NULL`,
+      `INSERT INTO wrong_current_questions (unit_id, question_id, deleted_at, sync_id, updated_at)
+       VALUES (?, ?, NULL, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)
+       ON CONFLICT(unit_id, question_id) DO UPDATE SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP`,
       [unitId, result.question_id],
       false,
     )
@@ -705,8 +814,8 @@ async function recordWrongRetryRound(
   const correctCount = results.filter(item => item.is_correct).length
   const created = await db.run(
     `INSERT INTO wrong_retry_rounds
-      (unit_id, session_id, round_number, question_count, correct_count, wrong_count)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+      (unit_id, session_id, round_number, question_count, correct_count, wrong_count, sync_id, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
     [unitId, sessionId, Number(next?.round_number || 1), results.length, correctCount, results.length - correctCount],
     false,
   )
@@ -714,16 +823,40 @@ async function recordWrongRetryRound(
   for (const result of results) {
     await db.run(
       `INSERT INTO wrong_retry_round_questions
-        (round_id, question_id, user_answer, is_correct) VALUES (?, ?, ?, ?)`,
+        (round_id, question_id, user_answer, is_correct, sync_id, updated_at)
+       VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
       [roundId, result.question_id, result.user_answer, result.is_correct ? 1 : 0],
+      false,
+    )
+  }
+  const currentRows = (await db.query(
+    'SELECT sync_id FROM wrong_current_questions WHERE unit_id = ?',
+    [unitId],
+  )).values || []
+  const profileRow = (await db.query(
+    `SELECT p.name FROM question_bank_profiles p
+     JOIN papers pa ON pa.profile_id = p.id
+     JOIN units u ON u.paper_id = pa.id
+     WHERE u.id = ? LIMIT 1`,
+    [unitId],
+  )).values?.[0]
+  for (const current of currentRows) {
+    const syncId = String(current.sync_id || '')
+    if (!syncId) continue
+    await db.run(
+      `INSERT INTO sync_tombstones(table_name, object_key, profile_name, deleted_at)
+       VALUES ('wrong_current_questions', ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(table_name, object_key, profile_name)
+       DO UPDATE SET deleted_at = CURRENT_TIMESTAMP`,
+      [syncId, String(profileRow?.name || '')],
       false,
     )
   }
   await db.run('DELETE FROM wrong_current_questions WHERE unit_id = ?', [unitId], false)
   for (const result of results.filter(item => !item.is_correct)) {
     await db.run(
-      `INSERT INTO wrong_current_questions (unit_id, question_id, since_round_id)
-       VALUES (?, ?, ?)`,
+      `INSERT INTO wrong_current_questions (unit_id, question_id, since_round_id, sync_id, updated_at)
+       VALUES (?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
       [unitId, result.question_id, roundId],
       false,
     )
@@ -733,6 +866,7 @@ async function recordWrongRetryRound(
 export async function submitUnit(sessionId: number, unitId: number): Promise<JsonRecord> {
   const session = await row<JsonRecord>('SELECT * FROM practice_sessions WHERE id = ?', [sessionId])
   if (!session) throw new LocalApiError(404, '练习记录不存在')
+  requireSnapshotChoice(session)
   if (session.status !== 'active') throw new LocalApiError(400, '整份练习已经提交')
   if (session.mode !== 'paper') throw new LocalApiError(400, '只有按年份练习支持单篇提交')
   const existing = await row(
@@ -756,11 +890,13 @@ export async function submitUnit(sessionId: number, unitId: number): Promise<Jso
     { id: missing.question_id, number: missing.number },
   )
   await transaction(async db => {
-    const graded = await gradeRows(answerRows, db)
-    await addCurrentWrongQuestions(unitId, graded.results, db)
+    const historicalContent = Boolean(readSnapshot(session.content_snapshot).revision)
+    const graded = await gradeRows(answerRows, db, !historicalContent)
+    if (!historicalContent) await addCurrentWrongQuestions(unitId, graded.results, db)
     await db.run(
       `INSERT INTO practice_unit_submissions
-        (session_id, unit_id, score, max_score) VALUES (?, ?, ?, ?)`,
+        (session_id, unit_id, score, max_score, sync_id, updated_at)
+       VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
       [sessionId, unitId, graded.score, graded.maxScore],
       false,
     )
@@ -771,7 +907,9 @@ export async function submitUnit(sessionId: number, unitId: number): Promise<Jso
 export async function submitSession(sessionId: number): Promise<JsonRecord> {
   const session = await row<JsonRecord>('SELECT * FROM practice_sessions WHERE id = ?', [sessionId])
   if (!session) throw new LocalApiError(404, '练习记录不存在')
+  requireSnapshotChoice(session)
   if (session.status === 'submitted') return getSession(sessionId)
+  if (session.status !== 'active') throw new LocalApiError(400, '练习已结束，请重新打开练习')
   const answerRows = await rows<JsonRecord>(
     `SELECT a.*, q.answer, q.score, q.unit_id, q.number, u.title AS unit_title
      FROM practice_answers a
@@ -797,9 +935,9 @@ export async function submitSession(sessionId: number): Promise<JsonRecord> {
     let score = 0
     let maxScore = 0
     for (const [unitId, unitAnswers] of byUnit) {
-      const historyOnly = session.mode === 'wrong_history'
+      const historyOnly = session.mode === 'wrong_history' || Boolean(readSnapshot(session.content_snapshot).revision)
       const graded = await gradeRows(unitAnswers, db, !historyOnly)
-      if (session.mode === 'wrong') {
+      if (session.mode === 'wrong' && !historyOnly) {
         await recordWrongRetryRound(unitId, sessionId, graded.results, db)
       } else if (!historyOnly) {
         await addCurrentWrongQuestions(unitId, graded.results, db)
@@ -808,10 +946,10 @@ export async function submitSession(sessionId: number): Promise<JsonRecord> {
       maxScore += graded.maxScore
       await db.run(
         `INSERT INTO practice_unit_submissions
-          (session_id, unit_id, score, max_score)
-         VALUES (?, ?, ?, ?)
+          (session_id, unit_id, score, max_score, sync_id, updated_at)
+         VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)
          ON CONFLICT(session_id, unit_id) DO UPDATE SET
-           score = excluded.score, max_score = excluded.max_score`,
+           score = excluded.score, max_score = excluded.max_score, updated_at = CURRENT_TIMESTAMP`,
         [sessionId, unitId, graded.score, graded.maxScore],
         false,
       )
@@ -819,7 +957,7 @@ export async function submitSession(sessionId: number): Promise<JsonRecord> {
     await db.run(
       `UPDATE practice_sessions SET
          status = 'submitted', submitted_at = CURRENT_TIMESTAMP,
-         score = ?, max_score = ?
+         score = ?, max_score = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [score, maxScore, sessionId],
       false,
@@ -861,13 +999,7 @@ export async function dashboard(): Promise<JsonRecord> {
      ORDER BY s.id DESC LIMIT 5`,
     [profileId],
   )
-  const resumeSession = await row<JsonRecord>(
-    `SELECT s.id, s.mode, s.started_at, p.year
-     FROM practice_sessions s LEFT JOIN papers p ON p.id = s.paper_id
-     WHERE s.status = 'active' AND (p.profile_id = ? OR s.paper_id IS NULL)
-     ORDER BY s.id DESC LIMIT 1`,
-    [profileId],
-  )
+  const resumeSession = await resumablePracticeSession()
   const unitTypeCounts = Object.fromEntries(
     (await rows<{ unit_type: string; count: number }>(
       `SELECT u.unit_type, COUNT(DISTINCT u.id) AS count
@@ -897,7 +1029,7 @@ export async function dashboard(): Promise<JsonRecord> {
     paper_type_counts: paperTypeCounts,
     recent_sessions: recentSessions,
     resume_session: resumeSession
-      ? { id: Number(resumeSession.id), mode: resumeSession.mode, year: resumeSession.year }
+      ? { id: Number(resumeSession.id), mode: resumeSession.mode, year: resumeSession.year, title: resumeSession.title }
       : null,
   }
 }
@@ -906,6 +1038,7 @@ export async function listWrong(view = 'current'): Promise<JsonRecord[]> {
   const profileId = await activeQuestionBankProfileId()
   const units = await rows<JsonRecord>(
     `SELECT u.id AS unit_id, u.title AS unit_title, u.unit_type, p.year,
+       json_extract(u.shared_data, '$.content_revision') AS content_revision,
        COUNT(DISTINCT wc.question_id) AS current_count,
        COUNT(DISTINCT rr.id) AS retry_count
      FROM units u
@@ -925,35 +1058,72 @@ export async function listWrong(view = 'current'): Promise<JsonRecord[]> {
     if (view === 'all') return true
     return Number(unit.current_count) > 0
   })
+  const frequentIds = view === 'frequent' ? new Set(await frequentQuestionIds()) : null
+  // Set queries instead of per-unit/per-round round trips: three batched IN
+  // reads cover every unit, then results are grouped in memory by id.
+  const unitIds = filtered.map(unit => Number(unit.unit_id))
+  const currentByUnit = new Map<number, number[]>()
+  const roundsByUnit = new Map<number, JsonRecord[]>()
+  const remainingByRound = new Map<number, number[]>()
+  if (unitIds.length) {
+    const chunk = <T,>(list: T[], size: number): T[][] => {
+      const parts: T[][] = []
+      for (let index = 0; index < list.length; index += size) parts.push(list.slice(index, index + size))
+      return parts
+    }
+    for (const part of chunk(unitIds, 400)) {
+      const placeholders = part.map(() => '?').join(', ')
+      for (const item of await rows<{ unit_id: number; question_id: number }>(
+        `SELECT unit_id, question_id FROM wrong_current_questions
+         WHERE unit_id IN (${placeholders}) AND deleted_at IS NULL ORDER BY unit_id, question_id`,
+        part,
+      )) {
+        const list = currentByUnit.get(Number(item.unit_id)) || []
+        list.push(Number(item.question_id))
+        currentByUnit.set(Number(item.unit_id), list)
+      }
+      for (const item of await rows<JsonRecord>(
+        `SELECT id, unit_id, round_number, question_count, correct_count, wrong_count,
+           submitted_at,
+           CASE WHEN question_count > 0
+             THEN ROUND(correct_count * 100.0 / question_count, 1) ELSE 0 END AS accuracy
+         FROM wrong_retry_rounds
+         WHERE unit_id IN (${placeholders}) AND deleted_at IS NULL
+         ORDER BY submitted_at, id`,
+        part,
+      )) {
+        const list = roundsByUnit.get(Number(item.unit_id)) || []
+        list.push(item)
+        roundsByUnit.set(Number(item.unit_id), list)
+      }
+    }
+    const roundIds = [...roundsByUnit.values()].flat().map(round => Number(round.id))
+    for (const part of chunk(roundIds, 400)) {
+      const placeholders = part.map(() => '?').join(', ')
+      for (const item of await rows<{ round_id: number; question_id: number }>(
+        `SELECT round_id, question_id FROM wrong_retry_round_questions
+         WHERE round_id IN (${placeholders}) AND is_correct = 0 ORDER BY round_id, question_id`,
+        part,
+      )) {
+        const list = remainingByRound.get(Number(item.round_id)) || []
+        list.push(Number(item.question_id))
+        remainingByRound.set(Number(item.round_id), list)
+      }
+    }
+  }
   const result: JsonRecord[] = []
   for (const unit of filtered) {
-    const current = await rows<{ question_id: number }>(
-      `SELECT question_id FROM wrong_current_questions
-       WHERE unit_id = ? AND deleted_at IS NULL ORDER BY question_id`,
-      [unit.unit_id],
-    )
-    const roundRows = await rows<JsonRecord>(
-      `SELECT id, round_number, question_count, correct_count, wrong_count,
-         submitted_at,
-         CASE WHEN question_count > 0
-           THEN ROUND(correct_count * 100.0 / question_count, 1) ELSE 0 END AS accuracy
-       FROM wrong_retry_rounds
-       WHERE unit_id = ? AND deleted_at IS NULL
-       ORDER BY submitted_at, id`,
-      [unit.unit_id],
-    )
-    const rounds = []
-    for (const round of roundRows) {
-      const remaining = await rows<{ question_id: number }>(
-        `SELECT question_id FROM wrong_retry_round_questions
-         WHERE round_id = ? AND is_correct = 0 ORDER BY question_id`,
-        [round.id],
-      )
-      rounds.push({ ...round, remaining_question_ids: remaining.map(item => Number(item.question_id)) })
-    }
+    const current = currentByUnit.get(Number(unit.unit_id)) || []
+    const rounds = (roundsByUnit.get(Number(unit.unit_id)) || []).map(round => ({
+      ...round,
+      remaining_question_ids: remainingByRound.get(Number(round.id)) || [],
+    }))
+    const currentIds = current.map(item => Number(item)).filter(id => !frequentIds || frequentIds.has(id))
+    if (frequentIds && !currentIds.length) continue
     result.push({
       ...unit,
-      current_question_ids: current.map(item => Number(item.question_id)),
+      current_count: currentIds.length,
+      current_question_ids: currentIds,
       is_mastered: Number(unit.current_count) === 0,
       rounds,
     })
