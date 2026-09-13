@@ -976,21 +976,9 @@ export async function dashboard(): Promise<JsonRecord> {
       (SELECT COUNT(*) FROM wrong_stats w JOIN questions q ON q.id = w.question_id JOIN units u ON u.id = q.unit_id JOIN papers p ON p.id = u.paper_id WHERE w.wrong_count > 0 AND p.profile_id = ? AND p.deleted_at IS NULL) AS wrong_count`,
     [profileId, profileId, profileId, profileId],
   )
-  const frequent = await rows<JsonRecord>(
-    `SELECT w.wrong_count, w.recent_results, w.manually_frequent
-     FROM wrong_stats w
-     JOIN questions q ON q.id = w.question_id
-     JOIN units u ON u.id = q.unit_id
-     JOIN papers p ON p.id = u.paper_id
-     WHERE w.wrong_count > 0 AND p.profile_id = ? AND p.deleted_at IS NULL`,
-    [profileId],
-  )
-  const frequentCount = frequent.filter(item => {
-    const recent = parseJson<boolean[]>(item.recent_results, [])
-    return Boolean(item.manually_frequent)
-      || Number(item.wrong_count) >= 3
-      || (recent.length >= 5 && recent.filter(value => !value).length >= 3)
-  }).length
+  // 高频题定义沿用错题列表的同一份查询，避免首页再拉一遍全表 wrong_stats 后
+  // 在 JS 里重复判定一次。
+  const frequentCount = (await frequentQuestionIds()).length
   const recentSessions = await rows<JsonRecord>(
     `SELECT s.id, s.mode, s.status, s.started_at, s.submitted_at,
        s.score, s.max_score, p.year
@@ -1000,27 +988,22 @@ export async function dashboard(): Promise<JsonRecord> {
     [profileId],
   )
   const resumeSession = await resumablePracticeSession()
+  // 篇目与试卷的题型统计共用一个分组结果：原先两条查询只差 COUNT(DISTINCT)
+  // 的列，EXISTS 取代 questions 连接后既保持“仅统计含题篇目”的语义又少扫一次。
+  const typeCounts = await rows<{ unit_type: string; unit_count: number; paper_count: number }>(
+    `SELECT u.unit_type, COUNT(DISTINCT u.id) AS unit_count, COUNT(DISTINCT p.id) AS paper_count
+     FROM units u JOIN papers p ON p.id = u.paper_id
+     WHERE p.profile_id = ? AND p.status = 'published' AND p.deleted_at IS NULL
+       AND (u.unit_type <> 'listening' OR (${listeningHasAudioSql('u')}))
+       AND EXISTS (SELECT 1 FROM questions q WHERE q.unit_id = u.id)
+     GROUP BY u.unit_type`,
+    [profileId],
+  )
   const unitTypeCounts = Object.fromEntries(
-    (await rows<{ unit_type: string; count: number }>(
-      `SELECT u.unit_type, COUNT(DISTINCT u.id) AS count
-       FROM units u JOIN papers p ON p.id = u.paper_id
-       JOIN questions q ON q.unit_id = u.id
-       WHERE p.profile_id = ? AND p.status = 'published' AND p.deleted_at IS NULL
-         AND (u.unit_type <> 'listening' OR (${listeningHasAudioSql('u')}))
-       GROUP BY u.unit_type`,
-      [profileId],
-    )).map(item => [item.unit_type, Number(item.count)]),
+    typeCounts.map(item => [item.unit_type, Number(item.unit_count)]),
   )
   const paperTypeCounts = Object.fromEntries(
-    (await rows<{ unit_type: string; count: number }>(
-      `SELECT u.unit_type, COUNT(DISTINCT p.id) AS count
-       FROM units u JOIN papers p ON p.id = u.paper_id
-       JOIN questions q ON q.unit_id = u.id
-       WHERE p.profile_id = ? AND p.status = 'published' AND p.deleted_at IS NULL
-         AND (u.unit_type <> 'listening' OR (${listeningHasAudioSql('u')}))
-       GROUP BY u.unit_type`,
-      [profileId],
-    )).map(item => [item.unit_type, Number(item.count)]),
+    typeCounts.map(item => [item.unit_type, Number(item.paper_count)]),
   )
   return {
     ...counts,

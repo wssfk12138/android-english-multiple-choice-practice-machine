@@ -45,7 +45,13 @@ export async function ensureSyncVersions(db: VersionDb, tables: readonly string[
       _sync_rev=CASE WHEN NEW._sync_rev=OLD._sync_rev AND NEW._sync_origin=OLD._sync_origin THEN OLD._sync_rev+1 ELSE NEW._sync_rev END,
       _sync_origin=CASE WHEN NEW._sync_rev=OLD._sync_rev AND NEW._sync_origin=OLD._sync_origin THEN lower(hex(randomblob(16))) ELSE NEW._sync_origin END
       WHERE rowid=NEW.rowid; END`)
-    await execute(`UPDATE ${table} SET ${business[0]}=${business[0]} WHERE _sync_seq=0`)
     await execute(`CREATE INDEX IF NOT EXISTS lan_seq_${table} ON ${table}(_sync_seq)`)
+    // Rows that predate the triggers still sit at _sync_seq=0 and need one
+    // touch to be picked up by incremental sync. Probe first so launches with
+    // nothing pending do not rewrite every table.
+    const pendingSequence = await db.query(`SELECT 1 FROM ${table} WHERE _sync_seq=0 LIMIT 1`)
+    if ((pendingSequence.values || []).length) {
+      await execute(`UPDATE ${table} SET ${business[0]}=${business[0]} WHERE _sync_seq=0`)
+    }
   }
 }

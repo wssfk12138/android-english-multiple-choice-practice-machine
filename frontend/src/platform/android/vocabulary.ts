@@ -152,6 +152,20 @@ function reviewRevision(entry: JsonRecord): string {
   return JSON.stringify([entry.normalized_term, entry.last_reviewed_at, entry.next_review_at, entry.updated_at, entry.review_count || 0])
 }
 
+// 评分只需要更新后的卡片身份；返回完整详情会让每次评分都付出出现记录查询和
+// 整本词库相似词匹配的代价，而复习界面从不读取这些字段。
+async function reviewAck(id: number): Promise<JsonRecord> {
+  const entry = await reviewEntry(id)
+  return {
+    id: Number(entry.id),
+    review_revision: entry.review_revision,
+    next_review_at: entry.next_review_at || null,
+    review_count: Number(entry.review_count || 0),
+    review_stage: Number(entry.review_stage || 0),
+    study_status: String(entry.study_status || ''),
+  }
+}
+
 async function reviewEntry(id: number): Promise<JsonRecord> {
   const entry = await row<JsonRecord>('SELECT *, (SELECT COUNT(*) FROM vocabulary_reviews WHERE entry_id=vocabulary_entries.id) AS review_count FROM vocabulary_entries WHERE id = ?', [id])
   if (!entry) throw new LocalApiError(404, '单词不存在')
@@ -408,7 +422,7 @@ async function applyVocabularyReview(id: number, rating: string, mode = 'schedul
       "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, 'reinforcement', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)",
       [id, rating, now.toISOString()],
     )
-    return serializeEntry(id)
+    return reviewAck(id)
   }
   let stage = Math.max(0, Math.min(7, Number(entry.review_stage || 0)))
   stage = rating === 'again' ? 0 : rating === 'hard' ? Math.max(0, stage - 1) : rating === 'know' ? Math.min(7, stage + 1) : Math.min(7, stage + 2)
@@ -423,7 +437,7 @@ async function applyVocabularyReview(id: number, rating: string, mode = 'schedul
     "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, 'scheduled', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)",
     [id, rating, next],
   )
-  return serializeEntry(id)
+  return reviewAck(id)
 }
 
 export async function queueTranslations(entryIds: number[]): Promise<JsonRecord> {

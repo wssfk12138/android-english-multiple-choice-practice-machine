@@ -23,6 +23,9 @@ const hasSelectedContent = computed(() => selected.value?.translation_status ===
   || ['phonetic', 'part_of_speech', 'contextual_meaning', 'common_meaning', 'note']
     .some(field => String(selected.value?.[field] || '').trim()))
 const reviewMode = ref(false)
+// 进入复习时先渲染卡片外壳，再让到期队列在后台落地，避免卡片出现前的加载页。
+const reviewLoading = ref(false)
+let reviewLoadToken = 0
 const reviewKind = ref<'scheduled' | 'reinforcement'>('scheduled')
 const reinforcementSize = ref(10)
 const reveal = ref(false)
@@ -97,7 +100,7 @@ async function enrichSelected() {
   } catch (cause) { error.value = String(cause) }
   finally {
     enrichmentPending.value = false
-    if (!translationRefreshTimer) translationRefreshTimer = window.setInterval(refreshTranslationStatuses, 5000)
+    startTranslationRefresh()
   }
 }
 
@@ -121,18 +124,41 @@ function translationStatusText(status: string, detail = false) {
 
 let translationRefreshTimer = 0
 let translationRefreshBusy = false
+let translationRefreshTick = 0
 const translationProgress = ref<any>({})
+
+// 后台翻译可能持续很久；轮询在首个 30 秒后降到 10 秒、再降到 30 秒，
+// 页面不可见时直接跳过，避免长时间反复查询数据库。
+function translationRefreshStride() {
+  if (translationRefreshTick <= 6) return 1
+  if (translationRefreshTick <= 18) return 2
+  return 6
+}
+
+function startTranslationRefresh() {
+  if (translationRefreshTimer) return
+  translationRefreshTick = 0
+  translationRefreshTimer = window.setInterval(refreshTranslationStatuses, 5000)
+}
+
+function stopTranslationRefresh() {
+  if (translationRefreshTimer) window.clearInterval(translationRefreshTimer)
+  translationRefreshTimer = 0
+  translationRefreshTick = 0
+}
 
 async function refreshTranslationStatuses() {
   if (translationRefreshBusy || reviewDisposed || reviewMode.value) return
+  if (document.visibilityState === 'hidden') return
+  translationRefreshTick += 1
+  if (translationRefreshTick % translationRefreshStride() !== 0) return
   translationRefreshBusy = true
   try {
     const next: any = await get('/vocabulary/translation-status')
     const previous = translationProgress.value
     translationProgress.value = next
     if (!(next.queued > 0 || next.translating > 0 || next.enrichment_queued > 0 || next.enrichment_inflight > 0)) {
-      window.clearInterval(translationRefreshTimer)
-      translationRefreshTimer = 0
+      stopTranslationRefresh()
     }
     if (editing.value || reviewMode.value) return
     const countsChanged = JSON.stringify(previous || {}) !== JSON.stringify(next)
@@ -153,8 +179,7 @@ async function refreshTranslationStatuses() {
       Object.assign(editForm, selected.value)
     }
   } catch {
-    window.clearInterval(translationRefreshTimer)
-    translationRefreshTimer = 0
+    stopTranslationRefresh()
   } finally { translationRefreshBusy = false }
 }
 
@@ -165,9 +190,7 @@ async function startPendingTranslations() {
       trigger: 'vocabulary_open',
     })
     await load()
-    if (!translationRefreshTimer) {
-      translationRefreshTimer = window.setInterval(refreshTranslationStatuses, 5000)
-    }
+    startTranslationRefresh()
   } catch (cause) {
     error.value = String(cause)
     await load()
@@ -259,9 +282,7 @@ async function retryTranslation() {
   const result: any = await post('/vocabulary/retry-pending')
   notice.value = '已将整个单词本中等待及失败的词条加入翻译队列'
   await load()
-  if (!translationRefreshTimer) {
-    translationRefreshTimer = window.setInterval(refreshTranslationStatuses, 5000)
-  }
+  startTranslationRefresh()
 }
 
 async function rate(rating: string) {
@@ -317,8 +338,19 @@ async function startReview() {
   reviewKind.value = 'scheduled'
   reveal.value = false
   reviewIndex.value = 0
-  await refreshDueQueue()
+  // 先进入复习视图并渲染等高骨架卡，到期队列在后台落地后再替换内容，
+  // 这样点击反馈不再等待 limit=all 的整表查询。
   reviewMode.value = true
+  reviewLoading.value = true
+  const token = reviewLoadToken + 1
+  reviewLoadToken = token
+  try {
+    await refreshDueQueue()
+  } catch (cause) {
+    error.value = String(cause)
+  } finally {
+    if (token === reviewLoadToken) reviewLoading.value = false
+  }
 }
 
 async function closeReview() {
@@ -379,7 +411,7 @@ onMounted(async () => {
   if (route.query.review === 'scheduled') await startReview()
   else await startPendingTranslations()
 })
-onBeforeUnmount(() => window.clearInterval(translationRefreshTimer))
+onBeforeUnmount(stopTranslationRefresh)
 
 const statChips = computed(() => [
   { key: 'all', label: '全部', count: counts.value.total || 0 },
@@ -432,7 +464,18 @@ const listFilters = [
     </section>
 
     <section v-if="reviewMode" class="review-overlay vocabulary-review-overlay">
-      <div v-if="reviewWord" class="review-card vocabulary-review-card" data-review-fullscreen>
+      <div v-if="reviewLoading" class="review-card vocabulary-review-card" data-review-fullscreen aria-busy="true">
+        <header class="review-header">
+          <strong>{{ reviewKind === 'scheduled' ? '到期复习' : '额外巩固' }} <span>{{ String(reviewIndex + 1).padStart(2, '0') }} / --</span></strong>
+          <button class="review-close" type="button" title="退出复习" aria-label="退出复习" :disabled="reviewSaving" @click="closeReview">×</button>
+        </header>
+        <div class="review-content">
+          <div class="review-term">…</div>
+          <div class="review-phonetic"></div>
+          <button class="button secondary reveal-button" type="button" disabled>显示释义和原句</button>
+        </div>
+      </div>
+      <div v-else-if="reviewWord" class="review-card vocabulary-review-card" data-review-fullscreen>
         <header class="review-header">
           <strong>{{ reviewKind === 'scheduled' ? '到期复习' : '额外巩固' }} <span>{{ String(reviewIndex + 1).padStart(2, '0') }} / {{ String(reviewItems.length).padStart(2, '0') }}</span></strong>
           <button class="review-close" type="button" title="退出复习" aria-label="退出复习" :disabled="reviewSaving" @click="closeReview">×</button>

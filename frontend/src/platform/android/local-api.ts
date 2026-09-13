@@ -59,9 +59,11 @@ function match(pathname: string, pattern: RegExp): RegExpMatchArray | null {
 
 export async function androidLocalApi<T>(path: string, options: RequestInit = {}): Promise<T> {
   const { ensureContentRemediation } = await import('./content-remediation')
-  // Vocabulary, AI, settings and sync stay responsive while content repair runs.
-  // Question-bank routes still wait so they never observe a partial remediation.
-  const independent = /^\/(?:vocabulary|ai|android|settings|models)(?:[/?]|$)/.test(path)
+  // First-screen reads, vocabulary, AI, settings and sync stay responsive while
+  // content repair runs in the background. Content repair only rewrites packaged
+  // units once per revision and is transactional, and the question-bank import
+  // paths await the same promise before they write.
+  const independent = /^\/(?:vocabulary|ai|android|settings|models|startup|papers|wrong|study-todos|question-bank-profiles|trash)(?:[/?]|$)/.test(path)
   if (independent) {
     void ensureContentRemediation().catch(() => {})
   } else {

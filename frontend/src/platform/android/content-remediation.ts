@@ -44,27 +44,52 @@ export function validateContentManifest(manifest: ContentManifest): void {
   }
 }
 
-export async function readContentUnit(unit: RecordValue): Promise<RecordValue> {
-  const shared = JSON.parse(unit.shared_data || '{}')
-  const result = pick(unit, unitFields)
-  result.subtype ||= ''
-  for (const [key, fallback] of [['content_blocks', []], ['directions', ''], ['candidates', {}]] as const) result['shared.' + key] = shared[key] ?? fallback
-  if ('fixed_slots' in shared) result['shared.fixed_slots'] = shared.fixed_slots
-  result.questions = []
-  const optionsByQuestion = new Map<number, RecordValue[]>()
-  for (const option of await rows<RecordValue>('SELECT o.* FROM options o JOIN questions q ON q.id=o.question_id WHERE q.unit_id=? ORDER BY o.sequence,o.id', [unit.id])) {
-    const options = optionsByQuestion.get(Number(option.question_id)) || []
-    options.push(option)
-    optionsByQuestion.set(Number(option.question_id), options)
+const QUERY_CHUNK = 400
+const marks = (count: number) => Array.from({length: count}, () => '?').join(',')
+
+/**
+ * Projects the remediable fields of several units at once. The single-unit
+ * form costs three statements per unit, which added up to ~195 queries for the
+ * 65-unit bundled manifest on every cold start.
+ */
+export async function readContentUnits(units: RecordValue[]): Promise<Map<number, RecordValue>> {
+  const views = new Map<number, RecordValue>()
+  for (const unit of units) {
+    const shared = JSON.parse(unit.shared_data || '{}')
+    const result = pick(unit, unitFields)
+    result.subtype ||= ''
+    for (const [key, fallback] of [['content_blocks', []], ['directions', ''], ['candidates', {}]] as const) result['shared.' + key] = shared[key] ?? fallback
+    if ('fixed_slots' in shared) result['shared.fixed_slots'] = shared.fixed_slots
+    result.questions = []
+    views.set(Number(unit.id), result)
   }
-  for (const q of await rows<RecordValue>('SELECT * FROM questions WHERE unit_id=? ORDER BY sequence,id', [unit.id])) {
+  const ids = [...views.keys()]
+  const optionsByQuestion = new Map<number, RecordValue[]>()
+  const questionRows: RecordValue[] = []
+  for (let offset = 0; offset < ids.length; offset += QUERY_CHUNK) {
+    const chunk = ids.slice(offset, offset + QUERY_CHUNK)
+    const list = marks(chunk.length)
+    questionRows.push(...await rows<RecordValue>(`SELECT * FROM questions WHERE unit_id IN (${list}) ORDER BY sequence,id`, chunk))
+    for (const option of await rows<RecordValue>(`SELECT o.* FROM options o JOIN questions q ON q.id=o.question_id WHERE q.unit_id IN (${list}) ORDER BY o.sequence,o.id`, chunk)) {
+      const options = optionsByQuestion.get(Number(option.question_id)) || []
+      options.push(option)
+      optionsByQuestion.set(Number(option.question_id), options)
+    }
+  }
+  for (const q of questionRows) {
+    const result = views.get(Number(q.unit_id))
+    if (!result) continue
     const question = {...pick(q, questionFields), key: q.external_key, metadata: JSON.parse(q.metadata || '{}'), options: [] as RecordValue[]}
     for (const o of optionsByQuestion.get(Number(q.id)) || []) {
       question.options.push({key: o.stable_key, original_label: o.original_label, content: o.content, sequence: o.sequence, metadata: JSON.parse(o.metadata || '{}')})
     }
     result.questions.push(question)
   }
-  return result
+  return views
+}
+
+export async function readContentUnit(unit: RecordValue): Promise<RecordValue> {
+  return (await readContentUnits([unit])).get(Number(unit.id))!
 }
 
 export function contentConflicts(actual: RecordValue, before: RecordValue, after: RecordValue): string[] {
@@ -77,10 +102,25 @@ export function contentConflicts(actual: RecordValue, before: RecordValue, after
 
 export async function preflightContent(manifest: ContentManifest): Promise<RecordValue[]> {
   validateContentManifest(manifest)
-  const records = []
+  const unitsByKey = new Map<string, RecordValue[]>()
+  const keys = manifest.units.map(change => change.unitKey)
+  for (let offset = 0; offset < keys.length; offset += QUERY_CHUNK) {
+    const chunk = keys.slice(offset, offset + QUERY_CHUNK)
+    const found = await rows<RecordValue>(
+      `SELECT u.* FROM units u JOIN papers p ON p.id=u.paper_id WHERE u.external_key IN (${marks(chunk.length)}) AND p.deleted_at IS NULL`,
+      chunk,
+    )
+    for (const unit of found) {
+      const list = unitsByKey.get(String(unit.external_key)) || []
+      list.push(unit)
+      unitsByKey.set(String(unit.external_key), list)
+    }
+  }
+  const contents = await readContentUnits([...unitsByKey.values()].flat())
+  const records: RecordValue[] = []
   for (const change of manifest.units) {
-    for (const unit of await rows<RecordValue>('SELECT u.* FROM units u JOIN papers p ON p.id=u.paper_id WHERE u.external_key=? AND p.deleted_at IS NULL', [change.unitKey])) {
-      const actual = await readContentUnit(unit)
+    for (const unit of unitsByKey.get(change.unitKey) || []) {
+      const actual = contents.get(Number(unit.id))!
       const contentChanged = !same(actual, change.after)
       records.push({unitId: unit.id, unitKey: change.unitKey, actual, change, contentChanged,
         conflicts: [change.before, ...(change.reviewedBefore || [])].some(baseline => !contentConflicts(actual, baseline, change.after).length)
@@ -134,7 +174,10 @@ export async function applyContent(manifest: ContentManifest): Promise<RecordVal
 export async function applyContentWithBackup(manifest: ContentManifest): Promise<RecordValue> {
   const records = await preflightContent(manifest)
   if (records.some(r => r.conflicts.length)) throw new Error('题库内容存在未审查差异，修正已停止')
-  if (!records.some(r => r.needed)) return {revision: manifest.revision, units: 0, sessions: 0}
+  if (!records.some(r => r.needed)) {
+    await markRemediationApplied(manifest.revision)
+    return {revision: manifest.revision, units: 0, sessions: 0}
+  }
   const {Filesystem, Directory, Encoding} = await import('@capacitor/filesystem')
   const backup = await (await androidDatabase()).exportToJson('full')
   if (!backup.export?.tables?.length) throw new Error('题库修正备份为空')
@@ -143,7 +186,22 @@ export async function applyContentWithBackup(manifest: ContentManifest): Promise
   await Filesystem.writeFile({path, directory: Directory.Data, encoding: Encoding.UTF8, data, recursive: true})
   const saved = await Filesystem.readFile({path, directory: Directory.Data, encoding: Encoding.UTF8})
   if (saved.data !== data) throw new Error('题库修正备份校验失败')
-  return transaction(() => applyContent(manifest))
+  const result = await transaction(() => applyContent(manifest))
+  await markRemediationApplied(manifest.revision)
+  return result
+}
+
+const remediationMarker = (revision: string) => `content-remediation:${revision}`
+
+async function remediationApplied(revision: string): Promise<boolean> {
+  return Boolean(await row<RecordValue>(
+    'SELECT migration_key FROM app_migrations WHERE migration_key=? LIMIT 1',
+    [remediationMarker(revision)],
+  ))
+}
+
+async function markRemediationApplied(revision: string): Promise<void> {
+  await run('INSERT OR IGNORE INTO app_migrations (migration_key) VALUES (?)', [remediationMarker(revision)])
 }
 
 let bundledManifest: Promise<ContentManifest | null> | undefined
@@ -166,9 +224,36 @@ export function ensureContentRemediation(): Promise<void> {
   startupPreparation ||= (async () => {
     await androidDatabase()
     const manifest = await loadBundledContentManifest()
-    if (manifest) await applyContentWithBackup(manifest)
+    if (!manifest) return
+    // Applying one revision is a one-time repair. Once every packaged unit
+    // carries this revision, later launches skip the per-unit preflight (and
+    // its question/option queries and digests) and only pay for reading the
+    // manifest. Import paths are guarded separately by validateRemediatedImport,
+    // and the revision flag is written only by a verified pass or a validated
+    // package install.
+    if (await remediationSettled(manifest)) return
+    await applyContentWithBackup(manifest)
   })()
   return startupPreparation
+}
+
+async function remediationSettled(manifest: ContentManifest): Promise<boolean> {
+  if (!(await remediationApplied(manifest.revision))) return false
+  const keys = manifest.units.map(change => change.unitKey)
+  let present = 0
+  let settled = 0
+  for (let offset = 0; offset < keys.length; offset += QUERY_CHUNK) {
+    const chunk = keys.slice(offset, offset + QUERY_CHUNK)
+    const list = marks(chunk.length)
+    const scope = `FROM units u JOIN papers p ON p.id=u.paper_id
+      WHERE u.external_key IN (${list}) AND p.deleted_at IS NULL`
+    present += Number((await row<RecordValue>(`SELECT COUNT(*) AS total ${scope}`, chunk))?.total || 0)
+    settled += Number((await row<RecordValue>(
+      `SELECT COUNT(*) AS total ${scope} AND json_extract(u.shared_data, '$.content_revision') = ?`,
+      [...chunk, manifest.revision],
+    ))?.total || 0)
+  }
+  return present === settled
 }
 
 // Imports (including LAN packages) must never restore a reviewed corrupt unit.

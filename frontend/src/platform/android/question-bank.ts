@@ -95,6 +95,25 @@ function validateManifest(manifest: JsonRecord) {
   }
 }
 
+// Bundled banks are re-checked on every launch. Reading only manifest.json out
+// of the ZIP skips the full CRC32 verification and JSON parse of every paper, so
+// the already-installed case can return without paying for the whole package.
+// Any probe failure falls back to parseEsqBytes so error reporting stays unchanged.
+async function probeBundledManifest(data: ArrayBuffer | Uint8Array): Promise<{ packageId: string; contentVersion: string } | null> {
+  try {
+    if (data.byteLength > MAX_ESQ_BYTES) return null
+    const zip = await JSZip.loadAsync(data, { createFolders: false })
+    const manifest = await jsonFile(zip, 'manifest.json', false)
+    if (!manifest) return null
+    const packageId = String(manifest.packageId || '')
+    const contentVersion = String(manifest.contentVersion || '')
+    if (!packageId || !contentVersion) return null
+    return { packageId, contentVersion }
+  } catch {
+    return null
+  }
+}
+
 export async function parseEsqBytes(data: ArrayBuffer | Uint8Array): Promise<ImportedPackage> {
   if (data.byteLength > MAX_ESQ_BYTES) {
     throw new LocalApiError(422, `ESQ 文件不能超过 ${MAX_ESQ_MIB} MiB`)
@@ -305,6 +324,16 @@ export async function installBundledQuestionBank(
   if (response.status === 404) return { available: false, installed: false }
   if (!response.ok) throw new LocalApiError(400, `内置题库读取失败：${response.status}`)
   const data = new Uint8Array(await response.arrayBuffer())
+  const bundled = await probeBundledManifest(data)
+  if (bundled) {
+    const upToDate = await row<{ id: number }>(
+      `SELECT id FROM question_bank_packages
+       WHERE package_id = ? AND content_version = ? AND status = 'published'
+       LIMIT 1`,
+      [bundled.packageId, bundled.contentVersion],
+    )
+    if (upToDate) return { available: true, installed: false, alreadyInstalled: true }
+  }
   const pkg = await parseEsqBytes(data)
   const packageId = String(pkg.manifest.packageId || '')
   const contentVersion = String(pkg.manifest.contentVersion || '')

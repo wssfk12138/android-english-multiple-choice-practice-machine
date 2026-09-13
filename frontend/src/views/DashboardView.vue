@@ -70,7 +70,28 @@ function reloadAfterAndroidStartup() {
   void loadHome()
 }
 
-async function loadHome() {
+// 挂载时的首次加载和 Android 启动准备完成事件会同时触发首页刷新。用一个在途
+// Promise 合并这两条路径，避免同一屏重复发出 /startup、/vocabulary/home 和
+// /papers；加载期间再次请求只排队一次补跑，题库切换引起的刷新不会被丢掉。
+let homeLoad: Promise<void> | null = null
+let homeReloadQueued = false
+
+function loadHome(): Promise<void> {
+  homeReloadQueued = true
+  homeLoad ||= (async () => {
+    try {
+      while (homeReloadQueued) {
+        homeReloadQueued = false
+        await refreshHome()
+      }
+    } finally {
+      homeLoad = null
+    }
+  })()
+  return homeLoad
+}
+
+async function refreshHome() {
   tasksRevision.value += 1
   error.value = ''
   const embedded = (window as any).__LINJIAN_STARTUP__

@@ -16,6 +16,9 @@ import {
 const DB_NAME = 'english_practice_machine'
 const DB_VERSION = 1
 
+/** One-time startup repairs tracked in `app_migrations` so repeat launches skip them. */
+const ORDERING_FIXED_SLOTS_MIGRATION = 'ordering-fixed-slots-v1'
+
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -468,6 +471,15 @@ async function tableRowCount(db: SQLiteDBConnection, tableName: string): Promise
   return Number(result.values?.[0]?.count || 0)
 }
 
+async function migrationApplied(db: SQLiteDBConnection, key: string): Promise<boolean> {
+  const result = await db.query('SELECT 1 FROM app_migrations WHERE migration_key = ? LIMIT 1', [key])
+  return (result.values || []).length > 0
+}
+
+async function markMigrationApplied(db: SQLiteDBConnection, key: string) {
+  await db.run('INSERT OR IGNORE INTO app_migrations (migration_key) VALUES (?)', [key], false)
+}
+
 async function recoverInterruptedPaperTable(db: SQLiteDBConnection) {
   const names = new Set(await tableNames(db))
   const recoveryCandidates = ['papers_rebuild_tmp_papers', 'papers_rebuild']
@@ -837,6 +849,15 @@ async function migratePaperExamMetadata(db: SQLiteDBConnection) {
   await ensureColumn(db, 'papers', 'exam_type', "TEXT NOT NULL DEFAULT ''")
   await ensureColumn(db, 'papers', 'exam_month', 'INTEGER NOT NULL DEFAULT 0')
   await ensureColumn(db, 'papers', 'set_number', 'INTEGER NOT NULL DEFAULT 1')
+  // The columns above already carry constant defaults, so the sweep is only
+  // needed while legacy rows still hold NULL. Probe first to keep cold start
+  // from rewriting every paper row on each launch.
+  const pending = await db.query(
+    `SELECT 1 FROM papers
+     WHERE exam_type IS NULL OR exam_month IS NULL OR set_number IS NULL
+     LIMIT 1`,
+  )
+  if (!(pending.values || []).length) return
   await db.run(
     `UPDATE papers
      SET exam_type = COALESCE(exam_type, ''),
@@ -864,6 +885,29 @@ async function createQuestionBankProfileIndexes(db: SQLiteDBConnection) {
  * existing user answers, labels and passages remain untouched.
  */
 async function backfillEnglishOneOrderingFixedSlots(db: SQLiteDBConnection) {
+  // Bundled/ESQ imports write fixed_slots up front, so this backfill is a
+  // one-time repair for rows imported by older builds. The marker plus the
+  // bounded probe keep repeat launches free of the full scan.
+  if (await migrationApplied(db, ORDERING_FIXED_SLOTS_MIGRATION)) return
+  const pending = await db.query(`
+    SELECT 1
+    FROM units
+    INNER JOIN papers ON papers.id = units.paper_id
+    WHERE units.unit_type = 'part_b'
+      AND units.subtype = 'paragraph_reordering'
+      AND papers.year IN (2010, 2011, 2014, 2017, 2018, 2019, 2023)
+      AND papers.deleted_at IS NULL
+      AND (units.shared_data IS NULL
+           OR (units.shared_data NOT LIKE '%fixed_slots%'
+               AND units.shared_data NOT LIKE '%fixedSlots%'))
+    LIMIT 1
+  `)
+  const changed = (pending.values || []).length > 0
+  if (changed) await runOrderingFixedSlotsBackfill(db)
+  await markMigrationApplied(db, ORDERING_FIXED_SLOTS_MIGRATION)
+}
+
+async function runOrderingFixedSlotsBackfill(db: SQLiteDBConnection) {
   const result = await db.query(`
     SELECT units.id, units.unit_type, units.subtype, units.shared_data,
            papers.year, papers.subject, papers.title, papers.external_key
@@ -1039,6 +1083,8 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
       }
       // LAN sync stable keys: backfill sync_id / updated_at for rows that
       // predate the sync columns, so incremental comparisons and deletes work.
+      // App code writes both columns on insert, so the probe usually finds
+      // nothing and the launch stays read-only.
       for (const table of [
         'practice_sessions',
         'practice_answers',
@@ -1050,6 +1096,12 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
         'vocabulary_occurrences',
         'vocabulary_reviews',
       ]) {
+        const pending = await db.query(
+          `SELECT 1 FROM ${table}
+           WHERE sync_id IS NULL OR sync_id = '' OR updated_at IS NULL OR updated_at = ''
+           LIMIT 1`,
+        )
+        if (!(pending.values || []).length) continue
         await db.run(
           `UPDATE ${table} SET sync_id = lower(hex(randomblob(16))) WHERE sync_id IS NULL OR sync_id = ''`,
           [],
@@ -1061,17 +1113,32 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
           false,
         )
       }
-      await db.run(
-        `UPDATE wrong_stats SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL OR updated_at = ''`,
-        [],
-        false,
+      const pendingWrongStats = await db.query(
+        "SELECT 1 FROM wrong_stats WHERE updated_at IS NULL OR updated_at = '' LIMIT 1",
       )
+      if ((pendingWrongStats.values || []).length) {
+        await db.run(
+          `UPDATE wrong_stats SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL OR updated_at = ''`,
+          [],
+          false,
+        )
+      }
       // A new database connection has no surviving in-process translation worker.
-      await db.run(
-        "UPDATE vocabulary_entries SET translation_status = 'queued', translation_error = '' WHERE user_edited = 0 AND translation_status = 'translating'",
-        [], false,
+      const stalledTranslations = await db.query(
+        "SELECT 1 FROM vocabulary_entries WHERE user_edited = 0 AND translation_status = 'translating' LIMIT 1",
       )
-      await db.run("UPDATE vocabulary_enrichment_jobs SET state='queued' WHERE state='inflight'", [], false)
+      if ((stalledTranslations.values || []).length) {
+        await db.run(
+          "UPDATE vocabulary_entries SET translation_status = 'queued', translation_error = '' WHERE user_edited = 0 AND translation_status = 'translating'",
+          [], false,
+        )
+      }
+      const stalledEnrichment = await db.query(
+        "SELECT 1 FROM vocabulary_enrichment_jobs WHERE state = 'inflight' LIMIT 1",
+      )
+      if ((stalledEnrichment.values || []).length) {
+        await db.run("UPDATE vocabulary_enrichment_jobs SET state='queued' WHERE state='inflight'", [], false)
+      }
       await ensureSyncVersions(db)
       await runLearningHistoryRebindV1(db)
       await runLearningHistoryRebindV2(db)
