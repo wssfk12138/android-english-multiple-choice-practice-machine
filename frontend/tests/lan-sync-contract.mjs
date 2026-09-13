@@ -66,6 +66,6 @@ assert.match(lanSync, /localSessionHasLearningData\(db, syncId\)/, 'a remote emp
 assert.match(lanSync, /isUnresolvedSessionUnitReference\(error, syncId\)/, 'compatibility handling must only catch the bounded stale-unit error')
 assert.match(practice, /sync_tombstones[\s\S]*DELETE FROM wrong_current_questions/, 'replacing the wrong-question pool must tombstone old rows')
 assert.match(practice, /practice_unit_submissions pus WHERE pus\.session_id = s\.id\) DESC,[\s\S]*TRIM\(COALESCE\(pa\.user_answer/, 'active sessions must prefer real progress over the newest empty shell')
-assert.match(updates, /局域网学习记录同步/, 'the Android settings UI must expose LAN sync')
+assert.match(updates, /设备同步/, 'the Android settings UI must expose LAN sync')
 
 console.log('Android LAN sync wiring and mutation contracts: OK')

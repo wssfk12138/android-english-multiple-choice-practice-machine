@@ -272,10 +272,13 @@ h2, h3 { margin: 0; }
 .vocab-stats { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; margin-bottom: 18px; }
 .vocab-stats button { text-align: left; padding: 16px 18px; color: var(--ink); transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }.vocab-stats button:hover { border-color: var(--line-strong); transform: translateY(-2px); box-shadow: var(--shadow); }.vocab-stats span,.vocab-stats strong { display: block; }
 .vocab-stats span { color: var(--muted); font-size: 12px; }.vocab-stats strong { font: 500 25px Georgia,serif; margin-top: 7px; }.vocab-stats .amber { background: color-mix(in srgb, var(--apricot) 60%, var(--surface)); }
-.vocabulary-layout { display: grid; grid-template-columns: 190px minmax(300px, .85fr) minmax(390px, 1.2fr); gap: 15px; align-items: start; }
-.vocab-filters { display: grid; gap: 5px; padding: 15px; position: sticky; top: 20px; }
-.vocab-filters>button { border: 0; background: transparent; color: var(--muted); padding: 10px 11px; text-align: left; border-radius: 9px; }
-.vocab-filters>button.active,.vocab-filters>button:hover { background: var(--primary-soft); color: var(--ink); }
+.vocabulary-layout { display: grid; grid-template-columns: minmax(300px, .85fr) minmax(390px, 1.2fr); gap: 15px; align-items: start; }
+.vocab-list-column { display: grid; gap: 15px; min-width: 0; align-content: start; }
+/* 搜索和筛选作为工具行放在列表上方，横向换行适配窄屏。 */
+.vocab-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 12px 14px; position: sticky; top: 12px; z-index: 2; }
+.vocab-filters .search-field { flex: 1 1 170px; margin-bottom: 0; }
+.vocab-filters>button { min-height: 40px; border: 1px solid var(--line); background: var(--surface-solid); color: var(--muted); padding: 7px 13px; text-align: center; border-radius: 999px; }
+.vocab-filters>button.active,.vocab-filters>button:hover { background: var(--primary-soft); color: var(--ink); border-color: color-mix(in srgb, var(--primary) 40%, var(--line)); }
 .search-field { display: flex; align-items: center; gap: 7px; border: 1px solid var(--line); padding: 0 10px; border-radius: 10px; margin-bottom: 8px; }
 .search-field input { width: 100%; min-width: 0; padding: 10px 0; border: 0; outline: 0; color: var(--ink); background: transparent; }
 .vocab-list { padding: 8px; max-height: calc(100vh - 280px); overflow: auto; }
@@ -634,7 +637,7 @@ h2, h3 { margin: 0; }
 .api-profile-card.new-profile { margin-bottom:16px; border-color:color-mix(in srgb,var(--primary) 30%,var(--line)); }
 .api-profile-heading { min-height:72px; padding:16px 20px; display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--line); background:var(--primary-faint); }
 .api-profile-heading h2 { margin:3px 0 0; font-size:18px; }
-.api-profile-summary { display:grid; grid-template-columns:minmax(0,1fr) 58px; align-items:center; }
+.api-profile-summary { display:grid; grid-template-columns:minmax(0,1fr) 58px 44px; align-items:center; }
 .api-profile-expand { min-width:0; min-height:86px; padding:14px 10px 14px 18px; display:grid; grid-template-columns:46px minmax(0,1fr) auto 20px; align-items:center; gap:13px; border:0; color:var(--ink); background:transparent; text-align:left; transition:background-color .18s ease; }
 .api-profile-expand:hover { background:var(--primary-faint); }
 .api-profile-icon { width:46px; height:46px; display:grid; place-items:center; border-radius:15px; color:var(--primary); background:var(--primary-soft); }
@@ -677,12 +680,28 @@ h2, h3 { margin: 0; }
 .api-model-row>button:disabled { cursor:not-allowed; }
 .api-model-empty { padding:24px 15px; border:1px dashed var(--line-strong); border-radius:13px; text-align:center; color:var(--muted); font-size:12px; }
 
+/* 模型详情分区、更多菜单与模型管理工具行。 */
+.api-detail-section { margin-top:19px; padding-top:17px; border-top:1px solid var(--line); display:grid; gap:13px; }
+.api-detail-section:first-of-type { margin-top:0; padding-top:0; border-top:0; }
+.api-detail-section h3 { font-size:15px; color:var(--ink); }
+.api-more { position:relative; display:grid; place-items:center; }
+.api-more .icon-button { width:40px; height:40px; border:0; background:transparent; }
+.api-more-menu { position:absolute; top:44px; right:6px; z-index:30; min-width:150px; padding:6px; border:1px solid var(--line); border-radius:12px; background:var(--surface-solid); box-shadow:var(--shadow); display:grid; gap:2px; }
+.api-more-item { min-height:44px; padding:9px 12px; display:flex; align-items:center; gap:8px; border:0; border-radius:9px; background:transparent; color:var(--ink); font:inherit; text-align:left; }
+.api-more-item:hover { background:var(--primary-faint); }
+.api-more-item.danger-text { color:var(--danger); }
+.api-model-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.api-model-toolbar .search-field { flex:1 1 180px; }
+.api-model-toolbar-actions { display:flex; gap:5px; flex-wrap:wrap; }
+.api-model-toolbar-actions button { min-height:38px; padding:7px 10px; display:flex; align-items:center; gap:5px; border:0; border-radius:9px; color:var(--muted); background:transparent; font-size:12px; }
+.api-model-toolbar-actions button:hover { color:var(--ink); background:var(--primary-faint); }
+
 @media (max-width: 1200px) {
   .app-shell { grid-template-columns:218px minmax(0,1fr); }
   .practice-shell { display:block; }
   .sidebar { padding-left: 14px; padding-right: 14px; }
   .page { padding-left: 28px; padding-right: 28px; }
-  .vocabulary-layout { grid-template-columns: 170px minmax(270px,.85fr) minmax(340px,1.2fr); }
+  .vocabulary-layout { grid-template-columns: minmax(270px,.85fr) minmax(340px,1.2fr); }
 }
 
 @media (max-width: 980px) {
@@ -861,7 +880,7 @@ h2, h3 { margin: 0; }
   html[data-platform="android"] .practice-footer.listening-footer { width:calc(100% - 390px); }
   html[data-platform="android"] .passage-pane { padding-left:32px; padding-right:28px; }
   html[data-platform="android"] .question-pane { padding-left:28px; padding-right:30px; }
-  html[data-platform="android"] .vocabulary-layout { grid-template-columns:190px minmax(300px,1fr); }
+  html[data-platform="android"] .vocabulary-layout { grid-template-columns:minmax(300px,1fr); }
   html[data-platform="android"] .vocab-detail { grid-column:1 / -1; position:static; }
 }
 
@@ -2877,7 +2896,7 @@ html[data-platform="android"] .practice-submit-actions .button { min-width:0; wh
   }
 
   html[data-platform="android"] .api-profile-summary {
-    grid-template-columns: minmax(0, 1fr) 48px;
+    grid-template-columns: minmax(0, 1fr) 48px 40px;
   }
 
   html[data-platform="android"] .api-profile-expand {
@@ -6571,6 +6590,54 @@ html[data-platform="android"] .wrong-scope-actions .icon-button {
     overflow-wrap: normal;
   }
 }
+
+/* ===== 自有主题化弹层（确认/输入）与选择弹层：只使用主题变量 ===== */
+.app-overlay { position: fixed; inset: 0; z-index: 240; display: grid; place-items: center; padding: 20px; background: rgba(23, 32, 28, .48); backdrop-filter: blur(5px); }
+.app-dialog { width: min(460px, 100%); max-height: min(86vh, 640px); overflow: auto; display: grid; gap: 14px; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-solid); color: var(--ink); box-shadow: var(--shadow); }
+.app-dialog-head { display: flex; align-items: center; gap: 12px; }
+.app-dialog-head h2 { font-size: 19px; line-height: 1.4; }
+.app-dialog-icon { flex: none; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px; background: var(--primary-soft); color: var(--primary); }
+.app-dialog-icon.danger { background: var(--danger-soft); color: var(--danger); }
+.app-dialog-body { display: grid; gap: 10px; }
+.app-dialog-body p { margin: 0; color: var(--muted); line-height: 1.7; overflow-wrap: anywhere; white-space: normal; }
+.app-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.app-dialog-actions .button { min-height: 48px; }
+.app-dialog-actions .button.danger { color: white; }
+@media (max-width: 600px) {
+  .app-overlay { padding: 14px; align-items: end; }
+  .app-dialog { width: 100%; }
+  .app-dialog-actions { flex-direction: row-reverse; }
+  .app-dialog-actions .button { flex: 1 1 46%; }
+}
+
+/* 主题化选择弹层：替代原生 <select>，带标题、关闭、搜索、选中标记和空结果。 */
+.option-sheet-trigger { min-height: 48px; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); color: var(--ink); text-align: left; }
+.option-sheet-trigger:disabled { opacity: .55; cursor: not-allowed; }
+.option-sheet-trigger .option-sheet-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.option-sheet-trigger .option-sheet-placeholder { color: var(--muted); }
+.option-sheet-trigger svg { flex: none; color: var(--muted); }
+.app-sheet-overlay { position: fixed; inset: 0; z-index: 241; display: flex; align-items: flex-end; justify-content: center; background: rgba(23, 32, 28, .48); backdrop-filter: blur(4px); }
+.app-sheet { width: min(560px, 100%); max-height: 82vh; display: flex; flex-direction: column; padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); border: 1px solid var(--line); border-bottom: 0; border-radius: 20px 20px 0 0; background: var(--surface-solid); color: var(--ink); box-shadow: var(--shadow); }
+@media (min-width: 601px) {
+  .app-sheet-overlay { align-items: center; padding: 20px; }
+  .app-sheet { width: min(520px, 100%); max-height: min(78vh, 560px); border: 1px solid var(--line); border-radius: var(--radius-lg); padding-bottom: 14px; }
+}
+.app-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.app-sheet-head h3 { font-size: 17px; }
+.app-sheet-close { display: grid; place-items: center; width: 48px; height: 48px; margin: -6px -6px -6px 0; border: 0; border-radius: 12px; background: transparent; color: var(--muted); }
+.app-sheet-search { display: flex; align-items: center; gap: 8px; padding: 10px 2px; color: var(--muted); }
+.app-sheet-search input { flex: 1; min-height: 44px; border: 1px solid var(--line); border-radius: 11px; padding: 8px 12px; background: var(--surface-solid); color: var(--ink); }
+.app-sheet-head, .app-sheet-search { flex-shrink: 0; }
+.app-sheet-list { flex: 1; min-height: 0; overflow: auto; display: grid; grid-auto-rows: max-content; align-content: start; gap: 2px; padding-top: 6px; }
+.app-sheet-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 10px 12px; border: 0; border-radius: 12px; background: transparent; color: var(--ink); text-align: left; }
+.app-sheet-option:disabled { opacity: .5; cursor: not-allowed; }
+.app-sheet-option:not(:disabled):hover, .app-sheet-option:not(:disabled):focus-visible { background: var(--primary-faint); }
+.app-sheet-option.selected { background: var(--primary-soft); }
+.app-sheet-option-copy { display: grid; gap: 2px; min-width: 0; flex: 1; line-height: 1.5; }
+.app-sheet-option-copy strong { font-weight: 600; overflow-wrap: anywhere; }
+.app-sheet-option-copy small { color: var(--muted); overflow-wrap: anywhere; white-space: normal; }
+.app-sheet-option-mark { flex: none; color: var(--primary); }
+.app-sheet-empty { padding: 26px 12px; text-align: center; color: var(--muted); line-height: 1.7; }
 
 /* Keep smart-label actions readable on narrow portrait phones. */
 @media (orientation: portrait) and (max-width: 840px) {

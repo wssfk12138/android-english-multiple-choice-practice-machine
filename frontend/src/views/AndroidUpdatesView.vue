@@ -12,9 +12,11 @@ import {
   Trash2,
   Wifi,
 } from 'lucide-vue-next'
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { get, post, put } from '../api'
+import { confirmDialog } from '../platform/dialogs'
+import OptionSheet from '../components/OptionSheet.vue'
 import { loadQuestionBankProfiles, questionBankProfilesState } from '../services/questionBankProfiles'
 import {
   clearDiagnosticLogs,
@@ -33,6 +35,8 @@ import LanSyncScanner from '../components/LanSyncScanner.vue'
 import { CATEGORY_LABELS, DEFAULT_CATEGORIES, type LanCategory } from '../platform/android/lan-categories'
 
 const router = useRouter()
+const route = useRoute()
+const sectionRefs: Record<string, HTMLElement | null> = {}
 const settings = reactive({
   question_bank_catalog_url: '',
 })
@@ -181,7 +185,17 @@ function formatSyncTime(value: string) {
 }
 
 async function sendModelConfiguration() {
-  if (busy.value || !window.confirm('以本机为准发送模型配置与 Key 到已绑定电脑？同名配置将覆盖，缺失配置将补建；模型列表、启用状态、默认选择和命名 Key 均以本机为准。电脑独有配置保留。此操作不处理练习记录。')) return
+  if (busy.value) return
+  const confirmed = await confirmDialog({
+    title: '以本机为准发送模型配置与 Key 到已绑定电脑？',
+    message: [
+      '同名配置将覆盖，缺失配置将补建；电脑独有配置保留。',
+      '模型列表、启用状态、默认选择和命名 Key 均以本机为准。',
+      '此操作不处理练习记录。',
+    ],
+    confirmLabel: '发送模型配置',
+  })
+  if (!confirmed) return
   busy.value = 'lan-models-send'
   error.value = ''
   notice.value = ''
@@ -419,14 +433,34 @@ async function shareHistoryDiagnostics() {
 }
 
 async function clearLogs() {
-  if (!diagnosticLogs.value.length || !confirm('确认清空全部本地诊断日志吗？')) return
+  if (!diagnosticLogs.value.length) return
+  const confirmed = await confirmDialog({
+    title: '清空全部本地诊断日志？',
+    message: [
+      `当前共 ${diagnosticLogs.value.length} 条脱敏诊断日志。`,
+      '清空后无法恢复，不影响题库和学习数据。',
+    ],
+    confirmLabel: '清空日志',
+    danger: true,
+  })
+  if (!confirmed) return
   await clearDiagnosticLogs()
   diagnosticLogs.value = []
   notice.value = '诊断日志已清空'
 }
 
-onMounted(() => {
+function setSectionRef(name: string) {
+  return (element: unknown) => { sectionRefs[name] = (element as HTMLElement) || null }
+}
+
+onMounted(async () => {
   load()
+  // 设置中枢的“设备同步/诊断日志”等入口通过 ?section= 直接定位到对应分区。
+  const section = String(route.query.section || '')
+  if (section) {
+    await nextTick()
+    sectionRefs[section]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 })
 </script>
 
@@ -442,11 +476,11 @@ onMounted(() => {
     <div v-if="error" class="warning" role="alert">{{ error }}</div>
     <div v-if="notice" class="settings-success" role="status"><PackageCheck :size="17" />{{ notice }}</div>
 
-    <section class="card update-source-card">
+    <section :ref="setSectionRef('sync')" class="card update-source-card" data-update-section="sync">
       <div class="update-source-heading">
         <span class="api-profile-icon"><Wifi :size="20" /></span>
         <div>
-          <h2>局域网学习记录同步</h2>
+          <h2>设备同步</h2>
         </div>
       </div>
       <div class="field">
@@ -497,65 +531,57 @@ onMounted(() => {
       <p v-if="lanSync.runtime.lastError" class="warning">上次错误：{{ lanSync.runtime.lastError }}</p>
     </section>
 
-    <section class="card update-source-card">
+    <LanQuestionBanks :key="lanSync.hostId" />
+
+    <section :ref="setSectionRef('catalog')" class="card update-source-card" data-update-section="catalog">
       <div class="update-source-heading">
         <span class="api-profile-icon"><Download :size="20" /></span>
-        <div><h2>远程题库目录 URL</h2></div>
+        <div><h2>远程题库</h2></div>
       </div>
       <div class="field">
         <label for="android-catalog-url">远程题库目录 URL</label>
         <input id="android-catalog-url" v-model.trim="settings.question_bank_catalog_url" inputmode="url" placeholder="https://github.com/.../question-bank-catalog.json">
       </div>
       <button class="button" type="button" :disabled="busy === 'save'" @click="save"><Save :size="16" />{{ busy === 'save' ? '保存中…' : '保存目录地址' }}</button>
+      <button class="button secondary" type="button" :disabled="busy === 'banks' || busy === 'catalog-install'" @click="checkBanks"><RefreshCw :size="16" />检查远程题库</button>
+      <div v-if="questionBankCatalog?.configured" class="update-package-list">
+        <div class="catalog-toolbar">
+          <span>{{ questionBankCatalog.packages.length }} 个可用 · 已选 {{ selectedPackages.length }} 个</span>
+          <div class="update-actions">
+            <button class="button ghost compact" type="button" :disabled="busy === 'catalog-install'" @click="toggleAllPackages">{{ allPackagesSelected ? '清空选择' : '全选' }}</button>
+            <button class="button compact" type="button" :disabled="busy === 'catalog-install' || !selectedPackages.length" @click="chooseCatalogImportDestination">
+              <Download :size="15" />{{ busy === 'catalog-install' ? '正在处理所选题库…' : `安装选中题库（${selectedPackages.length}）` }}
+            </button>
+          </div>
+        </div>
+        <label v-for="item in questionBankCatalog.packages" :key="packageKey(item)" class="catalog-item">
+          <input v-model="selectedPackages" type="checkbox" :value="packageKey(item)" :disabled="busy === 'catalog-install'">
+          <span>
+            <strong>{{ item.title }}</strong>
+            <small>版本 {{ item.contentVersion }} · {{ item.years.join('、') || '多年份' }} · {{ Math.ceil(item.size / 1024) }} KiB</small>
+            <small>{{ item.license }}</small>
+            <small v-if="packageResults[packageKey(item)]" :class="`catalog-${packageResults[packageKey(item)].status}`">{{ packageResults[packageKey(item)].message }}</small>
+          </span>
+        </label>
+        <p v-if="!questionBankCatalog.packages.length" class="diagnostic-empty">远程目录当前没有可安装题库。</p>
+      </div>
     </section>
 
-    <div class="grid grid-2 update-check-grid">
-      <section class="card">
-        <div class="update-source-heading">
-          <span class="api-profile-icon"><Download :size="20" /></span>
-          <div><h2>程序更新</h2></div>
-        </div>
-        <button class="button secondary" type="button" :disabled="busy === 'app'" @click="checkApp"><RefreshCw :size="16" />检查程序更新</button>
-        <div v-if="appUpdate" class="update-result">
-          <span>当前版本 {{ appUpdate.current_version }}</span>
-          <strong>{{ appUpdate.available ? `可更新至 ${appUpdate.manifest.versionName}` : '已是最新版本' }}</strong>
-          <p v-if="appUpdate.manifest.releaseNotes">{{ appUpdate.manifest.releaseNotes }}</p>
-          <button v-if="appUpdate.available" class="button" type="button" :disabled="busy === 'install'" @click="installApp"><Download :size="16" />下载、校验并安装</button>
-        </div>
-      </section>
-      <section class="card">
-        <div class="update-source-heading">
-          <span class="api-profile-icon"><PackageCheck :size="20" /></span>
-          <div><h2>远程题库</h2></div>
-        </div>
-        <button class="button secondary" type="button" :disabled="busy === 'banks' || busy === 'catalog-install'" @click="checkBanks"><RefreshCw :size="16" />检查远程题库</button>
-        <div v-if="questionBankCatalog?.configured" class="update-package-list">
-          <div class="catalog-toolbar">
-            <span>{{ questionBankCatalog.packages.length }} 个可用 · 已选 {{ selectedPackages.length }} 个</span>
-            <div class="update-actions">
-              <button class="button ghost compact" type="button" :disabled="busy === 'catalog-install'" @click="toggleAllPackages">{{ allPackagesSelected ? '清空选择' : '全选' }}</button>
-              <button class="button compact" type="button" :disabled="busy === 'catalog-install' || !selectedPackages.length" @click="chooseCatalogImportDestination">
-                <Download :size="15" />{{ busy === 'catalog-install' ? '正在处理所选题库…' : `安装选中题库（${selectedPackages.length}）` }}
-              </button>
-            </div>
-          </div>
-          <label v-for="item in questionBankCatalog.packages" :key="packageKey(item)" class="catalog-item">
-            <input v-model="selectedPackages" type="checkbox" :value="packageKey(item)" :disabled="busy === 'catalog-install'">
-            <span>
-              <strong>{{ item.title }}</strong>
-              <small>版本 {{ item.contentVersion }} · {{ item.years.join('、') || '多年份' }} · {{ Math.ceil(item.size / 1024) }} KiB</small>
-              <small>{{ item.license }}</small>
-              <small v-if="packageResults[packageKey(item)]" :class="`catalog-${packageResults[packageKey(item)].status}`">{{ packageResults[packageKey(item)].message }}</small>
-            </span>
-          </label>
-          <p v-if="!questionBankCatalog.packages.length" class="diagnostic-empty">远程目录当前没有可安装题库。</p>
-        </div>
-      </section>
-    </div>
+    <section :ref="setSectionRef('update')" class="card update-source-card" data-update-section="update">
+      <div class="update-source-heading">
+        <span class="api-profile-icon"><PackageCheck :size="20" /></span>
+        <div><h2>程序更新</h2></div>
+      </div>
+      <button class="button secondary" type="button" :disabled="busy === 'app'" @click="checkApp"><RefreshCw :size="16" />检查程序更新</button>
+      <div v-if="appUpdate" class="update-result">
+        <span>当前版本 {{ appUpdate.current_version }}</span>
+        <strong>{{ appUpdate.available ? `可更新至 ${appUpdate.manifest.versionName}` : '已是最新版本' }}</strong>
+        <p v-if="appUpdate.manifest.releaseNotes">{{ appUpdate.manifest.releaseNotes }}</p>
+        <button v-if="appUpdate.available" class="button" type="button" :disabled="busy === 'install'" @click="installApp"><Download :size="16" />下载、校验并安装</button>
+      </div>
+    </section>
 
-    <LanQuestionBanks :key="lanSync.hostId" />
-
-    <section class="card diagnostic-card">
+    <section :ref="setSectionRef('diagnostics')" class="card diagnostic-card" data-update-section="diagnostics">
       <div class="diagnostic-heading">
         <div class="update-source-heading">
           <span class="api-profile-icon"><FileWarning :size="20" /></span>
@@ -628,9 +654,7 @@ onMounted(() => {
         </label>
         <label v-if="catalogDestinationMode === 'existing_profile'" class="field">
           <span>已有题库配置</span>
-          <select v-model.number="catalogExistingProfileId">
-            <option v-for="profile in questionBankProfilesState.items" :key="profile.id" :value="profile.id">{{ profile.name }}</option>
-          </select>
+          <OptionSheet v-model="catalogExistingProfileId" :items="questionBankProfilesState.items.map((profile: any) => ({ value: Number(profile.id), label: profile.name }))" title="选择已有题库配置" searchable />
         </label>
         <p v-if="catalogDestinationError" class="warning" role="alert">{{ catalogDestinationError }}</p>
         <div class="catalog-destination-actions">

@@ -17,6 +17,7 @@ import {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, del, get } from '../api'
+import OptionSheet from './OptionSheet.vue'
 import { assistantSession } from '../services/assistantSession'
 import { agentInstructions, createDocument, documentStorage, outputName, runDocumentAgent } from '../services/documentAgent'
 import { saveAssistantDocument } from '../services/saveAssistantDocument'
@@ -156,15 +157,19 @@ const activeModel = computed(() =>
   models.value.find(item => modelValue(item) === selectedModel.value),
 )
 
-const groupedModels = computed(() => {
-  const groups = new Map<string, SelectorModel[]>()
-  for (const model of models.value) {
-    const current = groups.get(model.profile_name) || []
-    current.push(model)
-    groups.set(model.profile_name, current)
-  }
-  return [...groups.entries()].map(([name, items]) => ({ name, items }))
-})
+// 主题化选择弹层的扁平选项；所属配置名称作为辅助说明保留分组语义。
+const modelOptions = computed(() => models.value.map(model => ({
+  value: modelValue(model),
+  label: model.display_name || model.model_id,
+  hint: model.profile_name,
+})))
+
+const reasoningOptions = [
+  { value: '', label: '跟随配置' },
+  { value: 'low', label: '推理：低' },
+  { value: 'medium', label: '推理：中' },
+  { value: 'high', label: '推理：高' },
+]
 
 async function scrollToBottom() {
   await nextTick()
@@ -630,30 +635,23 @@ onBeforeUnmount(() => {
               <Plus :size="18" />
             </button>
             <div class="ai-model-control">
-              <label class="sr-only" for="assistant-model">对话模型</label>
-              <select
-                id="assistant-model"
+              <OptionSheet
                 v-model="selectedModel"
+                :items="modelOptions"
+                title="切换对话模型"
+                searchable
+                :placeholder="models.length ? '选择对话模型' : '暂无可用模型'"
                 :disabled="!models.length || loading"
-                aria-label="切换对话模型"
-              >
-                <option v-if="!models.length" value="">暂无可用模型</option>
-                <optgroup v-for="group in groupedModels" :key="group.name" :label="group.name">
-                  <option v-for="model in group.items" :key="modelValue(model)" :value="modelValue(model)">
-                    {{ model.display_name || model.model_id }}
-                  </option>
-                </optgroup>
-              </select>
+              />
             </div>
             <div class="ai-model-control ai-reasoning-control">
-              <label class="sr-only" for="assistant-reasoning-effort">本次对话推理强度</label>
-              <span class="ai-reasoning-label" aria-hidden="true">推理强度</span>
-              <select id="assistant-reasoning-effort" v-model="reasoningEffort" :disabled="loading" aria-label="本次对话推理强度">
-                <option value="">跟随配置</option>
-                <option value="low">推理：低</option>
-                <option value="medium">推理：中</option>
-                <option value="high">推理：高</option>
-              </select>
+              <OptionSheet
+                v-model="reasoningEffort"
+                :items="reasoningOptions"
+                title="本次对话推理强度"
+                :placeholder="reasoningEffort ? '' : '跟随配置'"
+                :disabled="loading"
+              />
             </div>
             <button
               v-if="loading"

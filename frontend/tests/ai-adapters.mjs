@@ -38,7 +38,7 @@ const [databaseSource, settingsSource, aiSource] = await Promise.all([
 ])
 assert.ok(databaseSource.includes("adapter TEXT NOT NULL DEFAULT 'openai-chat'"))
 assert.ok(databaseSource.includes("ensureColumn(db, 'ai_profiles', 'adapter'"))
-assert.ok(settingsSource.includes('v-for="adapter in adapters"'))
+assert.ok(settingsSource.includes('function adapterItems()'))
 assert.ok(aiSource.includes("VALUES (?, 'user', ?, ?, ?, ?)`"))
 
 const chat = adapterFor('openai-chat')

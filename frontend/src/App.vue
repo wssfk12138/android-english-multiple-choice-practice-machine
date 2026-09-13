@@ -6,6 +6,7 @@ import type { PluginListenerHandle } from '@capacitor/core'
 import { useRoute, useRouter } from 'vue-router'
 import { platformRuntime } from './platform/runtime'
 import { post } from './api'
+import AppDialogHost from './components/AppDialogHost.vue'
 import {
   pendingInstallerCleanup,
   resolveInstallerCleanup,
@@ -72,18 +73,12 @@ function updateWindowMode() {
   const mode = androidPortrait || width < 600 ? 'compact' : width < 840 ? 'medium' : 'expanded'
   document.documentElement.dataset.windowMode = mode
   document.documentElement.dataset.orientation = portrait ? 'portrait' : 'landscape'
-  // The mobile settings hub is only valid in portrait. Do not leave a tablet
-  // in the phone information architecture after rotation.
-  if (platformRuntime.isAndroid && !portrait && route.path === '/mobile-settings') {
-    void router.replace('/settings')
-  }
+  // The mobile settings hub stays available in both orientations; rotation no
+  // longer force-jumps to the model page. Each page adapts its own layout.
 }
 
 watch(() => route.path, () => {
   dark.value = document.documentElement.classList.contains('dark')
-  if (platformRuntime.isAndroid && document.documentElement.dataset.orientation === 'landscape' && route.path === '/mobile-settings') {
-    void router.replace('/settings')
-  }
 })
 function applyTheme() {
   document.documentElement.classList.toggle('dark', dark.value)
@@ -298,7 +293,7 @@ onBeforeUnmount(() => {
         <RouterLink to="/vocabulary"><img src="/assets/icons/vocabulary.png" alt="" /><span>单词本</span></RouterLink>
         <RouterLink to="/imports"><img src="/assets/icons/import.png" alt="" /><span>导入题库</span></RouterLink>
         <RouterLink to="/assistant"><img src="/assets/icons/ai.png" alt="" /><span>AI 学习助手</span></RouterLink>
-        <RouterLink to="/settings"><img src="/assets/icons/settings.png" alt="" /><span>模型与设置</span></RouterLink>
+        <RouterLink to="/mobile-settings"><Settings2 :size="22" /><span>设置</span></RouterLink>
         <RouterLink v-if="platformRuntime.isAndroid" to="/android-updates"><img src="/assets/icons/update.png" alt="" /><span>更新</span></RouterLink>
       </nav>
       <nav class="mobile-tab-nav" aria-label="手机主要导航">
@@ -319,5 +314,6 @@ onBeforeUnmount(() => {
     <main class="main-content">
       <RouterView />
     </main>
+    <AppDialogHost />
   </div>
 </template>

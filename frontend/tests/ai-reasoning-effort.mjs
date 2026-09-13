@@ -18,7 +18,7 @@ assert.ok(ai.includes("throw new LocalApiError(400, '推理强度只支持未设
 assert.ok(ai.includes('body.reasoning_effort == null'))
 
 for (const value of ['', 'low', 'medium', 'high']) {
-  assert.ok(settings.includes(`value="${value}"`))
+  assert.ok(settings.includes(`value: '${value}'`) || settings.includes(`value="${value}"`))
 }
 assert.ok(settings.includes('v-model="profile.reasoning_effort"'))
 assert.ok(assistant.includes('推理强度'))

@@ -3,7 +3,9 @@ import { BookOpen, CheckSquare, MoveRight, Play, Trash2, X } from 'lucide-vue-ne
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { del, get, post } from '../api'
+import { confirmDialog } from '../platform/dialogs'
 import { platformRuntime } from '../platform/runtime'
+import OptionSheet from '../components/OptionSheet.vue'
 import QuestionBankSwitcher from '../components/QuestionBankSwitcher.vue'
 import { loadQuestionBankProfiles, questionBankProfilesState } from '../services/questionBankProfiles'
 
@@ -12,10 +14,16 @@ const papers = ref<any[]>([])
 const error = ref('')
 const batchMode = ref(false)
 const selectedIds = ref<Set<number>>(new Set())
+const moveDialogOpen = ref(false)
+const moveTargetId = ref<number>(0)
 let holdTimer: number | null = null
 const emptyHint = platformRuntime.isAndroid
   ? '请先到“导入题库”选择 ESQ 题库包。'
   : '请先到“导入题库”上传 Word 真题。'
+
+const moveTargets = () => questionBankProfilesState.items.filter(
+  item => Number(item.id) !== questionBankProfilesState.activeId,
+)
 
 async function loadPapers() {
   selectedIds.value = new Set()
@@ -36,7 +44,15 @@ async function startPaper(id: number) {
 }
 
 async function restartPaper(id: number) {
-  if (!window.confirm('重新开始会作废上一次未完成的练习，确定吗？')) return
+  const confirmed = await confirmDialog({
+    title: '重新开始这套试卷？',
+    message: [
+      '重新开始会作废上一次未完成的练习进度。',
+      '已提交判分的历史成绩保留不变。',
+    ],
+    confirmLabel: '重新开始',
+  })
+  if (!confirmed) return
   try {
     const session: any = await post('/practice/sessions', {
       mode: 'paper', paper_id: id, shuffle_options: true, force_new: true,
@@ -76,19 +92,19 @@ function leaveBatch() {
 }
 
 async function moveSelected() {
-  const targets = questionBankProfilesState.items.filter(
-    item => Number(item.id) !== questionBankProfilesState.activeId,
-  )
+  const targets = moveTargets()
   if (!targets.length) {
     error.value = '请先新建另一个题库配置'
     return
   }
-  const answer = window.prompt(
-    `输入目标题库配置编号：\n${targets.map(item => `${item.id}：${item.name}`).join('\n')}`,
-    String(targets[0].id),
-  )
-  const targetId = Number(answer)
-  if (!targets.some(item => Number(item.id) === targetId)) return
+  moveTargetId.value = Number(targets[0].id)
+  moveDialogOpen.value = true
+}
+
+async function confirmMoveSelected() {
+  const targetId = Number(moveTargetId.value)
+  if (!moveTargets().some(item => Number(item.id) === targetId)) return
+  moveDialogOpen.value = false
   try {
     await post('/papers/batch-move', {
       paper_ids: [...selectedIds.value],
@@ -101,7 +117,16 @@ async function moveSelected() {
 
 async function deleteSelected() {
   if (!selectedIds.value.size) return
-  if (!window.confirm(`将选中的 ${selectedIds.value.size} 套试卷移入回收站？`)) return
+  const confirmed = await confirmDialog({
+    title: `将选中的 ${selectedIds.value.size} 套试卷移入回收站？`,
+    message: [
+      '移动后这些试卷不再出现在当前题库练习列表。',
+      '内容将在回收站保留七天，期间可以恢复。',
+    ],
+    confirmLabel: '移入回收站',
+    danger: true,
+  })
+  if (!confirmed) return
   try {
     for (const id of selectedIds.value) await del(`/papers/${id}`)
     leaveBatch()
@@ -151,5 +176,19 @@ async function deleteSelected() {
       <strong>题库还是空的</strong>
       <p>{{ emptyHint }}</p>
     </div>
+
+    <section v-if="moveDialogOpen" class="app-overlay" role="presentation" @click.self="moveDialogOpen=false">
+      <div class="app-dialog" role="dialog" aria-modal="true" aria-labelledby="move-dialog-title">
+        <header class="app-dialog-head"><h2 id="move-dialog-title">移动到哪个题库配置？</h2></header>
+        <div class="app-dialog-body">
+          <p>将选中的 {{ selectedIds.size }} 套试卷移动到目标配置；移动后可在该配置下继续练习。</p>
+          <OptionSheet v-model="moveTargetId" :items="moveTargets().map(item => ({ value: Number(item.id), label: item.name }))" title="选择目标题库配置" />
+        </div>
+        <footer class="app-dialog-actions">
+          <button class="button secondary" type="button" @click="moveDialogOpen=false">取消</button>
+          <button class="button" type="button" @click="confirmMoveSelected">移动</button>
+        </footer>
+      </div>
+    </section>
   </div>
 </template>

@@ -165,6 +165,13 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
         name: 'VocabularyEnrichmentStub',
         setup() { return () => vue.h('span', { class: 'vocabulary-enrichment-stub' }) },
       } }
+      if (name === '../platform/dialogs') return { confirmDialog: async () => true }
+      if (name === '../services/vocabularyDisplayConfig') return {
+        loadVocabDisplayConfig: () => ({
+          common_meaning: true, contextual: true, sentence: true, memory_hint: true,
+          synonyms: true, antonyms: true, similar_forms: true, morphology: true,
+        }),
+      }
       assert.equal(name, '../api')
       return api
     },
@@ -180,6 +187,13 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
   }
   let app = mount()
   await settle()
+  // 2026-09-12 起窄屏首次进入不再自动展开第一个词条，由用户显式点击；
+  // 用例在这里代用户点击第一个词，后续场景语义不变。
+  if (orientation === 'portrait') {
+    const first = byClass(root, 'vocab-list-item')[0]
+    first.props.onClick()
+    await settle()
+  }
   const detail = () => byClass(root, orientation === 'portrait' ? 'portrait-vocab-detail' : 'desktop-vocab-detail')[0]
   return {
     root, detail, sqlite, vocabulary, runner, writes, renderErrors,
@@ -194,7 +208,17 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
       }
       await settle()
     },
-    async reopen() { app.unmount(); app = mount(); await settle() },
+    async reopen() {
+      app.unmount()
+      app = mount()
+      await settle()
+      // 窄屏重新进入页面后同样需要显式点击词条才会展开详情。
+      if (orientation === 'portrait') {
+        const first = byClass(root, 'vocab-list-item')[0]
+        first.props.onClick()
+        await settle()
+      }
+    },
     close() { app.unmount(); sqlite.close() },
   }
 }

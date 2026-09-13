@@ -16,7 +16,7 @@ const main = await readFile(join(root, 'src/main.ts'), 'utf8')
 assert.ok(main.indexOf("import './study-theme.css'") > main.indexOf("import './styles.css'"))
 const stubs = {
   api: 'export const get=(p)=>globalThis.mockApi(p);export const post=(p,b)=>globalThis.mockApi(p,b);export const put=post;export const del=post;',
-  router: 'export const useRouter=()=>({push:async()=>{}});',
+  router: 'export const useRouter=()=>({push:async()=>{}});export const useRoute=()=>({query:{}});',
   profiles: 'export const questionBankProfilesState={items:[{id:1,name:"Synthetic study bank"}]};export const loadQuestionBankProfiles=async()=>{};',
   diagnostics: 'export const listDiagnosticLogs=async()=>[];export const clearDiagnosticLogs=async()=>{};export const copyIssueReportTemplate=async()=>{};export const copyDiagnosticLogs=async()=>{};export const shareDiagnosticLogs=async()=>{};',
   history: 'export const copyLearningHistoryDiagnostics=async()=>{};export const shareLearningHistoryDiagnostics=async()=>{};',

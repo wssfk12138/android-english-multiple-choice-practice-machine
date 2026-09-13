@@ -1,29 +1,67 @@
 <script setup lang="ts">
-import { BookOpen, ChevronDown, ExternalLink, Eye } from 'lucide-vue-next'
-import { onMounted, ref } from 'vue'
+import {
+  BookOpen,
+  ChevronDown,
+  CloudUpload,
+  Database,
+  Download,
+  ExternalLink,
+  Eye,
+  Import,
+  LibraryBig,
+  Moon,
+  NotebookText,
+  ScrollText,
+  Settings2,
+  Sun,
+  Trash2,
+} from 'lucide-vue-next'
+import { computed, onMounted, reactive, ref } from 'vue'
+import {
+  VOCAB_DISPLAY_OPTIONS,
+  loadVocabDisplayConfig,
+  saveVocabDisplayConfig,
+  type VocabDisplayKey,
+} from '../services/vocabularyDisplayConfig'
 
 const dark = ref(false)
 const vocabDisplayOpen = ref(false)
-const vocabularyDisplayOptions = [
-  ['common_meaning', '常用释义'],
-  ['contextual', '语境释义'],
-  ['sentence', '真题例句'],
-  ['memory_hint', '记忆提示'],
-  ['synonyms', '同义词辨析'],
-  ['antonyms', '反义词辨析'],
-  ['similar_forms', '形近词辨析'],
-  ['morphology', '显示单词词形'],
+const vocabDisplayConfig = reactive<Record<VocabDisplayKey, boolean>>(loadVocabDisplayConfig())
+// 分组入口按规格固定顺序；设备与维护三项都落在“更新与远程题库”页的对应分区。
+const groups = [
+  {
+    title: '题库与数据',
+    items: [
+      { label: '题库管理', to: '/library', icon: LibraryBig },
+      { label: '导入题库', to: '/imports', icon: Import },
+      { label: '回收站', to: '/trash', icon: Trash2 },
+    ],
+  },
+  {
+    title: 'AI 与模型',
+    items: [
+      { label: '模型与 API', to: '/settings', icon: Settings2 },
+    ],
+  },
+  {
+    title: '设备与维护',
+    items: [
+      { label: '设备同步', to: '/android-updates?section=sync', icon: CloudUpload },
+      { label: '更新与远程题库', to: '/android-updates', icon: Download },
+      { label: '诊断日志', to: '/android-updates?section=diagnostics', icon: ScrollText },
+    ],
+  },
 ] as const
-const vocabDisplayConfig = ref<Record<string, boolean>>({
-  common_meaning: true,
-  contextual: true,
-  sentence: true,
-  memory_hint: false,
-  synonyms: false,
-  antonyms: false,
-  similar_forms: false,
-  morphology: true,
+
+const vocabDisplaySummary = computed(() => {
+  const enabled = VOCAB_DISPLAY_OPTIONS.filter(option => vocabDisplayConfig[option.key])
+  return enabled.length ? enabled.map(option => option.label).join('、') : '已全部隐藏'
 })
+
+function toggleVocabDisplay(key: VocabDisplayKey) {
+  vocabDisplayConfig[key] = !vocabDisplayConfig[key]
+  saveVocabDisplayConfig({ ...vocabDisplayConfig })
+}
 
 function applyTheme() {
   document.documentElement.classList.toggle('dark', dark.value)
@@ -34,159 +72,103 @@ function toggleTheme() {
   applyTheme()
 }
 
-function loadVocabularyDisplayConfig() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('vocab-display-config') || '{}')
-    if (saved && typeof saved === 'object') {
-      vocabDisplayConfig.value = { ...vocabDisplayConfig.value, ...saved }
-    }
-  } catch {
-    // Keep the defaults when an older local value is invalid.
-  }
-}
-
-function saveVocabularyDisplayConfig() {
-  localStorage.setItem('vocab-display-config', JSON.stringify(vocabDisplayConfig.value))
-}
-
 onMounted(() => {
   dark.value = document.documentElement.classList.contains('dark')
-  loadVocabularyDisplayConfig()
+  document.documentElement.classList.toggle('dark', dark.value)
 })
 </script>
 
 <template>
   <div class="page mobile-hub settings-hub">
     <div class="page-head compact-page-head">
-      <div class="page-title-row"><img class="page-title-icon" src="/assets/icons/settings.png" alt=""><h1>设置</h1></div>
+      <div class="page-title-row"><span class="page-title-icon-lucide"><Settings2 :size="24" /></span><h1>设置</h1></div>
     </div>
-    <section class="settings-theme-row">
-      <img src="/assets/icons/theme.png" alt="">
-      <span><strong>外观</strong></span>
-      <button class="settings-theme-switch" type="button" role="switch" :aria-checked="dark" aria-label="深色模式" :title="dark ? '关闭深色模式' : '开启深色模式'" @click="toggleTheme"><span aria-hidden="true"></span></button>
-    </section>
-    <section class="settings-vocab-display">
-      <button class="settings-vocab-display-toggle" type="button" :aria-expanded="vocabDisplayOpen" @click="vocabDisplayOpen=!vocabDisplayOpen">
-        <span class="settings-vocab-display-icon"><Eye :size="20" /></span>
-        <span><strong>单词本显示</strong></span>
-        <ChevronDown :size="19" :class="{ open: vocabDisplayOpen }" />
-      </button>
-      <div v-if="vocabDisplayOpen" class="settings-vocab-display-options">
-        <label v-for="[key, label] in vocabularyDisplayOptions" :key="key">
-          <input v-model="vocabDisplayConfig[key]" type="checkbox" @change="saveVocabularyDisplayConfig">
-          <span>{{ label }}</span>
-        </label>
+
+    <section class="settings-hub-group" aria-labelledby="hub-appearance-title">
+      <h2 id="hub-appearance-title" class="settings-hub-group-title">外观与显示</h2>
+      <div class="settings-hub-rows">
+        <div class="settings-hub-row">
+          <span class="settings-hub-row-icon"><Moon v-if="dark" :size="19" /><Sun v-else :size="19" /></span>
+          <span><strong>深色模式</strong></span>
+          <button class="settings-theme-switch" type="button" role="switch" :aria-checked="dark" aria-label="深色模式" @click="toggleTheme"><span aria-hidden="true"></span></button>
+        </div>
+        <div class="settings-hub-row stack">
+          <button class="settings-hub-row-toggle" type="button" :aria-expanded="vocabDisplayOpen" @click="vocabDisplayOpen=!vocabDisplayOpen">
+            <span class="settings-hub-row-icon"><Eye :size="19" /></span>
+            <span class="settings-hub-row-copy"><strong>单词本显示</strong><small>{{ vocabDisplaySummary }}</small></span>
+            <ChevronDown :size="19" class="settings-hub-chevron" :class="{ open: vocabDisplayOpen }" />
+          </button>
+          <div v-if="vocabDisplayOpen" class="settings-vocab-display-options">
+            <label v-for="option in VOCAB_DISPLAY_OPTIONS" :key="option.key">
+              <input type="checkbox" :checked="vocabDisplayConfig[option.key]" @change="toggleVocabDisplay(option.key)">
+              <span>{{ option.label }}</span>
+            </label>
+          </div>
+        </div>
       </div>
     </section>
-    <div class="mobile-hub-list settings-hub-list">
-      <RouterLink class="mobile-hub-item" to="/library"><img src="/assets/icons/paper.png" alt=""><span><strong>题库管理</strong></span><b aria-hidden="true">›</b></RouterLink>
-      <RouterLink class="mobile-hub-item" to="/imports"><img src="/assets/icons/import.png" alt=""><span><strong>导入题库</strong></span><b aria-hidden="true">›</b></RouterLink>
-      <RouterLink class="mobile-hub-item" to="/settings"><img src="/assets/icons/settings.png" alt=""><span><strong>模型与 API</strong></span><b aria-hidden="true">›</b></RouterLink>
-      <RouterLink class="mobile-hub-item" to="/android-updates"><img src="/assets/icons/update.png" alt=""><span><strong>更新与日志</strong></span><b aria-hidden="true">›</b></RouterLink>
-      <RouterLink class="mobile-hub-item" to="/trash"><img src="/assets/icons/diagnostics.png" alt=""><span><strong>回收站</strong></span><b aria-hidden="true">›</b></RouterLink>
-    </div>
-    <section class="settings-about" aria-labelledby="mobile-settings-about-title">
-      <div class="settings-about-heading">
-        <span class="settings-about-icon"><BookOpen :size="20" /></span>
-        <div><h2 id="mobile-settings-about-title">帮助与关于</h2><p>离线查看功能说明与常见问题，遇到问题可直接反馈。</p></div>
-      </div>
-      <div class="settings-about-actions">
-        <RouterLink class="button secondary" to="/help"><BookOpen :size="16" />使用帮助</RouterLink>
-        <a class="button ghost" href="https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&amp;h_src=YXBwX3NoYXJl&amp;link_id=0ad4723fda0b" target="_blank" rel="noopener noreferrer"><ExternalLink :size="16" />问题反馈</a>
+
+    <section v-for="group in groups" :key="group.title" class="settings-hub-group" :aria-labelledby="`hub-${group.title}`">
+      <h2 :id="`hub-${group.title}`" class="settings-hub-group-title">{{ group.title }}</h2>
+      <div class="settings-hub-rows">
+        <RouterLink v-for="item in group.items" :key="item.label" class="settings-hub-row link" :to="item.to">
+          <span class="settings-hub-row-icon"><component :is="item.icon" :size="19" /></span>
+          <span><strong>{{ item.label }}</strong></span>
+          <b class="settings-hub-chevron" aria-hidden="true">›</b>
+        </RouterLink>
       </div>
     </section>
+
+    <section class="settings-hub-group" aria-labelledby="hub-help">
+      <h2 id="hub-help" class="settings-hub-group-title">帮助</h2>
+      <div class="settings-hub-rows">
+        <RouterLink class="settings-hub-row link" to="/help">
+          <span class="settings-hub-row-icon"><BookOpen :size="19" /></span>
+          <span><strong>使用帮助</strong></span>
+          <b class="settings-hub-chevron" aria-hidden="true">›</b>
+        </RouterLink>
+        <a class="settings-hub-row link" href="https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&amp;h_src=YXBwX3NoYXJl&amp;link_id=0ad4723fda0b" target="_blank" rel="noopener noreferrer">
+          <span class="settings-hub-row-icon"><NotebookText :size="19" /></span>
+          <span><strong>问题反馈</strong></span>
+          <ExternalLink class="settings-hub-chevron" :size="17" />
+        </a>
+      </div>
+    </section>
+
+    <div class="settings-hub-brand" aria-hidden="true"><Database :size="15" />学习数据保存在本机，可随时在设备同步中备份</div>
   </div>
 </template>
 
 <style scoped>
-.settings-theme-switch { width: 52px; height: 44px; padding: 8px 0; border: 0; background: transparent; cursor: pointer; flex-shrink: 0; }
+.settings-theme-switch { width: 52px; height: 48px; padding: 10px 0; border: 0; background: transparent; cursor: pointer; flex-shrink: 0; }
 .settings-theme-switch > span { display: block; position: relative; width: 52px; height: 28px; border-radius: 14px; background: var(--muted); }
 .settings-theme-switch > span::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: white; }
 .settings-theme-switch[aria-checked="true"] > span { background: var(--primary); }
 .settings-theme-switch[aria-checked="true"] > span::after { transform: translateX(24px); }
 .settings-theme-switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-html[data-platform="android"] .settings-hub > .settings-theme-row,
-html[data-platform="android"] .settings-hub > .settings-vocab-display,
-html[data-platform="android"] .settings-hub > .settings-about {
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  box-shadow: none;
-}
-html[data-platform="android"] .settings-hub .settings-hub-list { gap: 0; }
-html[data-platform="android"] .settings-hub .mobile-hub-item {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) 20px;
-  align-items: center;
-  gap: 10px;
-  min-height: 56px;
-  padding: 8px 4px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  box-shadow: none;
-  background: transparent;
-}
-html[data-platform="android"] .settings-hub .mobile-hub-item > img { width: 28px; height: 28px; }
-html[data-platform="android"] .settings-hub .mobile-hub-item strong { font-size: 16px; line-height: 1.5; }
-html[data-platform="android"] .settings-hub .mobile-hub-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 
-/* Keep every settings row on one alignment grid: icon, label, trailing control. */
-html[data-platform="android"] .settings-hub > .settings-theme-row,
-html[data-platform="android"] .settings-hub > .settings-vocab-display,
-html[data-platform="android"] .settings-hub .mobile-hub-item {
-  width: 100%;
-  min-height: 64px;
-  padding: 8px 4px;
-  margin: 0;
-  box-sizing: border-box;
+.settings-hub-group { margin: 0 0 18px; }
+.settings-hub-group-title { margin: 0 0 8px; padding: 0 4px; color: var(--muted); font-size: 13px; font-weight: 700; letter-spacing: .04em; }
+.settings-hub-rows { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-sm); }
+.settings-hub-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) 52px; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 6px 14px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; background: transparent; color: var(--ink); text-align: left; }
+.settings-hub-rows > :last-child { border-bottom: 0; }
+.settings-hub-row.link { min-height: 56px; }
+.settings-hub-row.link:hover { background: var(--primary-faint); }
+.settings-hub-row-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--primary-soft); color: var(--primary); }
+.settings-hub-row strong { font-size: 16px; line-height: 1.5; font-weight: 600; }
+.settings-hub-row-copy { display: grid; gap: 1px; min-width: 0; }
+.settings-hub-row-copy small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-hub-chevron { justify-self: end; color: var(--muted); transition: transform .2s ease; }
+.settings-hub-chevron.open { transform: rotate(180deg); }
+.settings-hub-row.stack { display: block; padding: 0; }
+.settings-hub-row-toggle { display: grid; width: 100%; min-height: 56px; padding: 6px 14px; grid-template-columns: 32px minmax(0, 1fr) 52px; gap: 12px; align-items: center; border: 0; background: transparent; color: var(--ink); text-align: left; }
+.settings-hub-row-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.settings-vocab-display-options { display: grid; gap: 0; padding: 2px 14px 12px 58px; }
+.settings-vocab-display-options label { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--line); font-size: 15px; }
+.settings-vocab-display-options label:last-child { border-bottom: 0; }
+.settings-vocab-display-options input { width: 19px; height: 19px; }
+.settings-hub-brand { display: flex; align-items: center; gap: 7px; justify-content: center; margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+@media (max-width: 720px) {
+  .settings-hub-row, .settings-hub-row-toggle { grid-template-columns: 32px minmax(0, 1fr) 52px; }
 }
-html[data-platform="android"] .settings-hub > .settings-theme-row {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) 52px;
-  align-items: center;
-  gap: 10px;
-}
-html[data-platform="android"] .settings-hub > .settings-theme-row > img,
-html[data-platform="android"] .settings-hub .mobile-hub-item > img {
-  width: 32px !important;
-  height: 32px !important;
-  min-width: 32px;
-  max-width: 32px;
-  min-height: 32px;
-  max-height: 32px;
-  margin: 0;
-  object-fit: contain;
-}
-html[data-platform="android"] .settings-hub > .settings-vocab-display {
-  display: block;
-  padding: 0;
-}
-html[data-platform="android"] .settings-hub .settings-vocab-display-toggle {
-  display: grid;
-  width: 100%;
-  min-height: 63px;
-  padding: 8px 4px;
-  grid-template-columns: 32px minmax(0, 1fr) 52px;
-  gap: 10px;
-  box-sizing: border-box;
-  align-items: center;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  text-align: left;
-}
-html[data-platform="android"] .settings-hub .settings-vocab-display-icon {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-}
-html[data-platform="android"] .settings-hub .mobile-hub-item { grid-template-columns: 32px minmax(0, 1fr) 52px; }
-html[data-platform="android"] .settings-hub .mobile-hub-item > b,
-html[data-platform="android"] .settings-hub .settings-vocab-display-toggle > svg { justify-self: end; }
-html[data-platform="android"] .settings-hub .settings-theme-row strong,
-html[data-platform="android"] .settings-hub .settings-vocab-display-toggle strong { font-size: 16px; line-height: 1.5; }
 </style>

@@ -120,7 +120,8 @@ try {
     await page.locator('.vocab-list-item').first().waitFor()
     const label=width+'x'+height+'-'+(dark?'dark':'light')
     for (const word of ['evidence',longWord,veryLongWord]) {
-      if (word!=='evidence') await page.locator('.vocab-list-item').filter({hasText:word}).click()
+      // 首次进入不再自动展开第一个词条（窄屏信息架构），由用例显式点击目标词。
+      await page.locator('.vocab-list-item').filter({hasText:word}).click()
       await page.locator('.vocab-detail-head h2:visible').scrollIntoViewIfNeeded()
       const measured=await inspectDetail(page)
       evidence.push({label,word,...measured})

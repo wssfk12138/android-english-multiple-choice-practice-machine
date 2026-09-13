@@ -2,6 +2,7 @@
 import { RotateCcw, Trash2 } from 'lucide-vue-next'
 import { onMounted, ref } from 'vue'
 import { del, get, post } from '../api'
+import { confirmDialog } from '../platform/dialogs'
 
 const items = ref<any[]>([])
 const error = ref('')
@@ -33,7 +34,16 @@ async function restore(item: any) {
 }
 
 async function purge(item: any) {
-  if (!window.confirm(`永久删除“${item.resource_name}”？此操作无法恢复。`)) return
+  const confirmed = await confirmDialog({
+    title: `永久删除“${item.resource_name}”？`,
+    message: [
+      `这是“${typeLabel(item.resource_type)}”，删除后不再保留任何内容。`,
+      '此操作无法恢复，也不会再经过回收站。',
+    ],
+    confirmLabel: '永久删除',
+    danger: true,
+  })
+  if (!confirmed) return
   try {
     await del(`/trash/${item.id}`)
     await load()

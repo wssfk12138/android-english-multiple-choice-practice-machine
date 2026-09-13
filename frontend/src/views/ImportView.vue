@@ -6,6 +6,8 @@ import {
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, del, get, patch, post, put } from '../api'
+import { confirmDialog } from '../platform/dialogs'
+import OptionSheet from '../components/OptionSheet.vue'
 import QuestionBankSwitcher from '../components/QuestionBankSwitcher.vue'
 import { loadQuestionBankProfiles, questionBankProfilesState } from '../services/questionBankProfiles'
 import {
@@ -27,6 +29,11 @@ type LabelRow = {
 
 const route = useRoute()
 const router = useRouter()
+const levelOptions = [
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+]
 const jobs = ref<any[]>([])
 const current = ref<any>(null)
 const selectedFile = ref<File | null>(null)
@@ -287,7 +294,15 @@ async function publishDocument() {
     error.value = '仍有校验问题，请按警告逐项修正后再批准入库。'
     return
   }
-  if (!confirm(`确认发布 ${current.value.draft.year} 年题库吗？`)) return
+  const confirmed = await confirmDialog({
+    title: `发布 ${current.value.draft.year} 年题库？`,
+    message: [
+      `将把校对完成的草稿正式写入题库“${current.value.draft.title}”。`,
+      '发布后题目进入可练习状态；草稿内容可在发布前继续修改。',
+    ],
+    confirmLabel: '发布题库',
+  })
+  if (!confirmed) return
   busy.value = true
   startPublishStage('正在发布题库…')
   try {
@@ -408,7 +423,16 @@ async function publishEsq() {
 }
 
 async function removeImportJob(job: any, esq = false) {
-  if (!confirm(`将未完成导入“${job.display_name || job.filename}”及原始文件移入回收站？`)) return
+  const confirmed = await confirmDialog({
+    title: `移入回收站“${job.display_name || job.filename}”？`,
+    message: [
+      '将删除该未完成导入及其原始文件。',
+      '内容将在回收站保留七天，期间可以恢复。',
+    ],
+    confirmLabel: '移入回收站',
+    danger: true,
+  })
+  if (!confirmed) return
   try {
     await del(`${esq ? '/question-banks/imports' : '/imports'}/${job.id}`)
     if (esq) {
@@ -531,7 +555,7 @@ async function removeImportJob(job: any, esq = false) {
             <section v-for="question in unit.questions" :key="question.number" class="question-editor">
               <div class="question-editor-head">
                 <label class="compact-field"><span>题号</span><input v-model.number="question.number" type="number"></label>
-                <label class="compact-field"><span>答案</span><select v-model="current.draft.answers[question.number]"><option value="">未填写</option><option v-for="option in question.options" :key="option.key" :value="option.key">{{ option.key }}</option></select></label>
+                <label class="compact-field"><span>答案</span><OptionSheet v-model="current.draft.answers[question.number]" :items="[{ value: '', label: '未填写' }, ...question.options.map((option: any) => ({ value: option.key, label: option.key }))]" title="选择本题答案" /></label>
               </div>
               <label class="field"><span>题干</span><textarea v-model="question.stem" rows="2"></textarea></label>
               <div class="option-editor-grid">
@@ -573,9 +597,9 @@ async function removeImportJob(job: any, esq = false) {
         <label class="field"><span>干扰项类型</span><textarea :value="editingLabel.trap_types.join('，')" @input="editingLabel!.trap_types=tags(($event.target as HTMLTextAreaElement).value)"></textarea></label>
         <label class="field"><span>注意事项</span><textarea :value="editingLabel.attention_points.join('，')" @input="editingLabel!.attention_points=tags(($event.target as HTMLTextAreaElement).value)"></textarea></label>
         <div class="draft-meta-grid">
-          <label class="field"><span>词汇要求</span><select v-model="editingLabel.vocabulary_demand"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
-          <label class="field"><span>上下文依赖</span><select v-model="editingLabel.context_dependency"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
-          <label class="field"><span>语法依赖</span><select v-model="editingLabel.grammar_dependency"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
+          <label class="field"><span>词汇要求</span><OptionSheet v-model="editingLabel.vocabulary_demand" :items="levelOptions" title="选择词汇要求" /></label>
+          <label class="field"><span>上下文依赖</span><OptionSheet v-model="editingLabel.context_dependency" :items="levelOptions" title="选择上下文依赖" /></label>
+          <label class="field"><span>语法依赖</span><OptionSheet v-model="editingLabel.grammar_dependency" :items="levelOptions" title="选择语法依赖" /></label>
         </div>
         <label class="check-row"><input v-model="editingLabel.locked" type="checkbox"><span><b>锁定人工校正结果</b><small>后续批量标注不会覆盖。</small></span></label>
         <div class="review-actions"><button class="button secondary" @click="editingLabel=null">取消</button><button class="button" @click="saveLabel"><Check :size="16" />保存并锁定</button></div>
@@ -587,11 +611,7 @@ async function removeImportJob(job: any, esq = false) {
         <h2 id="model-selector-title">选择其他模型重新校对</h2>
         <p>将重新向所选模型提供完整试卷、答案附件和当前草稿。本地解析结果会保留到模型成功返回为止。</p>
         <label class="field"><span>可用模型</span>
-          <select v-model="selectedModelKey">
-            <option v-for="item in selectorModels" :key="`${item.profile_id}:${item.model_id}`" :value="`${item.profile_id}::${item.model_id}`">
-              {{ item.profile_name }} / {{ item.display_name || item.model_id }}
-            </option>
-          </select>
+          <OptionSheet v-model="selectedModelKey" :items="selectorModels.map((item: any) => ({ value: `${item.profile_id}::${item.model_id}`, label: item.display_name || item.model_id, hint: item.profile_name }))" title="选择重新校对模型" searchable />
         </label>
         <div v-if="!selectorModels.length" class="warning" role="alert">当前没有可用模型，请先到模型与设置中启用配置并刷新模型列表。</div>
         <div class="review-actions">
@@ -622,7 +642,7 @@ async function removeImportJob(job: any, esq = false) {
         <label class="check-row"><input v-model="importDestinationMode" type="radio" value="new_profile"><span><b>按题库包名称创建新题库配置（推荐）</b><small>适合导入不同考试或科目的新题库，不会切换当前学习题库。</small></span></label>
         <label v-if="importDestinationMode === 'new_profile'" class="field"><span>新题库配置名称</span><input v-model.trim="importProfileName" maxlength="80" @keyup.enter="confirmImportDestination"></label>
         <label class="check-row"><input v-model="importDestinationMode" type="radio" value="existing_profile"><span><b>导入已有题库配置</b><small>仅在文件确实属于已有题库时选择。</small></span></label>
-        <label v-if="importDestinationMode === 'existing_profile'" class="field"><span>已有题库配置</span><select v-model.number="existingProfileId"><option v-for="profile in questionBankProfilesState.items" :key="profile.id" :value="profile.id">{{ profile.name }}</option></select></label>
+        <label v-if="importDestinationMode === 'existing_profile'" class="field"><span>已有题库配置</span><OptionSheet v-model="existingProfileId" :items="questionBankProfilesState.items.map((profile: any) => ({ value: Number(profile.id), label: profile.name }))" title="选择已有题库配置" searchable /></label>
         <p v-if="importDestinationError" class="warning" role="alert">{{ importDestinationError }}</p>
         <div style="display:flex;gap:10px;margin-top:20px;justify-content:center"><button class="button ghost" type="button" @click="importDestinationOpen=false">取消</button><button class="button" type="button" @click="confirmImportDestination">继续导入</button></div>
       </div>
