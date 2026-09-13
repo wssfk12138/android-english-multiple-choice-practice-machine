@@ -30,6 +30,15 @@ import {
   copyLearningHistoryDiagnostics,
   shareLearningHistoryDiagnostics,
 } from '../platform/android/learning-history-diagnostics'
+import {
+  databaseExportAvailable,
+  exportDatabaseSnapshot,
+  formatDatabaseSize,
+  readDatabaseInfo,
+  shareDatabaseSnapshot,
+  type DatabaseExportResult,
+  type DatabaseFileInfo,
+} from '../platform/android/database-export'
 import type { LanSyncQrPayload } from '../platform/android/lan-sync-qr'
 import LanSyncScanner from '../components/LanSyncScanner.vue'
 import { CATEGORY_LABELS, DEFAULT_CATEGORIES, type LanCategory } from '../platform/android/lan-categories'
@@ -60,6 +69,9 @@ const catalogProfileNames = ref<Record<string, string>>({})
 const catalogExistingProfileId = ref(0)
 const catalogDestinationError = ref('')
 const diagnosticLogs = ref<DiagnosticLogEntry[]>([])
+const databaseInfo = ref<DatabaseFileInfo | null>(null)
+const databaseExport = ref<DatabaseExportResult | null>(null)
+const databaseChannelEnabled = ref(false)
 const busy = ref('')
 const notice = ref('')
 const error = ref('')
@@ -432,6 +444,42 @@ async function shareHistoryDiagnostics() {
   }
 }
 
+async function refreshDatabaseInfo() {
+  try {
+    databaseInfo.value = await readDatabaseInfo()
+  } catch (cause) {
+    databaseInfo.value = null
+    error.value = `读取应用数据库信息失败：${String(cause)}`
+  }
+}
+
+async function exportDatabaseCopy() {
+  error.value = ''
+  busy.value = 'database-export'
+  try {
+    const result = await exportDatabaseSnapshot()
+    databaseExport.value = result
+    notice.value = `已导出数据库副本 ${result.fileName}（${formatDatabaseSize(result.size)}）`
+  } catch (cause) {
+    error.value = `导出应用数据库副本失败：${String(cause)}`
+  } finally {
+    busy.value = ''
+  }
+}
+
+async function shareDatabaseCopy() {
+  error.value = ''
+  busy.value = 'database-share'
+  try {
+    await shareDatabaseSnapshot(databaseExport.value?.path)
+    notice.value = '已打开系统发送界面，请选择发送方式'
+  } catch (cause) {
+    error.value = `分享应用数据库副本失败：${String(cause)}`
+  } finally {
+    busy.value = ''
+  }
+}
+
 async function clearLogs() {
   if (!diagnosticLogs.value.length) return
   const confirmed = await confirmDialog({
@@ -455,6 +503,10 @@ function setSectionRef(name: string) {
 
 onMounted(async () => {
   load()
+  if (databaseExportAvailable()) {
+    databaseChannelEnabled.value = true
+    await refreshDatabaseInfo()
+  }
   // 设置中枢的“设备同步/诊断日志”等入口通过 ?section= 直接定位到对应分区。
   const section = String(route.query.section || '')
   if (section) {
@@ -613,6 +665,20 @@ onMounted(async () => {
         </button>
       </div>
       <p class="diagnostic-privacy">学习历史诊断只执行本地只读汇总，包含数量和完整性类别，不含学习记录、题库名、题目、答案、词汇或任何同步标识。</p>
+      <template v-if="databaseChannelEnabled">
+        <div class="diagnostic-actions">
+          <button class="button secondary" type="button" :disabled="busy === 'database-export'" @click="exportDatabaseCopy">
+            <Save :size="16" />导出应用数据库副本
+          </button>
+          <button class="button" type="button" :disabled="!databaseExport || busy === 'database-share'" @click="shareDatabaseCopy">
+            <Send :size="16" />导出并系统分享
+          </button>
+        </div>
+        <p class="diagnostic-privacy">数据库副本包含题库、单词本、错题与学习记录，只在你点击导出时写入本机应用外部私有目录 db-export（Android/data/（应用包名）/files/db-export），用于 adb pull 或在应用内系统分享。</p>
+        <p v-if="databaseInfo?.exists" class="diagnostic-privacy">当前库 {{ databaseInfo.fileName }}，{{ formatDatabaseSize(databaseInfo.size || 0) }}，{{ databaseInfo.tableCount ?? 0 }} 张表，日志模式 {{ databaseInfo.journalMode }}。</p>
+        <p v-else-if="databaseInfo" class="diagnostic-privacy">未找到数据库文件（{{ databaseInfo.expectedFileName }}），请先在应用内打开一次题库。</p>
+        <p v-if="databaseExport" class="diagnostic-privacy">最近导出 {{ databaseExport.fileName }}（{{ formatDatabaseSize(databaseExport.size) }}，完整性 {{ databaseExport.integrityCheck }}，快照 {{ databaseExport.snapshot }}），路径 {{ databaseExport.path }}{{ databaseExport.adbReadable ? '，可直接用 adb pull 取走' : '，adb 读取被系统拒绝，请改用系统分享' }}</p>
+      </template>
       <div v-if="diagnosticLogs.length" class="diagnostic-list">
         <details v-for="item in diagnosticLogs" :key="`${item.createdAt}:${item.event}`">
           <summary>

@@ -77,3 +77,9 @@
 验证：`frontend` 下 `corepack.cmd pnpm run test:all` = 63 passed / 0 failed（新增 `question-bank-bundled-probe.mjs`）；`pnpm run build`（`vue-tsc --noEmit` + `vite build`）通过；`cap sync android` 与 `gradlew assembleInternal -PappVersionCode=86 -PappVersionName=0.1.0-alpha.86` 通过；APK SHA-256 `D7595AFD02005E99CABB214B8B8A24D9F6EBDFBB24297E3168B87DB6CF217E4C`，签名 SHA-256 `b50d155c…de0a7` 与既有内测包一致，已覆盖安装到平板（HEY2-W09）和手机（PHK110），首次安装时间与用户数据保留。
 
 未覆盖：真机端到端分段计时（点击到首帧、评分到下一张）、横竖屏与 1.35 倍字体的实际观感。
+
+## 暂停记录（2026-09-13）
+
+用户真机反馈：竖屏复习流畅，只有横屏卡顿；同一份数据在手机（PHK110 / Android 16）竖屏同样流畅，携带 127 词的手机竖屏也流畅，说明数据量与本轮查询改动不是主因，平板（HEY2-W09 / Android 14）的横竖屏差异才是关键。定位期横屏帧时间中位数约为平板 38ms、手机 12ms（单次采样，未复测）。
+
+自本轮起暂停卡顿代码改动，先交付应用私有数据库读取通道（见 NOW）。恢复卡顿时优先检查 frontend/src/styles.css 中横屏路径的 .review-overlay（blur 13px）、.practice-top（blur 15px）、.practice-footer（blur 16px），竖屏媒体查询已把复习卡片 blur 显式改为 none；用户怀疑平板开发者选项（视图属性检查）也有影响，未证实。另记录：竖屏“今日到期”复习卡片排版不美观，细节待用户补充。

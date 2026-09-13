@@ -20,6 +20,7 @@ const stubs = {
   profiles: 'export const questionBankProfilesState={items:[{id:1,name:"Synthetic study bank"}]};export const loadQuestionBankProfiles=async()=>{};',
   diagnostics: 'export const listDiagnosticLogs=async()=>[];export const clearDiagnosticLogs=async()=>{};export const copyIssueReportTemplate=async()=>{};export const copyDiagnosticLogs=async()=>{};export const shareDiagnosticLogs=async()=>{};',
   history: 'export const copyLearningHistoryDiagnostics=async()=>{};export const shareLearningHistoryDiagnostics=async()=>{};',
+  databaseExport: 'export const databaseExportAvailable=()=>false;export const readDatabaseInfo=async()=>null;export const exportDatabaseSnapshot=async()=>null;export const shareDatabaseSnapshot=async()=>{};export const formatDatabaseSize=()=>"0 B";',
   banks: 'export const checkLanQuestionBanks=async()=>({hostId:"fixture",packages:[{packageId:"test",title:"Synthetic-long-question-bank-title-".repeat(4),years:[2025,2026],size:1024,license:"Test-only"}]});export const downloadLanQuestionBank=async()=>({skipped:true});',
   scanner: 'export default {render:()=>null};',
 }
@@ -58,6 +59,7 @@ const server = await createServer({ configFile: false, root, optimizeDeps: { noD
       if (id.endsWith('/services/questionBankProfiles')) return 'virtual:stub:profiles'
       if (id.endsWith('/android/diagnostics')) return 'virtual:stub:diagnostics'
       if (id.endsWith('/android/learning-history-diagnostics')) return 'virtual:stub:history'
+      if (id.endsWith('/android/database-export')) return 'virtual:stub:databaseExport'
       if (id.endsWith('/android/lan-question-banks')) return 'virtual:stub:banks'
       if (id.endsWith('/LanSyncScanner.vue')) return 'virtual:stub:scanner'
     },

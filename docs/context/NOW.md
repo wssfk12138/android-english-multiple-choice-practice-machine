@@ -1,10 +1,22 @@
 # 当前工作
 
-> 最后更新：2026-09-13（卡顿与加载观感修复：内测 alpha.86 / versionCode 86 已覆盖安装平板与手机，P0–P3 实施与门禁见 [卡顿与 UI 修复方案](history/2026-09-card-lag-and-ui-fix-plan.md)；真机横竖屏与 1.35 倍字体验收待用户执行）。既有交付核验日期不变，本页仅保留当前摘要。
+> 最后更新：2026-09-13（私有数据库读取通道：内测 alpha.88 / versionCode 88 已覆盖安装平板与手机，导出副本已按真机 adb 取回复核；卡顿修复暂停，横屏卡顿未修）。既有交付核验日期不变，本页仅保留当前摘要。
 
-## 卡顿与加载观感修复（本轮，待真机抽验）
+## 私有数据库读取通道（本轮交付，已按真机取回验证）
+
+应用数据目录 /data/data/包名/databases 无法被电脑直接读取：allowBackup=false、内测包非 debuggable，run-as 与 adb backup 都不可用。本轮新增内部渠道专用的读取通道，把数据库导出成可被 adb 拉取或系统分享取走的副本。
+
+实现：frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/DatabaseExportPlugin.java 优先用 SQLite VACUUM INTO 生成单文件一致性快照（失败时退回逐字节复制并连带 -wal 与 -shm），写入应用外部私有目录 Android/data/包名/files/db-export/，只保留最近 3 次导出。副本会被显式放宽到 0644——外部私有目录下的文件默认是 0600，shell 用户能列出目录却读不到文件，直接拉取会报 Permission denied。前端封装在 frontend/src/platform/android/database-export.ts。
+
+入口在“更新 → 诊断日志”分区（frontend/src/views/AndroidUpdatesView.vue，按运行时平台判断，仅在 Android 原生壳内出现；公测副本尚未同步此改动）：“导出应用数据库副本”回报文件名、大小、SHA-256、PRAGMA integrity_check 与快照方式；“导出并系统分享”经 FileProvider 与 ACTION_SEND 交系统分享，供没有电脑时取走。
+
+真机验证（alpha.88）：平板导出 12,840,960 字节、SHA-256 efda7c4bf74f18f1bdba072662e7f616e3b1bb6e5eb2e2bff361c765cd8928f8；手机导出 13,598,720 字节、SHA-256 cdf94a76307cf8bcae5f3ffd1d5a085ce3f35bb3dfcae88c484c26d26cefade2。两份副本均可拉取，本机 node:sqlite 复核 integrity_check 为 ok、 77 张表，表集合与原参考快照一致，vocabulary_entries 216 / practice_sessions 33 / app_settings 21 计数一致。后续卡顿定位可以直接只读查询错题、词汇和复习记录。
+
+## 卡顿与加载观感修复（暂停：横屏卡顿未修）
 
 按 [卡顿与 UI 修复方案](history/2026-09-card-lag-and-ui-fix-plan.md) 完成 P0–P3：进入“今日到期”先渲染等高卡片骨架并让到期队列在后台落地，评分接口只回传轻量结果；启动路径把内容修正、试卷元数据扫描、LAN 同步版本表和内置题库包判定改为探针后按需写入；首页 `mounted` 与启动事件合并为单飞刷新；学习待办的“正在加载”占位换成等高骨架。前端门禁 63 项全部通过，内测 alpha.86 已覆盖安装平板与手机并保留用户数据，构建与哈希证据见方案文档的“实施结果”。
+
+暂停与现状（2026-09-13）：用户真机反馈竖屏复习流畅，只有横屏卡顿；同一份数据在手机（PHK110 / Android 16）竖屏同样流畅，携带 127 词的手机竖屏也流畅，说明数据量与本轮查询改动不是主因。平板为 HEY2-W09 / Android 14。定位期采样的横屏帧时间中位数约为平板 38ms、手机 12ms（单次采样，未复测）。尚未处理的候选因素集中在横屏路径的三处 backdrop-filter：frontend/src/styles.css 的 .review-overlay（blur 13px）、.practice-top（blur 15px）、.practice-footer（blur 16px）；竖屏媒体查询已把复习卡片的 blur 显式改为 none。用户怀疑与平板自身的开发者选项（如视图属性检查）有关，未证实。另记录：竖屏“今日到期”复习卡片排版不美观，细节待用户补充。
 
 ## Android UI 整改（alpha.83 起交付，待真机抽验）
 

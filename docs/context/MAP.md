@@ -24,12 +24,13 @@
 
 - frontend/src/：前端；frontend/src/platform/android/：平台适配；frontend/android/：原生工程。
 - docs/：产品文档；docs/context/：专题入口；.codex-local/、work/、outputs/：工具与产物，操作前查引用和忽略规则。
+- 应用私有数据库读取通道（内测包专用，2026-09-13 交付）：原生插件 frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/DatabaseExportPlugin.java，前端封装 frontend/src/platform/android/database-export.ts，入口在“更新 → 诊断日志”。导出副本落在设备端 Android/data/包名/files/db-export/，不随源码走，也不是仓库产物。
 
 ## 环境与清理依赖（沿用 2026-09-09 记录，使用前复核）
 
 - 三批交付证据已迁至 E:/EnglishPracticeMachine/archives/codex-evidence/，保留原日期/任务ID层级；本页历史C盘visualizations链接通过Junction继续可用。
 - Gradle用户目录为 E:/EnglishPracticeMachine/.toolchains/gradle-user-home，User级GRADLE_USER_HOME已设置；C:/Users/MEC/.gradle保留Junction。Android SDK仍为 E:/EnglishPracticeMachine/.toolchains/android-sdk，C盘旧SDK已核验去重并保留Junction。
-- C盘工作树2000的.codex-local/staging-alpha39联接至aac2工作树同名保留副本。后续删除或归档任一工作树前先处理此依赖，不能直接移除aac2保留副本。其余工作树与源码未清理。
+- C盘工作树2000的.codex-local/staging-alpha39联接至aac2工作树同名保留副本。后续删除或归档任一工作树前先处理此依赖，不能直接移除aac2保留副本。其余工作树与源码未清理。2026-09-13 只读盘点：C:/Users/MEC/.codex/worktrees 下余 9 个游离工作树（41e89bd 七个、fbba2b4 两个），其中 1569/18e1/6318/e55a 干净，2000/2eb7/7a35/aac2/f405 带非空白的旧功能改动（AppUpdater、LanSync、ESQ 等），与已归档的卡顿修复尝试（a2f0）不是同一批；本次未删除任何工作树。
 - 私有清单、逐文件SHA-256、环境旧值和回退说明：E:/EnglishPracticeMachine/archives/c-drive-migration-20260909/README.md；闭环见history/2026-09-storage-migration.md。这些设备路径与私有回执不得同步到公开副本。
 
 ## 当前任务和历史

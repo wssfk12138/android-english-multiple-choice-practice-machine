@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(AppUpdaterPlugin.class);
         registerPlugin(DiagnosticLogPlugin.class);
         registerPlugin(DocumentExtractorPlugin.class);
+        registerPlugin(DatabaseExportPlugin.class);
         super.onCreate(savedInstanceState);
         bridge.getWebView().setWebChromeClient(new LocalizedWebChromeClient(bridge));
     }
