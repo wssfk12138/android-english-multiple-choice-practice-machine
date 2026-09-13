@@ -112,6 +112,7 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
     './vocabulary-enrichment-runner': { queueVocabularyEnrichment: async () => {} },
   })
   const ai = loadModule('ai', {
+    '../../services/vocabularyTranslationConfig': { loadVocabularyEnrichment: () => true },
     './database': database,
     './errors': errors,
     './model-key-store': {},
@@ -161,6 +162,8 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
         completeDueWord: (queue, key) => ({ ...queue, main: (queue?.main || []).filter(item => item !== key), relearning: (queue?.relearning || []).filter(item => item !== key) }),
         wordKey: word => word?.normalized_term || String(word?.term || '').toLowerCase(),
       }
+      if (name === '../components/VocabularyTerm.vue') return { default: { props:['term'], setup:p=>()=>vue.h('span',p.term) } }
+      if (name === '../components/VocabularyMemoryContent.vue') return { default: { props:['entry'], setup:p=>()=>vue.h('div',[p.entry.common_meaning,p.entry.contextual_meaning,p.entry.note]) } }
       if (name === '../components/VocabularyEnrichment.vue') return { default: {
         name: 'VocabularyEnrichmentStub',
         setup() { return () => vue.h('span', { class: 'vocabulary-enrichment-stub' }) },

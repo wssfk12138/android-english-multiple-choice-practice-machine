@@ -535,6 +535,7 @@ onMounted(async () => {
           <h2>设备同步</h2>
         </div>
       </div>
+      <details class="sync-connection"><summary>连接</summary>
       <div class="lan-sync-connection-grid">
         <div class="field">
           <label for="lan-sync-host">电脑端地址</label>
@@ -551,20 +552,22 @@ onMounted(async () => {
           <span v-if="scannedPairing || lanSync.hostId" class="lan-sync-host-id">HTTPS · {{ scannedPairing?.tls.hostId || lanSync.hostId }}</span>
         </div>
       </div>
-      <div class="lan-sync-options-grid">
-        <label class="lan-sync-toggle">
+
+        <label class="lan-sync-toggle selection-option">
           <input v-model="lanSync.auto" type="checkbox">
           <span class="lan-sync-toggle-copy"><strong>自动同步</strong><small>连接可用时按计划同步</small></span>
         </label>
+      </details>
+      <div class="lan-sync-work-grid">
         <fieldset class="lan-category-options">
           <legend>同步类别</legend>
-          <label v-for="(label, category) in CATEGORY_LABELS" :key="category">
+          <label class="selection-option" v-for="(label, category) in CATEGORY_LABELS" :key="category">
             <input v-model="lanSync.categories" type="checkbox" :value="category" :disabled="Boolean(busy)">
             <span>{{ label }}</span>
             <span>{{ lanSync.effectiveCategories.includes(category) ? '上次已启用' : '上次未启用' }}</span>
           </label>
         </fieldset>
-      </div>
+      <div class="lan-sync-operation-column">
       <div class="update-actions lan-sync-actions">
         <button class="button" type="button" :disabled="busy === 'lan-sync-save'" @click="saveLanSync">
           <Save :size="16" />{{ busy === 'lan-sync-save' ? '保存并测试中…' : '保存并测试连接' }}
@@ -585,15 +588,16 @@ onMounted(async () => {
       <p v-else-if="lanSync.runtime.autoPaused" class="warning">自动同步已暂停，请处理上述问题后手动同步</p>
       <p v-else-if="lanSync.runtime.nextRetryAt" class="sync-retry-hint">连接异常，{{ formatSyncTime(lanSync.runtime.nextRetryAt) }} 自动重试</p>
       <p v-if="lanSync.runtime.lastError" class="warning">上次错误：{{ lanSync.runtime.lastError }}</p>
+      </div></div>
     </section>
 
     <LanQuestionBanks :key="lanSync.hostId" />
 
-    <section :ref="setSectionRef('catalog')" class="card update-source-card" data-update-section="catalog">
-      <div class="update-source-heading">
+    <details :open="route.query.section === 'catalog'" :ref="setSectionRef('catalog')" class="card update-source-card" data-update-section="catalog">
+      <summary class="update-source-heading">
         <span class="api-profile-icon"><Download :size="20" /></span>
         <div><h2>远程题库</h2></div>
-      </div>
+      </summary>
       <div class="field">
         <label for="android-catalog-url">远程题库目录 URL</label>
         <input id="android-catalog-url" v-model.trim="settings.question_bank_catalog_url" inputmode="url" placeholder="https://github.com/.../question-bank-catalog.json">
@@ -610,7 +614,7 @@ onMounted(async () => {
             </button>
           </div>
         </div>
-        <label v-for="item in questionBankCatalog.packages" :key="packageKey(item)" class="catalog-item">
+        <label v-for="item in questionBankCatalog.packages" :key="packageKey(item)" class="catalog-item selection-option">
           <input v-model="selectedPackages" type="checkbox" :value="packageKey(item)" :disabled="busy === 'catalog-install'">
           <span>
             <strong>{{ item.title }}</strong>
@@ -621,13 +625,13 @@ onMounted(async () => {
         </label>
         <p v-if="!questionBankCatalog.packages.length" class="diagnostic-empty">远程目录当前没有可安装题库。</p>
       </div>
-    </section>
+    </details>
 
-    <section :ref="setSectionRef('update')" class="card update-source-card" data-update-section="update">
-      <div class="update-source-heading">
+    <details :open="route.query.section === 'update'" :ref="setSectionRef('update')" class="card update-source-card" data-update-section="update">
+      <summary class="update-source-heading">
         <span class="api-profile-icon"><PackageCheck :size="20" /></span>
         <div><h2>程序更新</h2></div>
-      </div>
+      </summary>
       <button class="button secondary" type="button" :disabled="busy === 'app'" @click="checkApp"><RefreshCw :size="16" />检查程序更新</button>
       <div v-if="appUpdate" class="update-result">
         <span>当前版本 {{ appUpdate.current_version }}</span>
@@ -635,7 +639,7 @@ onMounted(async () => {
         <p v-if="appUpdate.manifest.releaseNotes">{{ appUpdate.manifest.releaseNotes }}</p>
         <button v-if="appUpdate.available" class="button" type="button" :disabled="busy === 'install'" @click="installApp"><Download :size="16" />下载、校验并安装</button>
       </div>
-    </section>
+    </details>
 
     <section :ref="setSectionRef('diagnostics')" class="card diagnostic-card" data-update-section="diagnostics">
       <div class="diagnostic-heading">
@@ -668,7 +672,6 @@ onMounted(async () => {
         </button>
       </div>
       <template v-if="databaseChannelEnabled">
-        <p class="diagnostic-meta">数据库副本含学习数据，仅在导出或分享时由你取走。</p>
         <div class="diagnostic-actions">
           <button class="button secondary" type="button" :disabled="busy === 'database-export'" @click="exportDatabaseCopy">
             <Save :size="16" />导出应用数据库副本
@@ -735,6 +738,10 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.lan-sync-work-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }
+.lan-sync-operation-column { min-width:0; }
+.sync-connection { margin-bottom:16px; }
+@media(max-width:720px) { .lan-sync-work-grid { grid-template-columns:minmax(0,1fr); } }
 .lan-sync-status > span, .lan-category-options span { min-width: 0; overflow-wrap: anywhere; }
 .update-source-heading > div { min-width: 0; }
 .lan-sync-connection-grid,.lan-sync-options-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-items:start; }

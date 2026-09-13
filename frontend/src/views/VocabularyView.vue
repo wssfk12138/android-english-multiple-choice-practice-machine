@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import VocabularyEnrichment from '../components/VocabularyEnrichment.vue'
+import VocabularyTerm from '../components/VocabularyTerm.vue'
+import VocabularyMemoryContent from '../components/VocabularyMemoryContent.vue'
 import { BookOpen, Check, ChevronDown, RefreshCw, Search, Star, Trash2 } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -88,22 +89,6 @@ function applyLoadedPage(result: any) {
 const reviewWord = computed(() => reviewItems.value[reviewIndex.value])
 const displayConfig = ref(loadVocabDisplayConfig())
 const expandedAll = ref(false)
-const enrichmentPending = ref(false)
-async function enrichSelected() {
-  if (!selected.value || enrichmentPending.value) return
-  enrichmentPending.value = true
-  const id = selected.value.id
-  try {
-    const result = await post(`/vocabulary/${id}/enrichment`)
-    if (selected.value?.id === id) selected.value = result
-    notice.value = (result as any).enrichment_status === 'ready' ? '词形和例句已补全，手动释义已保留' : '补全任务已保存，稍后可查看结果'
-  } catch (cause) { error.value = String(cause) }
-  finally {
-    enrichmentPending.value = false
-    startTranslationRefresh()
-  }
-}
-
 function isAndroidPortrait() {
   return document.documentElement.dataset.platform === 'android'
     && document.documentElement.dataset.orientation === 'portrait'
@@ -432,6 +417,11 @@ const listFilters = [
 
 const activeFilterLabel = computed(() => listFilters.find(item => item[0] === filter.value)?.[1] || '全部单词')
 const filtersExpanded = ref(false)
+function filterCount(key: string) {
+  if (key === 'all') return counts.value.total || 0
+  if (key === 'learning') return counts.value.learning ?? Math.max(0, (counts.value.total || 0) - (counts.value.mastered || 0))
+  return counts.value[key] || 0
+}
 </script>
 
 <template>
@@ -451,11 +441,11 @@ const filtersExpanded = ref(false)
         v-for="chip in statChips"
         :key="chip.key"
         class="vocab-stat-chip"
-        :class="{ active: filter === chip.key }"
+        :class="{ active: filter === chip.key }" :aria-pressed="filter === chip.key"
         type="button"
         @click="filter = chip.key"
       >
-        {{ chip.label }} <strong>{{ chip.count }}</strong>
+        <Check v-if="filter === chip.key" :size="14" aria-hidden="true" />{{ chip.label }} <strong>{{ chip.count }}</strong>
       </button>
     </div>
 
@@ -484,29 +474,17 @@ const filtersExpanded = ref(false)
           <button class="review-close" type="button" title="退出复习" aria-label="退出复习" :disabled="reviewSaving" @click="closeReview">×</button>
         </header>
         <div class="review-content">
-          <div class="review-term"><Star v-if="reviewWord.is_frequent" class="review-star" :size="22" aria-label="高频词" />{{ reviewWord.term }}</div>
+          <div class="review-term"><VocabularyTerm :term="reviewWord.term" :frequent="reviewWord.is_frequent" /></div>
           <div class="review-phonetic">{{ reviewWord.phonetic }}</div>
           <button v-if="!reveal" class="button secondary reveal-button" @click="reveal=true">显示释义和原句</button>
           <div v-else class="review-answer">
-            <section class="review-meaning-block">
-              <div class="review-meaning-heading"><small>常用释义</small><span v-if="reviewWord.part_of_speech" class="review-part-of-speech">{{ reviewWord.part_of_speech }}</span></div>
-              <strong>{{ reviewWord.common_meaning || reviewWord.contextual_meaning || '释义待补充' }}</strong>
-            </section>
-            <section v-if="displayConfig.contextual && reviewWord.contextual_meaning && reviewWord.contextual_meaning !== reviewWord.common_meaning" class="review-meaning-block">
-              <small>本句语境</small>
-              <p>{{ reviewWord.contextual_meaning }}</p>
-            </section>
-            <section v-if="reviewWord.latest_sentence && displayConfig.sentence" class="review-sentence-block">
-              <small>真题原句</small>
-              <blockquote>{{ reviewWord.latest_sentence }}</blockquote>
-            </section>
-            <VocabularyEnrichment :entry="reviewWord" :show-morphology="displayConfig.morphology" :show-sentence="displayConfig.sentence" />
+            <VocabularyMemoryContent :entry="reviewWord" :config="displayConfig" />
           </div>
         </div>
-        <footer v-if="reveal" class="review-actions">
-          <button class="button secondary" @click="rate('hard')">不认识</button>
-          <button class="button secondary" @click="rate('know')">认识</button>
-          <button class="button" @click="rate('fluent')">熟练</button>
+        <footer v-if="reveal" class="review-actions" :aria-busy="reviewSaving">
+          <button class="button secondary" :disabled="reviewSaving" @click="rate('hard')">不认识</button>
+          <button class="button secondary" :disabled="reviewSaving" @click="rate('know')">认识</button>
+          <button class="button" :disabled="reviewSaving" @click="rate('fluent')">熟练</button>
         </footer>
       </div>
       <div v-else class="card empty vocab-review-empty">
@@ -520,13 +498,13 @@ const filtersExpanded = ref(false)
         <aside class="vocab-filters card">
           <div class="search-field"><Search :size="16" /><input v-model="search" placeholder="搜索单词或释义"></div>
           <button class="vocab-filter-toggle" type="button" :aria-expanded="filtersExpanded" aria-controls="vocabulary-filter-options" @click="filtersExpanded = !filtersExpanded">
-            <span>筛选：<strong>{{ activeFilterLabel }}</strong></span>
+            <span>筛选：<strong>{{ activeFilterLabel }}</strong> · {{ filterCount(filter) }}</span>
             <ChevronDown :size="16" :class="{ rotated: filtersExpanded }" aria-hidden="true" />
           </button>
           <div v-if="filtersExpanded" id="vocabulary-filter-options" class="vocab-filter-options" role="group" aria-label="单词本筛选项">
-            <button v-for="item in listFilters" :key="item[0]" type="button" :class="{ active: filter === item[0] }" :aria-current="filter === item[0] ? 'true' : undefined" @click="filter = item[0]">
-              <span>{{ item[1] }}</span><Check v-if="filter === item[0]" :size="15" aria-hidden="true" />
-            </button>
+            <label v-for="item in listFilters" :key="item[0]" class="selection-option" :class="{ active: filter === item[0] }">
+              <input v-model="filter" type="radio" name="vocabulary-filter" :value="item[0]"><span>{{ item[1] }} · {{ filterCount(item[0]) }}</span>
+            </label>
           </div>
         </aside>
 
@@ -540,8 +518,8 @@ const filtersExpanded = ref(false)
             </button>
             <section v-if="selected?.id===word.id" class="portrait-vocab-detail" aria-label="单词详情">
               <div class="vocab-detail-head">
-                <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2>{{ selected.lemma || selected.term }}</h2><p>{{ selected.phonetic }}<span v-if="selected.part_of_speech">{{ selected.phonetic ? ' · ' : '' }}{{ selected.part_of_speech }}</span></p></div>
-                <div class="vocab-tools"><button class="button ghost" @click="expandedAll=!expandedAll">{{ expandedAll ? '收起' : '展开全部' }}</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" aria-label="删除单词" @click="removeEntry"><Trash2 :size="17" /></button></div>
+                <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2><VocabularyTerm :term="selected.lemma || selected.term" /></h2><p>{{ selected.phonetic }}<span v-if="selected.part_of_speech">{{ selected.phonetic ? ' · ' : '' }}{{ selected.part_of_speech }}</span></p></div>
+                <div class="vocab-tools"><button class="button ghost" @click="expandedAll=!expandedAll">{{ expandedAll ? '收起' : '显示全部栏目' }}</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" aria-label="删除单词" @click="removeEntry"><Trash2 :size="17" /></button></div>
               </div>
               <div v-if="!editing && selected.translation_status!=='ready'" class="vocab-pending-panel">
                 <RefreshCw :size="22" /><strong>{{ translationStatusText(selected.translation_status, true) }}</strong>
@@ -549,18 +527,9 @@ const filtersExpanded = ref(false)
                 <button v-if="selected.translation_status==='failed' || selected.translation_status==='pending'" class="button secondary" @click="retryTranslation">重试全部待翻译</button>
               </div>
               <template v-if="!editing && hasSelectedContent">
-                <VocabularyEnrichment :entry="selected" :show-morphology="displayConfig.morphology" :show-sentence="displayConfig.sentence || expandedAll" />
-                <div v-if="displayConfig.common_meaning || expandedAll" class="detail-section"><label>常用释义</label><strong>{{ selected.common_meaning || selected.contextual_meaning }}</strong></div>
-                <div v-if="selected.contextual_meaning && selected.contextual_meaning !== selected.common_meaning && (displayConfig.contextual || expandedAll)" class="detail-section"><label>本句语境</label><p>{{ selected.contextual_meaning }}</p></div>
-                <div v-if="selected.latest_sentence && (displayConfig.sentence || expandedAll)" class="detail-section"><label>真题原句</label><blockquote class="detail-sentence">{{ selected.latest_sentence }}</blockquote><small>{{ selected.occurrences?.length ? `${selected.occurrences[0].year || '未知年份'} · ${selected.occurrences[0].unit_title || selected.occurrences[0].unit_type || ''}` : '' }}</small></div>
-                <div v-if="selected.synonyms?.length && (displayConfig.synonyms || expandedAll)" class="detail-section discrimination-section"><label>同义词辨析</label><ul class="discrimination-list"><li v-for="item in selected.synonyms" :key="`ps-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}</span></li></ul></div>
-                <div v-if="selected.antonyms?.length && (displayConfig.antonyms || expandedAll)" class="detail-section discrimination-section"><label>反义词辨析</label><ul class="discrimination-list"><li v-for="item in selected.antonyms" :key="`pa-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}</span></li></ul></div>
-                <div v-if="(selected.local_similar?.length || selected.similar_forms?.length) && (displayConfig.similar_forms || expandedAll)" class="detail-section discrimination-section"><label>形近词辨析</label><ul class="discrimination-list"><li v-for="item in selected.local_similar" :key="`pl-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}<em class="source-tag">本地</em></span></li><li v-for="item in selected.similar_forms" :key="`pm-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}</span></li></ul></div>
-                <div v-if="selected.memory_hint && (displayConfig.memory_hint || expandedAll)" class="detail-section memory-hint"><label>记忆提示</label><p>{{ selected.memory_hint }}</p></div>
-                <div v-if="selected.note" class="detail-section"><label>我的笔记</label><p>{{ selected.note }}</p></div>
-                <p v-if="selected.enrichment_status === 'failed'" class="error vocab-enrich-error">补全失败：{{ selected.enrichment_error }}，可点击下方按钮重试。</p>
-                <p v-else-if="['queued','inflight'].includes(selected.enrichment_status)">词形与例句补全任务已保存，正在排队或处理中。</p>
-                <button class="button secondary" :disabled="enrichmentPending" @click="enrichSelected">{{ enrichmentPending ? '正在补全…' : '补全词形与例句' }}</button>
+                <VocabularyMemoryContent :entry="selected" :config="displayConfig" :expanded="expandedAll" />
+                <p v-if="selected.enrichment_status === 'failed'" class="error vocab-enrich-error">补全失败：{{ selected.enrichment_error }}</p>
+                <button v-if="selected.enrichment_status === 'failed'" class="button secondary" @click="retryTranslation">重试失败任务</button>
                 <div class="detail-actions"><button class="button secondary" @click="put(`/vocabulary/${selected.id}`,{manually_frequent:!selected.manually_frequent}).then(()=>load())"><Star :size="16" />{{ selected.manually_frequent ? '取消重点' : '标记重点' }}</button><button class="button" @click="put(`/vocabulary/${selected.id}`,{study_status:selected.study_status==='mastered'?'learning':'mastered'}).then(()=>load())"><Check :size="16" />{{ selected.study_status === 'mastered' ? '恢复学习' : '标记已掌握' }}</button></div>
               </template>
               <div v-else-if="editing" class="vocab-edit"><label>音标<input v-model="editForm.phonetic"></label><label>词性<input v-model="editForm.part_of_speech"></label><label>当前语境释义<textarea rows="3" v-model="editForm.contextual_meaning"></textarea></label><label>常用释义<textarea rows="3" v-model="editForm.common_meaning"></textarea></label><label>我的笔记<textarea rows="4" v-model="editForm.note"></textarea></label><div><button class="button" @click="saveEdit">保存修改</button><button class="button ghost" @click="editing=false">取消</button></div></div>
@@ -573,8 +542,8 @@ const filtersExpanded = ref(false)
 
       <section class="vocab-detail desktop-vocab-detail card" v-if="selected">
         <div class="vocab-detail-head">
-          <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2>{{ selected.lemma || selected.term }}</h2><p>{{ selected.phonetic }}<span v-if="selected.part_of_speech">{{ selected.phonetic ? ' · ' : '' }}{{ selected.part_of_speech }}</span></p></div>
-          <div class="vocab-tools"><button class="button ghost" @click="expandedAll=!expandedAll">{{ expandedAll ? '收起全部' : '展开全部' }}</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" @click="removeEntry"><Trash2 :size="17" /></button></div>
+          <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2><VocabularyTerm :term="selected.lemma || selected.term" /></h2><p>{{ selected.phonetic }}<span v-if="selected.part_of_speech">{{ selected.phonetic ? ' · ' : '' }}{{ selected.part_of_speech }}</span></p></div>
+          <div class="vocab-tools"><button class="button ghost" @click="expandedAll=!expandedAll">{{ expandedAll ? '收起全部' : '显示全部栏目' }}</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" @click="removeEntry"><Trash2 :size="17" /></button></div>
         </div>
         <div v-if="!editing && selected.translation_status!=='ready'" class="vocab-pending-panel">
           <RefreshCw :size="22" /><strong>{{ translationStatusText(selected.translation_status, true) }}</strong>
@@ -582,34 +551,9 @@ const filtersExpanded = ref(false)
           <button v-if="selected.translation_status==='failed' || selected.translation_status==='pending'" class="button secondary" @click="retryTranslation">重试全部待翻译</button>
         </div>
         <template v-if="!editing && hasSelectedContent">
-          <VocabularyEnrichment :entry="selected" :show-morphology="displayConfig.morphology" :show-sentence="displayConfig.sentence || expandedAll" />
-          <div v-if="displayConfig.common_meaning || expandedAll" class="detail-section"><label>常用释义</label><strong>{{ selected.common_meaning || selected.contextual_meaning }}</strong></div>
-          <div v-if="selected.contextual_meaning && selected.contextual_meaning !== selected.common_meaning && (displayConfig.contextual || expandedAll)" class="detail-section"><label>本句语境</label><p>{{ selected.contextual_meaning }}</p></div>
-          <div v-if="selected.latest_sentence && (displayConfig.sentence || expandedAll)" class="detail-section"><label>真题原句</label><blockquote class="detail-sentence">{{ selected.latest_sentence }}</blockquote><small>{{ selected.occurrences?.length ? `${selected.occurrences[0].year || '未知年份'} · ${selected.occurrences[0].unit_title || selected.occurrences[0].unit_type || ''}` : '' }}</small></div>
-          <div v-if="selected.synonyms?.length && (displayConfig.synonyms || expandedAll)" class="detail-section discrimination-section">
-            <label>同义词辨析</label>
-            <ul class="discrimination-list">
-              <li v-for="item in selected.synonyms" :key="`s-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}</span></li>
-            </ul>
-          </div>
-          <div v-if="selected.antonyms?.length && (displayConfig.antonyms || expandedAll)" class="detail-section discrimination-section">
-            <label>反义词辨析</label>
-            <ul class="discrimination-list">
-              <li v-for="item in selected.antonyms" :key="`a-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}</span></li>
-            </ul>
-          </div>
-          <div v-if="(selected.local_similar?.length || selected.similar_forms?.length) && (displayConfig.similar_forms || expandedAll)" class="detail-section discrimination-section">
-            <label>形近词辨析</label>
-            <ul class="discrimination-list">
-              <li v-for="item in selected.local_similar" :key="`l-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}<em class="source-tag">本地</em></span></li>
-              <li v-for="item in selected.similar_forms" :key="`m-${item.word}`"><strong>{{ item.word }}</strong><span>{{ item.note }}</span></li>
-            </ul>
-          </div>
-          <div v-if="selected.memory_hint && (displayConfig.memory_hint || expandedAll)" class="detail-section memory-hint"><label>记忆提示</label><p>{{ selected.memory_hint }}</p></div>
-          <div v-if="selected.note" class="detail-section"><label>我的笔记</label><p>{{ selected.note }}</p></div>
-          <p v-if="selected.enrichment_status === 'failed'" class="error vocab-enrich-error">补全失败：{{ selected.enrichment_error }}，可点击下方按钮重试。</p>
-          <p v-else-if="['queued','inflight'].includes(selected.enrichment_status)">词形与例句补全任务已保存，正在排队或处理中。</p>
-          <button class="button secondary" :disabled="enrichmentPending" @click="enrichSelected">{{ enrichmentPending ? '正在补全…' : '补全词形与例句' }}</button>
+                <VocabularyMemoryContent :entry="selected" :config="displayConfig" :expanded="expandedAll" />
+                <p v-if="selected.enrichment_status === 'failed'" class="error vocab-enrich-error">补全失败：{{ selected.enrichment_error }}</p>
+                <button v-if="selected.enrichment_status === 'failed'" class="button secondary" @click="retryTranslation">重试失败任务</button>
           <div class="detail-actions">
             <button class="button secondary" @click="put(`/vocabulary/${selected.id}`,{manually_frequent:!selected.manually_frequent}).then(()=>load())"><Star :size="16" />{{ selected.manually_frequent ? '取消重点' : '标记重点' }}</button>
             <button class="button" @click="put(`/vocabulary/${selected.id}`,{study_status:selected.study_status==='mastered'?'learning':'mastered'}).then(()=>load())"><Check :size="16" />{{ selected.study_status === 'mastered' ? '恢复学习' : '标记已掌握' }}</button>

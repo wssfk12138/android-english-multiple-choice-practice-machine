@@ -111,6 +111,11 @@ try {
         elements.forEach((element, index) => { element.style.fontSize = `${sizes[index] * fontScale}px` })
       }, { width, height, fontScale })
 
+      for (const advanced of await page.locator('.api-advanced-section').all()) {
+        assert.equal(await advanced.getAttribute('open'),null)
+        await advanced.locator('summary').click()
+        assert.equal(await advanced.evaluate(el=>el.open),true)
+      }
       const geometry = await page.evaluate(() => {
         const visible = element => {
           const style = getComputedStyle(element)

@@ -138,7 +138,7 @@ async function deleteSelected() {
 <template>
   <div class="page">
     <div class="page-head"><div><h1>按年份练习</h1></div></div>
-    <QuestionBankSwitcher class="library-bank-switcher" @changed="loadPapers">
+    <QuestionBankSwitcher :show-library-link="true" class="library-bank-switcher" @changed="loadPapers">
       <template #actions>
         <span v-if="batchMode" class="bank-batch-status">已选 {{ selectedIds.size }} 套</span>
         <button v-if="!batchMode" class="button secondary compact" type="button" @click="batchMode=true"><CheckSquare :size="16" />批量管理</button>
@@ -161,6 +161,7 @@ async function deleteSelected() {
         @pointerleave="cancelHold"
         @click="togglePaper(paper.id)"
       >
+        <label v-if="batchMode" class="selection-option" @click.stop @pointerdown.stop><input type="checkbox" :checked="selectedIds.has(paper.id)" aria-label="选择题库" @change="togglePaper(paper.id)"><span>选择题库</span></label>
         <div class="paper-card-head"><span v-if="paper.active_session_id" class="pill">进行中 · 已做 {{ paper.active_done }}/{{ paper.unit_count }} 篇</span><span v-else-if="paper.last_score != null" class="pill">{{ scoreText(paper) }}</span><span v-else></span><BookOpen :size="20" /></div>
         <h3>{{ paper.title }}</h3>
         <p class="lead">{{ paper.subject }} · {{ paper.unit_count }}篇 · {{ paper.question_count }}题</p>

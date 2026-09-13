@@ -82,6 +82,12 @@ try {
     await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort())
     await page.goto(server.resolvedUrls.local[0] + '__s6')
     await page.locator('.named-keys').waitFor()
+    if (android) for (const selector of ['.sync-connection','[data-update-section=catalog]','[data-update-section=update]']) {
+      const panel=page.locator(selector)
+      assert.equal(await panel.evaluate(el=>el.open),false)
+      await panel.locator(':scope > summary').click()
+      assert.equal(await panel.evaluate(el=>el.open),true)
+    }
     await page.evaluate(dark => document.documentElement.classList.toggle('dark',dark), dark)
     if (android) await page.getByRole('button',{name:'检查电脑共享题库',exact:true}).click()
     else await page.locator('.lan-permissions').waitFor()

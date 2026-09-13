@@ -54,7 +54,7 @@ async function download() {
     </div>
     <p v-if="error" class="warning" role="alert">{{ error }}</p>
     <template v-if="catalog">
-      <label v-for="item in catalog.packages" :key="item.packageId" class="bank">
+      <label v-for="item in catalog.packages" :key="item.packageId" class="bank selection-option">
         <input v-model="selected" type="checkbox" :value="item.packageId" :disabled="busy">
         <span><strong>{{ item.title }}</strong><small>{{ item.years.join('、') }} · {{ Math.ceil(item.size / 1024) }} KiB</small><small>{{ results[item.packageId] || item.license }}</small></span>
       </label>

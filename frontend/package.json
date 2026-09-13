@@ -79,6 +79,7 @@
     "test:vocabulary-enrichment-jobs": "node tests/vocabulary-enrichment-jobs.mjs",
     "test:vocabulary-identity": "node --experimental-strip-types tests/vocabulary-identity.mjs",
     "test:vocabulary-layout": "node tests/vocabulary-layout.mjs",
+    "test:ui-omissions": "node tests/ui-omissions.mjs",
     "test:vocabulary-model-validation": "node tests/vocabulary-model-validation.mjs",
     "test:vocabulary-review-refresh": "node tests/vocabulary-review-refresh.mjs",
     "test:vocabulary-review-revision": "node tests/vocabulary-review-revision.mjs",

@@ -17,6 +17,7 @@ import {
   Trash2,
 } from 'lucide-vue-next'
 import { computed, onMounted, reactive, ref } from 'vue'
+import { loadVocabularyEnrichment, saveVocabularyEnrichment } from '../services/vocabularyTranslationConfig'
 import {
   VOCAB_DISPLAY_OPTIONS,
   loadVocabDisplayConfig,
@@ -24,6 +25,7 @@ import {
   type VocabDisplayKey,
 } from '../services/vocabularyDisplayConfig'
 
+const enrichmentEnabled = ref(loadVocabularyEnrichment())
 const dark = ref(false)
 const vocabDisplayOpen = ref(false)
 const vocabDisplayConfig = reactive<Record<VocabDisplayKey, boolean>>(loadVocabDisplayConfig())
@@ -54,7 +56,7 @@ const groups = [
 ] as const
 
 const vocabDisplaySummary = computed(() => {
-  const enabled = VOCAB_DISPLAY_OPTIONS.filter(option => vocabDisplayConfig[option.key])
+  const enabled = VOCAB_DISPLAY_OPTIONS.filter(option => option.key === 'common_meaning' || vocabDisplayConfig[option.key])
   return enabled.length ? enabled.map(option => option.label).join('、') : '已全部隐藏'
 })
 
@@ -99,14 +101,16 @@ onMounted(() => {
             <ChevronDown :size="19" class="settings-hub-chevron" :class="{ open: vocabDisplayOpen }" />
           </button>
           <div v-if="vocabDisplayOpen" class="settings-vocab-display-options">
-            <label v-for="option in VOCAB_DISPLAY_OPTIONS" :key="option.key">
-              <input type="checkbox" :checked="vocabDisplayConfig[option.key]" @change="toggleVocabDisplay(option.key)">
+            <label v-for="option in VOCAB_DISPLAY_OPTIONS" :key="option.key" class="selection-option">
+              <input type="checkbox" :checked="option.key === 'common_meaning' || vocabDisplayConfig[option.key]" :disabled="option.key === 'common_meaning'" @change="toggleVocabDisplay(option.key)">
               <span>{{ option.label }}</span>
             </label>
           </div>
         </div>
       </div>
     </section>
+
+    <section class="settings-hub-group"><h2 class="settings-hub-group-title">单词翻译</h2><label class="selection-option"><input v-model="enrichmentEnabled" type="checkbox" @change="saveVocabularyEnrichment(enrichmentEnabled)"><span>翻译时补全词形与例句</span></label></section>
 
     <section v-for="group in groups" :key="group.title" class="settings-hub-group" :aria-labelledby="`hub-${group.title}`">
       <h2 :id="`hub-${group.title}`" class="settings-hub-group-title">{{ group.title }}</h2>

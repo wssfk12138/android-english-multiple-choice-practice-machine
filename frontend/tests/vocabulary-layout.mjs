@@ -30,10 +30,14 @@ function fixture() {
   globalThis.fixtureWords = words
   globalThis.mockApi = async (path, body) => {
     if (path === '/vocabulary/translation-runs') return { workerStarted: false }
-    if (path.startsWith('/vocabulary?')) return { items: words, counts: { total: 3, frequent: 0, mastered: 0, pending: 0, review: 3 } }
+    if (path.startsWith('/vocabulary?')) return { items: words.filter(word=>!path.includes('status=review')||!word.rated), counts: { total: 3, frequent: 0, mastered: 0, pending: 0, review: 3 } }
     const match = path.match(/^\/vocabulary\/(\d+)(?:\/review)?$/)
     if (match) {
       const word = words.find(word => word.id === Number(match[1]))
+      if (body && path.endsWith('/review')) {
+        await new Promise(resolve=>{globalThis.releaseRating=resolve})
+        word.rated=true
+      }
       return body ? Object.assign(word, body) : { ...word }
     }
     throw new Error('Unexpected synthetic API: ' + path)
@@ -110,7 +114,7 @@ let cases=0
 try {
   await server.listen()
   browser=await chromium.launch({headless:true})
-  for (const [width,height] of [[1280,800],[1120,700],[960,600],[800,1280],[390,844]]) for (const dark of [false,true]) {
+  for (const [width,height] of [[1280,800],[1120,700],[960,600],[800,1280],[390,844],[844,390]]) for (const dark of [false,true]) for (const fontScale of [1,1.35]) {
     const page=await browser.newPage({viewport:{width,height},colorScheme:dark?'dark':'light'})
     const errors=[]
     page.on('pageerror',error=>errors.push(error.message))
@@ -118,19 +122,25 @@ try {
     await page.addInitScript(()=>Object.defineProperty(screen.orientation,'type',{get:()=>innerHeight>innerWidth?'portrait-primary':'landscape-primary'}))
     await page.goto(server.resolvedUrls.local[0]+'__vocabulary-layout')
     await page.locator('.vocab-list-item').first().waitFor()
-    const label=width+'x'+height+'-'+(dark?'dark':'light')
+    await page.evaluate(scale=>{document.documentElement.style.fontSize=16*scale+'px'},fontScale)
+    if(fontScale===1.35) await page.addStyleTag({content:'.vocab-detail-head h2 {font-size:40.5px!important}.review-term {font-size:64.8px!important}'})
+    const label=width+'x'+height+'-'+(dark?'dark':'light')+'-font-'+fontScale
     const filterToggle=page.locator('.vocab-filter-toggle')
     assert.equal(await filterToggle.getAttribute('aria-expanded'),'false')
     await filterToggle.click()
-    await page.locator('.vocab-filter-options button').filter({hasText:'已掌握'}).click()
+    await page.locator('.vocab-filter-options label').filter({hasText:'已掌握'}).click()
     assert.match(await filterToggle.innerText(),/已掌握/)
-    assert.equal(await page.locator('.vocab-filter-options [aria-current="true"]').innerText(),'已掌握')
+    assert.equal(await page.getByRole('radio',{name:'已掌握'}).isChecked(),true)
+    assert.match(await filterToggle.innerText(),/0/)
     await filterToggle.click()
     assert.equal(await page.locator('.vocab-filter-options').count(),0)
     for (const word of ['evidence',longWord,veryLongWord]) {
       // 首次进入不再自动展开第一个词条（窄屏信息架构），由用例显式点击目标词。
       await page.locator('.vocab-list-item').filter({hasText:word}).click()
       await page.locator('.vocab-detail-head h2:visible').scrollIntoViewIfNeeded()
+      await page.waitForFunction(()=>[...document.querySelectorAll('.vocab-detail-head h2 .vocabulary-term-fit')].filter(el=>el.clientWidth).every(el=>el.scrollWidth<=el.clientWidth+1))
+      const titleLine=await page.locator('.vocab-detail-head h2:visible .vocabulary-term-text').evaluate(el=>({height:el.getBoundingClientRect().height,line:parseFloat(getComputedStyle(el).lineHeight)}))
+      assert.ok(titleLine.height <= titleLine.line+1, 'long word remains on one line')
       const measured=await inspectDetail(page)
       evidence.push({label,word,...measured})
       if(output) await page.screenshot({path:join(output,label+'-'+word+'.png')})
@@ -151,8 +161,8 @@ try {
     for (const state of ['hidden','revealed']) {
       if(state==='revealed') await page.locator('.reveal-button').click()
       if(state==='revealed') {
-        assert.equal(await page.locator('.review-answer > section').first().getAttribute('class'),'review-meaning-block')
-        assert.equal(await page.locator('.review-part-of-speech').innerText(),'n.')
+        assert.equal(await page.locator('.review-answer .review-meaning-block').first().getAttribute('class'),'review-meaning-block detail-section')
+        assert.equal(await page.locator('.review-answer .review-part-of-speech').innerText(),'n.')
         assert.deepEqual(await page.locator('.review-actions button').allTextContents(),['不认识','认识','熟练'])
         const tops=await page.locator('.review-actions button').evaluateAll(buttons=>buttons.map(button=>button.getBoundingClientRect().top))
         assert.ok(Math.max(...tops)-Math.min(...tops)<2,'rating buttons stay in one row')
@@ -160,7 +170,7 @@ try {
       const measured=await inspectReview(page)
       evidence.push({label,state,...measured})
       if(output) await page.screenshot({path:join(output,label+'-compact-'+state+'.png')})
-      if(width>height) {
+      if(width>height && height>=600 && fontScale===1) {
         assert.ok(measured.card.width<=720, 'landscape review uses desktop card width')
         assert.ok(measured.card.top>=16&&measured.card.bottom<=height-16, 'review leaves space around its border')
         assert.ok(Math.abs(measured.card.left-(width-measured.card.width)/2)<2, 'review card is centered')
@@ -174,10 +184,38 @@ try {
       }
       cases++
     }
+    const layers=page.locator('.review-answer .memory-layer')
+    if (width<=900 || height>width) {
+      await layers.nth(0).locator('summary').click()
+      await layers.nth(1).locator('summary').click()
+      await page.waitForFunction(()=>document.querySelectorAll('.review-answer details[open]').length===1)
+    }
+    const before=await page.locator('.review-actions button').evaluateAll(items=>items.map(el=>({x:el.offsetLeft,y:el.offsetTop,width:el.offsetWidth})))
+    await page.getByRole('button',{name:'认识',exact:true}).click()
+    await page.waitForFunction(()=>typeof globalThis.releaseRating==='function')
+    assert.equal(await page.locator('.review-actions').getAttribute('aria-busy'),'true')
+    assert.equal(await page.locator('.review-actions button:disabled').count(),3)
+    assert.deepEqual(await page.locator('.review-actions button').allTextContents(),['不认识','认识','熟练'])
+    assert.deepEqual(await page.locator('.review-actions button').evaluateAll(items=>items.map(el=>({x:el.offsetLeft,y:el.offsetTop,width:el.offsetWidth}))),before)
+    await page.evaluate(()=>globalThis.releaseRating())
+    await page.waitForFunction(()=>document.querySelector('.review-term')?.textContent.includes('interdisciplinary'))
+    await page.locator('.reveal-button').click()
+    // Rotate with long title and multiple open layers, then narrow to one layer.
+    if(width===1280 && !dark && fontScale===1) {
+      await layers.nth(0).locator('summary').click()
+      await layers.nth(1).locator('summary').click()
+      await page.waitForFunction(()=>document.querySelectorAll('.review-answer details[open]').length===2)
+      await page.setViewportSize({width:390,height:844})
+      await page.waitForFunction(()=>document.querySelectorAll('.review-answer details[open]').length===1)
+      await page.waitForFunction(()=>{const el=document.querySelector('.review-term .vocabulary-term-fit');return el.scrollWidth<=el.clientWidth+1})
+      await page.setViewportSize({width,height})
+    }
     await page.getByRole('button',{name:'退出复习',exact:true}).click()
     await page.evaluate(()=>{
+      fixtureWords[0].rated=false
       fixtureWords[0].common_meaning='Synthetic long definition for layout regression. '.repeat(80)
       fixtureWords[0].latest_sentence=fixtureWords[0].latest_sentence.repeat(30)
+      for (const word of fixtureWords) word.common_meaning=fixtureWords[0].common_meaning
     })
     for (const kind of ['scheduled','reinforcement']) {
       if(kind==='scheduled') await page.locator('.page-head button').click()

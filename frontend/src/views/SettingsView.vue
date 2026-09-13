@@ -448,8 +448,8 @@ onMounted(() => {
               </label>
             </section>
 
-            <section class="api-detail-section api-advanced-section" aria-labelledby="api-advanced-title">
-              <h3 id="api-advanced-title">高级参数</h3>
+            <details class="api-detail-section api-advanced-section">
+              <summary>高级参数与系统提示词</summary>
               <div class="grid grid-2">
                 <div class="field"><label for="profile-temperature">Temperature</label><input id="profile-temperature" v-model.number="profile.temperature" type="number" min="0" max="2" step=".1"></div>
                 <div class="field">
@@ -463,7 +463,7 @@ onMounted(() => {
                 <p class="field-hint">Temperature 越低越稳定，判分、题库导入和单词翻译建议 0.2–0.5。</p>
                 <p class="field-hint">长任务没有返回正文时，请重试或切换模型/API 配置。</p>
               </div>
-            </section>
+            </details>
           </div>
 
           <section class="api-detail-section" aria-labelledby="api-manage-title">

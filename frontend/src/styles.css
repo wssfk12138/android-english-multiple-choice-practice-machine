@@ -6925,3 +6925,30 @@ input[type="file"]::file-selector-button {
 @media (min-width: 600px) {
   .ai-reasoning-label { display: inline; }
 }
+
+/* Shared selection states for filters and catalogs. */
+.selection-option { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; min-height:40px; border:1px solid var(--line); border-radius:8px; background:var(--surface-solid); color:var(--ink); cursor:pointer; }
+.selection-option:has(input:checked) { background:var(--primary-soft); border-color:var(--primary); }
+.selection-option:has(input:disabled) { opacity:.55; cursor:default; }
+.selection-option:focus-within { outline:3px solid var(--focus); outline-offset:2px; }
+.selection-option input:is([type=checkbox],[type=radio]) { accent-color:var(--primary); flex:0 0 18px; width:18px; height:18px; cursor:pointer; }
+.selection-option input:is([type=checkbox],[type=radio]):disabled { opacity:.55; cursor:default; }
+.vocab-filter-options>.selection-option { flex:1 1 auto; }
+details>summary { cursor:pointer; min-height:44px; align-content:center; font-weight:600; }
+.api-advanced-section>summary { margin-bottom:12px; }
+.vocabulary-review-card .review-actions[aria-busy=true] { opacity:.65; }
+.vocab-detail .detail-actions,.portrait-vocab-detail .detail-actions { position:sticky; bottom:0; z-index:2; padding-block:12px; background:var(--surface-solid); }
+html[data-platform=android] .library-bank-switcher .bank-switcher-main { display:grid; grid-template-columns:minmax(160px,2fr) repeat(4,minmax(0,1fr)); }
+html[data-platform=android] .library-bank-switcher .bank-switcher-main>* { min-width:0; width:auto; }
+@media(max-width:900px),(orientation:portrait) {
+ html[data-platform=android] .library-bank-switcher .bank-switcher-main { grid-template-columns:repeat(4,minmax(0,1fr)); }
+ html[data-platform=android] .library-bank-switcher .bank-switcher-main>.option-sheet-trigger { grid-column:1/-1; }
+ html[data-platform=android] .library-bank-switcher .bank-switcher-main>.button { padding:8px 3px; font-size:.85rem; }
+ html[data-platform=android] .library-bank-switcher .bank-switcher-main>.button svg { display:none; }
+}
+
+html[data-platform=android] .vocab-detail-head > div:first-child { min-width:0; max-width:100%; }
+@media(max-width:900px),(orientation:portrait) {
+ html[data-platform=android] .vocab-detail-head { flex-wrap:wrap; }
+ html[data-platform=android] .vocab-detail-head > div:first-child { flex:1 1 100%; }
+}

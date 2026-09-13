@@ -33,7 +33,7 @@ const markup = String.raw`<!doctype html><html data-platform="android"><head><me
   </div></div></div></main>
   <main class="page"><div class="bank-switcher library-bank-switcher"><div class="bank-switcher-main">
     <button class="option-sheet-trigger"><span class="option-sheet-value">当前题库</span><span>⌄</span></button>
-    <button class="button ghost compact">管理</button><a class="button ghost compact">回收站</a><button class="button secondary compact">批量管理</button>
+    <button class="button ghost compact">管理</button><a class="button ghost compact">回收站</a><a class="button ghost compact bank-library-link">查看全部题库</a><button class="button secondary compact">批量管理</button>
   </div></div></main>
 </body></html>`
 
@@ -59,11 +59,11 @@ try {
       }
     })
     assert.equal(measured.dashboard.length, 4, `dashboard actions visible at ${width}x${height}`)
-    assert.equal(measured.library.length, 4, `library actions visible at ${width}x${height}`)
+    assert.equal(measured.library.length, 5, `library actions visible at ${width}x${height}`)
     assert.ok(measured.dashboard.every(box => box.left >= 0 && box.right <= measured.bodyWidth + 1))
     assert.ok(measured.library.every(box => box.left >= 0 && box.right <= measured.bodyWidth + 1))
     assert.equal(measured.scrollWidth, measured.bodyWidth, `no horizontal overflow at ${width}x${height}`)
-    if (width >= 800) {
+    if (orientation === 'landscape') {
       const center = box => (box.top + box.bottom) / 2
       assert.ok(Math.max(...measured.library.map(center)) - Math.min(...measured.library.map(center)) < 3, `library controls share one row at ${width}x${height}: ${JSON.stringify(measured.library)}`)
     }
