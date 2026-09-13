@@ -110,7 +110,7 @@ let cases=0
 try {
   await server.listen()
   browser=await chromium.launch({headless:true})
-  for (const [width,height] of [[1280,800],[1120,700],[960,600],[800,1280]]) for (const dark of [false,true]) {
+  for (const [width,height] of [[1280,800],[1120,700],[960,600],[800,1280],[390,844]]) for (const dark of [false,true]) {
     const page=await browser.newPage({viewport:{width,height},colorScheme:dark?'dark':'light'})
     const errors=[]
     page.on('pageerror',error=>errors.push(error.message))
@@ -119,6 +119,14 @@ try {
     await page.goto(server.resolvedUrls.local[0]+'__vocabulary-layout')
     await page.locator('.vocab-list-item').first().waitFor()
     const label=width+'x'+height+'-'+(dark?'dark':'light')
+    const filterToggle=page.locator('.vocab-filter-toggle')
+    assert.equal(await filterToggle.getAttribute('aria-expanded'),'false')
+    await filterToggle.click()
+    await page.locator('.vocab-filter-options button').filter({hasText:'已掌握'}).click()
+    assert.match(await filterToggle.innerText(),/已掌握/)
+    assert.equal(await page.locator('.vocab-filter-options [aria-current="true"]').innerText(),'已掌握')
+    await filterToggle.click()
+    assert.equal(await page.locator('.vocab-filter-options').count(),0)
     for (const word of ['evidence',longWord,veryLongWord]) {
       // 首次进入不再自动展开第一个词条（窄屏信息架构），由用例显式点击目标词。
       await page.locator('.vocab-list-item').filter({hasText:word}).click()
@@ -142,6 +150,13 @@ try {
     await page.locator('.page-head button').click()
     for (const state of ['hidden','revealed']) {
       if(state==='revealed') await page.locator('.reveal-button').click()
+      if(state==='revealed') {
+        assert.equal(await page.locator('.review-answer > section').first().getAttribute('class'),'review-meaning-block')
+        assert.equal(await page.locator('.review-part-of-speech').innerText(),'n.')
+        assert.deepEqual(await page.locator('.review-actions button').allTextContents(),['不认识','认识','熟练'])
+        const tops=await page.locator('.review-actions button').evaluateAll(buttons=>buttons.map(button=>button.getBoundingClientRect().top))
+        assert.ok(Math.max(...tops)-Math.min(...tops)<2,'rating buttons stay in one row')
+      }
       const measured=await inspectReview(page)
       evidence.push({label,state,...measured})
       if(output) await page.screenshot({path:join(output,label+'-compact-'+state+'.png')})

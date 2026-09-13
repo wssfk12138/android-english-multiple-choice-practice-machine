@@ -40,7 +40,8 @@ for (const label of decorativeEyebrows) assert.ok(!source.includes(label), label
 
 assert.ok(!library.includes('长按试卷或点击“批量管理”'))
 assert.ok(!library.includes('完成整年45道客观题后统一判分，中途自动保存。'))
-assert.ok(library.includes('v-if="batchMode" class="lead">已选择 {{ selectedIds.size }} 套试卷'))
+assert.ok(library.includes('v-if="batchMode" class="bank-batch-status">已选 {{ selectedIds.size }} 套'))
+assert.ok(library.includes('<template #actions>'))
 assert.ok(source.includes('class="eyebrow">{{ activeUnit.year }} · {{ activeUnit.title }}'))
 assert.ok(source.includes('v-if="selected.is_frequent" class="eyebrow">高频词'))
 

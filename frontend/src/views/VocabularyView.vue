@@ -429,6 +429,9 @@ const listFilters = [
   ['mastered', '已掌握'],
   ['pending', '等待翻译'],
 ] as const
+
+const activeFilterLabel = computed(() => listFilters.find(item => item[0] === filter.value)?.[1] || '全部单词')
+const filtersExpanded = ref(false)
 </script>
 
 <template>
@@ -485,10 +488,9 @@ const listFilters = [
           <div class="review-phonetic">{{ reviewWord.phonetic }}</div>
           <button v-if="!reveal" class="button secondary reveal-button" @click="reveal=true">显示释义和原句</button>
           <div v-else class="review-answer">
-            <VocabularyEnrichment :entry="reviewWord" :show-morphology="displayConfig.morphology" :show-sentence="displayConfig.sentence" />
             <section class="review-meaning-block">
-              <small>常用释义</small>
-              <strong>{{ reviewWord.common_meaning || reviewWord.contextual_meaning }}</strong>
+              <div class="review-meaning-heading"><small>常用释义</small><span v-if="reviewWord.part_of_speech" class="review-part-of-speech">{{ reviewWord.part_of_speech }}</span></div>
+              <strong>{{ reviewWord.common_meaning || reviewWord.contextual_meaning || '释义待补充' }}</strong>
             </section>
             <section v-if="displayConfig.contextual && reviewWord.contextual_meaning && reviewWord.contextual_meaning !== reviewWord.common_meaning" class="review-meaning-block">
               <small>本句语境</small>
@@ -498,10 +500,11 @@ const listFilters = [
               <small>真题原句</small>
               <blockquote>{{ reviewWord.latest_sentence }}</blockquote>
             </section>
+            <VocabularyEnrichment :entry="reviewWord" :show-morphology="displayConfig.morphology" :show-sentence="displayConfig.sentence" />
           </div>
         </div>
         <footer v-if="reveal" class="review-actions">
-          <button class="button secondary" @click="rate('hard')">困难</button>
+          <button class="button secondary" @click="rate('hard')">不认识</button>
           <button class="button secondary" @click="rate('know')">认识</button>
           <button class="button" @click="rate('fluent')">熟练</button>
         </footer>
@@ -516,7 +519,15 @@ const listFilters = [
       <div class="vocab-list-column">
         <aside class="vocab-filters card">
           <div class="search-field"><Search :size="16" /><input v-model="search" placeholder="搜索单词或释义"></div>
-          <button v-for="item in listFilters" :key="item[0]" :class="{active:filter===item[0]}" @click="filter=item[0]">{{ item[1] }}</button>
+          <button class="vocab-filter-toggle" type="button" :aria-expanded="filtersExpanded" aria-controls="vocabulary-filter-options" @click="filtersExpanded = !filtersExpanded">
+            <span>筛选：<strong>{{ activeFilterLabel }}</strong></span>
+            <ChevronDown :size="16" :class="{ rotated: filtersExpanded }" aria-hidden="true" />
+          </button>
+          <div v-if="filtersExpanded" id="vocabulary-filter-options" class="vocab-filter-options" role="group" aria-label="单词本筛选项">
+            <button v-for="item in listFilters" :key="item[0]" type="button" :class="{ active: filter === item[0] }" :aria-current="filter === item[0] ? 'true' : undefined" @click="filter = item[0]">
+              <span>{{ item[1] }}</span><Check v-if="filter === item[0]" :size="15" aria-hidden="true" />
+            </button>
+          </div>
         </aside>
 
         <section class="vocab-list card">
@@ -667,7 +678,12 @@ const listFilters = [
 .vocab-stat-chip strong { color: var(--ink); font-weight: 650; }
 .vocab-stat-chip.active { border-color: color-mix(in srgb, var(--primary) 45%, var(--line)); background: var(--primary-soft); color: var(--ink); }
 .vocab-star { color: #c08a3e; flex: none; }
+.vocab-detail-head > div:first-child { min-width: 0; }
+.vocab-detail-head h2 { overflow-wrap: anywhere; }
 .review-star { color: #c08a3e; }
+.review-meaning-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.review-part-of-speech { padding: 2px 8px; border-radius: 6px; background: var(--primary-soft); color: var(--ink); font-size: 13px; line-height: 1.5; }
+.review-answer .review-meaning-block > strong { display: block; line-height: 1.65; overflow-wrap: anywhere; }
 .detail-sentence { margin: 0; font-family: Cambria, Georgia, serif; font-size: 16px; line-height: 1.68; overflow-wrap: anywhere; white-space: normal; }
 .vocab-enrich-error { white-space: normal; overflow-wrap: anywhere; line-height: 1.7; }
 

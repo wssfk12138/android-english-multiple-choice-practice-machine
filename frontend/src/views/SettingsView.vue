@@ -356,10 +356,12 @@ onMounted(() => {
           <div class="field"><label for="new-profile-model">默认模型（可稍后同步选择）</label><input id="new-profile-model" v-model.trim="newProfile.default_model" placeholder="例如：qwen3:8b"></div>
           <div class="field"><label for="new-profile-url">API Base URL</label><input id="new-profile-url" v-model.trim="newProfile.base_url" :placeholder="adapterDefinition(newProfile).baseUrlPlaceholder"><small>请求端点：{{ endpointPreview(newProfile) }}</small></div>
         </div>
-        <div class="field"><label for="new-profile-key">API Key</label><input id="new-profile-key" v-model="newProfile.api_key" type="password" placeholder="本地接口通常可留空"></div>
-        <div class="field">
-          <label>默认推理强度</label>
-          <OptionSheet v-model="newProfile.reasoning_effort" :items="reasoningItems(newProfile)" title="选择推理强度" />
+        <div class="grid grid-2">
+          <div class="field"><label for="new-profile-key">API Key</label><input id="new-profile-key" v-model="newProfile.api_key" type="password" placeholder="本地接口通常可留空"></div>
+          <div class="field">
+            <label>默认推理强度</label>
+            <OptionSheet v-model="newProfile.reasoning_effort" :items="reasoningItems(newProfile)" title="选择推理强度" />
+          </div>
         </div>
         <div class="api-create-actions">
           <button class="button secondary" type="button" @click="creating=false">取消</button>
@@ -426,41 +428,43 @@ onMounted(() => {
             </div>
           </section>
 
-          <section class="api-detail-section" aria-labelledby="api-model-title">
-            <h3 id="api-model-title">默认模型</h3>
-            <div class="field">
-              <label>默认模型</label>
-              <OptionSheet
-                v-model="profile.default_model"
-                :items="modelItems(profile)"
-                title="选择默认模型"
-                searchable
-                :placeholder="profile.models.length ? '请选择默认模型' : '还没有模型，请先同步模型'"
-              />
-              <small v-if="!profile.models.length">保存配置后点击下方“同步模型”获取模型列表。</small>
-            </div>
-          </section>
-
-          <section class="api-detail-section" aria-labelledby="api-advanced-title">
-            <h3 id="api-advanced-title">高级参数</h3>
-            <div class="grid grid-2">
-              <div class="field"><label for="profile-temperature">Temperature</label><input id="profile-temperature" v-model.number="profile.temperature" type="number" min="0" max="2" step=".1"></div>
+          <div class="api-model-setup-grid">
+            <section class="api-detail-section api-model-default-section" aria-labelledby="api-model-title">
+              <h3 id="api-model-title">默认模型</h3>
               <div class="field">
-                <label>默认推理强度</label>
-                <OptionSheet v-model="profile.reasoning_effort" :items="reasoningItems(profile)" title="选择推理强度" />
-                <small v-if="!adapterDefinition(profile).supportsReasoningEffort">该协议不发送推理强度，已选值会保留。</small>
+                <label>默认模型</label>
+                <OptionSheet
+                  v-model="profile.default_model"
+                  :items="modelItems(profile)"
+                  title="选择默认模型"
+                  searchable
+                  :placeholder="profile.models.length ? '请选择默认模型' : '还没有模型，请先同步模型'"
+                />
+                <small v-if="!profile.models.length">保存配置后点击下方“同步模型”获取模型列表。</small>
               </div>
-            </div>
-            <div class="api-profile-hints">
-              <p class="field-hint">Temperature 控制回答的随机性与创造性：值越低越稳定、越适合判分和事实类任务（错题分析、题库导入、单词翻译建议 0.2–0.5）；越高越发散，适合头脑风暴。</p>
-              <p class="field-hint">所有模型场景均由供应商决定最大输出长度；若长任务没有返回正文，程序会提示重试或切换模型/API 配置。</p>
-            </div>
-            <div class="field"><label for="profile-prompt">附加系统提示词</label><textarea id="profile-prompt" v-model="profile.system_prompt" rows="3" placeholder="对该 API 下的模型统一生效"></textarea></div>
-            <label class="default-profile-check">
-              <input v-model="profile.is_default" type="checkbox" :disabled="profile.is_default">
-              设为默认 API（错题分析、单词翻译和题库校正会优先使用它）
-            </label>
-          </section>
+              <label class="default-profile-check">
+                <input v-model="profile.is_default" type="checkbox" :disabled="profile.is_default">
+                设为默认 API（错题分析、单词翻译和题库校正会优先使用它）
+              </label>
+            </section>
+
+            <section class="api-detail-section api-advanced-section" aria-labelledby="api-advanced-title">
+              <h3 id="api-advanced-title">高级参数</h3>
+              <div class="grid grid-2">
+                <div class="field"><label for="profile-temperature">Temperature</label><input id="profile-temperature" v-model.number="profile.temperature" type="number" min="0" max="2" step=".1"></div>
+                <div class="field">
+                  <label>默认推理强度</label>
+                  <OptionSheet v-model="profile.reasoning_effort" :items="reasoningItems(profile)" title="选择推理强度" />
+                  <small v-if="!adapterDefinition(profile).supportsReasoningEffort">该协议不发送推理强度，已选值会保留。</small>
+                </div>
+              </div>
+              <div class="field"><label for="profile-prompt">附加系统提示词</label><textarea id="profile-prompt" v-model="profile.system_prompt" rows="3" placeholder="对该 API 下的模型统一生效"></textarea></div>
+              <div class="api-profile-hints">
+                <p class="field-hint">Temperature 越低越稳定，判分、题库导入和单词翻译建议 0.2–0.5。</p>
+                <p class="field-hint">长任务没有返回正文时，请重试或切换模型/API 配置。</p>
+              </div>
+            </section>
+          </div>
 
           <section class="api-detail-section" aria-labelledby="api-manage-title">
             <h3 id="api-manage-title">模型管理</h3>
@@ -524,3 +528,14 @@ onMounted(() => {
     </section>
   </div>
 </template>
+
+<style scoped>
+.api-model-setup-grid { display:grid; grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr); gap:14px; margin-top:19px; padding-top:17px; border-top:1px solid var(--line); }
+.api-model-setup-grid > .api-detail-section { min-width:0; margin-top:0; padding-top:0; border-top:0; align-content:start; }
+.api-model-default-section .default-profile-check { margin-top:auto; }
+.api-advanced-section .api-profile-hints { margin-bottom:0; }
+@media (max-width:720px) {
+  .api-model-setup-grid { grid-template-columns:minmax(0,1fr); gap:0; }
+  .api-model-setup-grid > .api-detail-section + .api-detail-section { margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
+}
+</style>

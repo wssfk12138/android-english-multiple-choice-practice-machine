@@ -138,18 +138,17 @@ async function deleteSelected() {
 <template>
   <div class="page">
     <div class="page-head"><div><h1>按年份练习</h1></div></div>
-    <QuestionBankSwitcher @changed="loadPapers" />
-    <div class="batch-toolbar">
-      <span v-if="batchMode" class="lead">已选择 {{ selectedIds.size }} 套试卷</span>
-      <span style="display:flex;gap:8px;flex-wrap:wrap">
+    <QuestionBankSwitcher class="library-bank-switcher" @changed="loadPapers">
+      <template #actions>
+        <span v-if="batchMode" class="bank-batch-status">已选 {{ selectedIds.size }} 套</span>
         <button v-if="!batchMode" class="button secondary compact" type="button" @click="batchMode=true"><CheckSquare :size="16" />批量管理</button>
         <template v-else>
           <button class="button secondary compact" type="button" :disabled="!selectedIds.size" @click="moveSelected"><MoveRight :size="16" />移动</button>
           <button class="button ghost danger compact" type="button" :disabled="!selectedIds.size" @click="deleteSelected"><Trash2 :size="16" />移入回收站</button>
           <button class="button ghost compact" type="button" @click="leaveBatch"><X :size="16" />取消</button>
         </template>
-      </span>
-    </div>
+      </template>
+    </QuestionBankSwitcher>
     <div v-if="error" class="warning">{{ error }}</div>
     <div v-if="papers.length" class="grid grid-3">
       <article

@@ -535,32 +535,36 @@ onMounted(async () => {
           <h2>设备同步</h2>
         </div>
       </div>
-      <div class="field">
-        <label for="lan-sync-host">电脑端地址</label>
-        <div class="lan-sync-host-row">
-          <input id="lan-sync-host" v-model.trim="lanSync.host" inputmode="url" placeholder="http://192.168.x.x:8766">
-          <button class="icon-button" type="button" :disabled="busy === 'lan-sync-scan'" aria-label="扫描电脑端二维码" title="扫描电脑端二维码" @click="scanLanSync">
-            <ScanLine :size="20" />
-          </button>
+      <div class="lan-sync-connection-grid">
+        <div class="field">
+          <label for="lan-sync-host">电脑端地址</label>
+          <div class="lan-sync-host-row">
+            <input id="lan-sync-host" v-model.trim="lanSync.host" inputmode="url" placeholder="http://192.168.x.x:8766">
+            <button class="icon-button" type="button" :disabled="busy === 'lan-sync-scan'" aria-label="扫描电脑端二维码" title="扫描电脑端二维码" @click="scanLanSync">
+              <ScanLine :size="20" />
+            </button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="lan-sync-passcode">同步口令</label>
+          <input id="lan-sync-passcode" v-model.trim="lanSync.passcode" type="password" autocomplete="new-password" :disabled="Boolean(lanSync.hostId || scannedPairing)" placeholder="旧版配对口令">
+          <span v-if="scannedPairing || lanSync.hostId" class="lan-sync-host-id">HTTPS · {{ scannedPairing?.tls.hostId || lanSync.hostId }}</span>
         </div>
       </div>
-      <div class="field">
-        <label for="lan-sync-passcode">同步口令</label>
-        <input id="lan-sync-passcode" v-model.trim="lanSync.passcode" type="password" autocomplete="new-password" :disabled="Boolean(lanSync.hostId || scannedPairing)" placeholder="旧版配对口令">
-        <span v-if="scannedPairing || lanSync.hostId" style="overflow-wrap:anywhere">HTTPS · {{ scannedPairing?.tls.hostId || lanSync.hostId }}</span>
-      </div>
-      <label class="lan-sync-toggle">
-        <input v-model="lanSync.auto" type="checkbox">
-        <span class="lan-sync-toggle-copy"><strong>自动同步</strong></span>
-      </label>
-      <fieldset class="lan-category-options">
-        <legend>同步类别</legend>
-        <label v-for="(label, category) in CATEGORY_LABELS" :key="category">
-          <input v-model="lanSync.categories" type="checkbox" :value="category" :disabled="Boolean(busy)">
-          <span>{{ label }}</span>
-          <span>{{ lanSync.effectiveCategories.includes(category) ? '上次协商已启用' : '上次未启用' }}</span>
+      <div class="lan-sync-options-grid">
+        <label class="lan-sync-toggle">
+          <input v-model="lanSync.auto" type="checkbox">
+          <span class="lan-sync-toggle-copy"><strong>自动同步</strong><small>连接可用时按计划同步</small></span>
         </label>
-      </fieldset>
+        <fieldset class="lan-category-options">
+          <legend>同步类别</legend>
+          <label v-for="(label, category) in CATEGORY_LABELS" :key="category">
+            <input v-model="lanSync.categories" type="checkbox" :value="category" :disabled="Boolean(busy)">
+            <span>{{ label }}</span>
+            <span>{{ lanSync.effectiveCategories.includes(category) ? '上次已启用' : '上次未启用' }}</span>
+          </label>
+        </fieldset>
+      </div>
       <div class="update-actions lan-sync-actions">
         <button class="button" type="button" :disabled="busy === 'lan-sync-save'" @click="saveLanSync">
           <Save :size="16" />{{ busy === 'lan-sync-save' ? '保存并测试中…' : '保存并测试连接' }}
@@ -655,7 +659,6 @@ onMounted(async () => {
           <Trash2 :size="16" />清空
         </button>
       </div>
-      <p class="diagnostic-privacy">诊断最多保留 50 条且导出包不超过约 1 MiB。不会后台上传，只有你点击复制、导出或系统分享时才会离开本机。</p>
       <div class="diagnostic-actions">
         <button class="button secondary" type="button" @click="copyHistoryDiagnostics">
           <ClipboardCopy :size="16" />复制学习历史只读诊断
@@ -664,8 +667,8 @@ onMounted(async () => {
           <Send :size="16" />导出并系统分享
         </button>
       </div>
-      <p class="diagnostic-privacy">学习历史诊断只执行本地只读汇总，包含数量和完整性类别，不含学习记录、题库名、题目、答案、词汇或任何同步标识。</p>
       <template v-if="databaseChannelEnabled">
+        <p class="diagnostic-meta">数据库副本含学习数据，仅在导出或分享时由你取走。</p>
         <div class="diagnostic-actions">
           <button class="button secondary" type="button" :disabled="busy === 'database-export'" @click="exportDatabaseCopy">
             <Save :size="16" />导出应用数据库副本
@@ -674,10 +677,9 @@ onMounted(async () => {
             <Send :size="16" />导出并系统分享
           </button>
         </div>
-        <p class="diagnostic-privacy">数据库副本包含题库、单词本、错题与学习记录，只在你点击导出时写入本机应用外部私有目录 db-export（Android/data/（应用包名）/files/db-export），用于 adb pull 或在应用内系统分享。</p>
-        <p v-if="databaseInfo?.exists" class="diagnostic-privacy">当前库 {{ databaseInfo.fileName }}，{{ formatDatabaseSize(databaseInfo.size || 0) }}，{{ databaseInfo.tableCount ?? 0 }} 张表，日志模式 {{ databaseInfo.journalMode }}。</p>
-        <p v-else-if="databaseInfo" class="diagnostic-privacy">未找到数据库文件（{{ databaseInfo.expectedFileName }}），请先在应用内打开一次题库。</p>
-        <p v-if="databaseExport" class="diagnostic-privacy">最近导出 {{ databaseExport.fileName }}（{{ formatDatabaseSize(databaseExport.size) }}，完整性 {{ databaseExport.integrityCheck }}，快照 {{ databaseExport.snapshot }}），路径 {{ databaseExport.path }}{{ databaseExport.adbReadable ? '，可直接用 adb pull 取走' : '，adb 读取被系统拒绝，请改用系统分享' }}</p>
+        <p v-if="databaseInfo?.exists" class="diagnostic-meta">当前库 {{ databaseInfo.fileName }}，{{ formatDatabaseSize(databaseInfo.size || 0) }}，{{ databaseInfo.tableCount ?? 0 }} 张表，日志模式 {{ databaseInfo.journalMode }}。</p>
+        <p v-else-if="databaseInfo" class="diagnostic-meta">未找到数据库文件（{{ databaseInfo.expectedFileName }}），请先在应用内打开一次题库。</p>
+        <p v-if="databaseExport" class="diagnostic-meta">最近导出 {{ databaseExport.fileName }}（{{ formatDatabaseSize(databaseExport.size) }}，完整性 {{ databaseExport.integrityCheck }}，快照 {{ databaseExport.snapshot }}），路径 {{ databaseExport.path }}<span v-if="!databaseExport.adbReadable">，电脑读取被系统拒绝，请改用系统分享</span></p>
       </template>
       <div v-if="diagnosticLogs.length" class="diagnostic-list">
         <details v-for="item in diagnosticLogs" :key="`${item.createdAt}:${item.event}`">
@@ -735,13 +737,19 @@ onMounted(async () => {
 <style scoped>
 .lan-sync-status > span, .lan-category-options span { min-width: 0; overflow-wrap: anywhere; }
 .update-source-heading > div { min-width: 0; }
+.lan-sync-connection-grid,.lan-sync-options-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-items:start; }
+.lan-sync-options-grid { margin-top:12px; }
+.lan-sync-host-id { display:block; margin-top:4px; color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
 .lan-sync-host-row .icon-button { flex: 0 0 44px; min-width: 44px; min-height: 44px; }
 .lan-sync-actions .button { max-width: 100%; white-space: normal; }
 .lan-sync-actions svg { flex-shrink: 0; }
+.lan-sync-toggle { min-height:44px; margin-top:0; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--surface-solid); }
+.lan-sync-toggle-copy small { color:var(--muted); font-size:12px; line-height:1.4; overflow-wrap:anywhere; }
 .warning { overflow-wrap: anywhere; }
-.lan-category-options { border: 0; padding: 0; margin: 16px 0; min-width: 0; }
+.lan-category-options { border: 0; padding: 0; margin: 0; min-width: 0; }
 .lan-category-options label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 0; }
 .lan-category-options input { width: 18px; height: 18px; flex: 0 0 18px; }
+.diagnostic-meta { margin:10px 0 0; color:var(--muted); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 .catalog-destination-dialog { text-align: left; }
 .catalog-destination-choice { display: flex; gap: 10px; align-items: flex-start; padding: 11px; border: 1px solid var(--line); border-radius: 12px; margin-top: 12px; }
 .catalog-destination-choice input { margin-top: 4px; min-width: 20px; min-height: 20px; }
@@ -749,4 +757,8 @@ onMounted(async () => {
 .catalog-destination-choice small { color: var(--muted); overflow-wrap: anywhere; }
 .catalog-profile-name-list { display: grid; gap: 10px; margin: 12px 0; }
 .catalog-destination-actions { display: flex; justify-content: center; gap: 10px; margin-top: 20px; }
+@media (max-width: 720px) {
+  .lan-sync-connection-grid,.lan-sync-options-grid { grid-template-columns: minmax(0,1fr); }
+  .lan-sync-options-grid { gap: 10px; }
+}
 </style>

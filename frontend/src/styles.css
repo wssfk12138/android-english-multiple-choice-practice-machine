@@ -277,8 +277,12 @@ h2, h3 { margin: 0; }
 /* 搜索和筛选作为工具行放在列表上方，横向换行适配窄屏。 */
 .vocab-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 12px 14px; position: sticky; top: 12px; z-index: 2; }
 .vocab-filters .search-field { flex: 1 1 170px; margin-bottom: 0; }
-.vocab-filters>button { min-height: 40px; border: 1px solid var(--line); background: var(--surface-solid); color: var(--muted); padding: 7px 13px; text-align: center; border-radius: 999px; }
-.vocab-filters>button.active,.vocab-filters>button:hover { background: var(--primary-soft); color: var(--ink); border-color: color-mix(in srgb, var(--primary) 40%, var(--line)); }
+.vocab-filter-toggle { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; border: 1px solid var(--line); background: var(--surface-solid); color: var(--muted); padding: 7px 13px; text-align: left; border-radius: 999px; }
+.vocab-filter-toggle strong { color: var(--ink); font-weight: 650; }
+.vocab-filter-toggle .rotated { transform: rotate(180deg); }
+.vocab-filter-options { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; }
+.vocab-filter-options>button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 40px; border: 1px solid var(--line); background: var(--surface-solid); color: var(--muted); padding: 7px 13px; text-align: center; border-radius: 999px; }
+.vocab-filter-options>button.active,.vocab-filter-options>button:hover { background: var(--primary-soft); color: var(--ink); border-color: color-mix(in srgb, var(--primary) 40%, var(--line)); }
 .search-field { display: flex; align-items: center; gap: 7px; border: 1px solid var(--line); padding: 0 10px; border-radius: 10px; margin-bottom: 8px; }
 .search-field input { width: 100%; min-width: 0; padding: 10px 0; border: 0; outline: 0; color: var(--ink); background: transparent; }
 .vocab-list { padding: 8px; max-height: calc(100vh - 280px); overflow: auto; }
@@ -2686,6 +2690,18 @@ html[data-platform="android"] .practice-submit-actions .button { min-width:0; wh
     font-size: 10px;
   }
 
+  html[data-platform="android"] .vocab-filter-options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  html[data-platform="android"] .vocab-filter-options > button {
+    min-width: 0;
+    min-height: 40px;
+    padding: 7px 5px;
+    font-size: 10px;
+  }
+
   html[data-platform="android"] .vocab-list {
     padding: 4px;
   }
@@ -4619,6 +4635,10 @@ html[data-platform="android"][data-window-mode="compact"] .practice-submit-actio
 }
 .bank-switcher { position: relative; margin: 0 0 18px; }
 .bank-switcher-main { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.bank-switcher-main .option-sheet-trigger { flex: 1 1 190px; width: auto; min-width: 190px; }
+.bank-batch-status { color: var(--muted); font-size: 13px; white-space: nowrap; }
+html[data-platform="android"] .library-bank-switcher .bank-switcher-main { display: flex; flex-wrap: wrap; }
+html[data-platform="android"] .library-bank-switcher .option-sheet-trigger { flex: 1 1 220px; }
 
 /* Canonical Android portrait practice layout.
    Keep this override last: older phone/tablet rules above intentionally remain
@@ -4846,7 +4866,7 @@ html[data-platform="android"][data-orientation="portrait"] .portrait-dashboard .
 
 html[data-platform="android"][data-orientation="portrait"] .portrait-dashboard .bank-switcher-main {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
   gap: 9px;
   padding: 11px 12px;
@@ -4856,8 +4876,23 @@ html[data-platform="android"][data-orientation="portrait"] .portrait-dashboard .
   box-shadow: var(--shadow-sm);
 }
 
-html[data-platform="android"][data-orientation="portrait"] .portrait-dashboard .bank-switcher-main .button,
-html[data-platform="android"][data-orientation="portrait"] .portrait-dashboard .bank-manager {
+html[data-platform="android"][data-orientation="portrait"] .portrait-dashboard .bank-switcher-main .option-sheet-trigger {
+  grid-column: 1 / -1;
+}
+
+html[data-platform="android"][data-orientation="portrait"] .portrait-dashboard .bank-switcher-main .button {
+  justify-content: center;
+  min-width: 0;
+  padding-inline: 7px;
+  font-size: 12px;
+}
+
+html[data-platform="android"][data-orientation="portrait"] .portrait-dashboard .bank-switcher-main .button svg {
+  width: 18px;
+  height: 18px;
+}
+
+html[data-platform="android"][data-orientation="portrait"] .portrait-dashboard .bank-switcher-main .bank-library-link svg:last-child {
   display: none;
 }
 
@@ -5129,7 +5164,7 @@ html[data-platform="android"][data-orientation="portrait"] .sidebar .mobile-tab-
   html[data-platform="android"] .bank-switcher-main {
     align-items: stretch;
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
     padding: 12px;
     border: 1px solid var(--line);
@@ -5138,7 +5173,7 @@ html[data-platform="android"][data-orientation="portrait"] .sidebar .mobile-tab-
     box-shadow: var(--shadow-sm);
   }
 
-  html[data-platform="android"] .bank-switcher-main>a { display: none; }
+  html[data-platform="android"] .bank-switcher-main .option-sheet-trigger { min-width: 0; }
   html[data-platform="android"] .bank-switcher select { min-width: 0; width: 100%; }
 
   html[data-platform="android"] .vocabulary-ticker {
@@ -5595,6 +5630,10 @@ html[data-platform="android"] .import-publish-toast {
   }
 
   html[data-platform="android"] .vocab-filters > button {
+    min-height: 44px;
+  }
+
+  html[data-platform="android"] .vocab-filter-options > button {
     min-height: 44px;
   }
 

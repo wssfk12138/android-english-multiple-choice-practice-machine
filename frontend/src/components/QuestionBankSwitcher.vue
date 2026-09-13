@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LibraryBig, Plus, Settings2, Trash2 } from 'lucide-vue-next'
+import { ArrowRight, BookOpen, Plus, Settings2, Trash2 } from 'lucide-vue-next'
 import { onMounted, ref } from 'vue'
 import { confirmDialog, promptDialog } from '../platform/dialogs'
 import OptionSheet from './OptionSheet.vue'
@@ -13,6 +13,7 @@ import {
 } from '../services/questionBankProfiles'
 
 const emit = defineEmits<{ changed: [] }>()
+const props = withDefaults(defineProps<{ showLibraryLink?: boolean }>(), { showLibraryLink: false })
 const managing = ref(false)
 const newName = ref('')
 const error = ref('')
@@ -74,7 +75,6 @@ async function removeProfile(profile: any) {
 <template>
   <div class="bank-switcher">
     <div class="bank-switcher-main">
-      <LibraryBig :size="17" />
       <OptionSheet
         :model-value="questionBankProfilesState.activeId"
         :items="questionBankProfilesState.items.map(profile => ({ value: profile.id, label: profile.name }))"
@@ -84,6 +84,8 @@ async function removeProfile(profile: any) {
       />
       <button class="button ghost compact" type="button" @click="managing = !managing"><Settings2 :size="15" />管理</button>
       <RouterLink class="button ghost compact" to="/trash"><Trash2 :size="15" />回收站</RouterLink>
+      <RouterLink v-if="props.showLibraryLink" class="button ghost compact bank-library-link" to="/library"><BookOpen :size="17" />查看全部题库<ArrowRight :size="16" /></RouterLink>
+      <slot name="actions" />
     </div>
     <div v-if="managing" class="bank-manager card">
       <div class="bank-manager-create">

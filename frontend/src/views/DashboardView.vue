@@ -166,7 +166,7 @@ function resumePractice() {
 <template>
   <div class="page dashboard-page">
     <div class="desktop-dashboard glass-dashboard">
-      <div class="dashboard-bank-row"><QuestionBankSwitcher @changed="loadHome" /><RouterLink class="button ghost compact" to="/library"><BookOpen :size="17" />查看全部题库<ArrowRight :size="16" /></RouterLink></div>
+      <div class="dashboard-bank-row"><QuestionBankSwitcher :show-library-link="true" @changed="loadHome" /></div>
       <StudyTodos :key="tasksRevision" />
       <div v-if="error" class="warning">{{ error }}</div>
       <section v-if="vocabulary.length" class="vocabulary-ticker card" @mouseenter="tickerPaused=true" @mouseleave="tickerPaused=false">
@@ -196,7 +196,7 @@ function resumePractice() {
     </div>
 
     <div class="portrait-dashboard">
-      <QuestionBankSwitcher @changed="loadHome" />
+      <QuestionBankSwitcher :show-library-link="true" @changed="loadHome" />
       <div v-if="error" class="warning">{{ error }}</div>
 
       <button v-if="resumeSession" class="resume-practice card" type="button" @click="resumePractice">

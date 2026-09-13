@@ -25,11 +25,41 @@ export function safeObject(value: unknown): RecordValue {
   try { const parsed = typeof value === 'string' ? JSON.parse(value) : value; return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {} } catch { return {} }
 }
 const text = (value: unknown, limit: number) => typeof value === 'string' ? value.trim().slice(0, limit) : ''
+
+/** Keep model supplied morphology labels readable and consistent in the UI. */
+export function morphologyLabel(value: unknown): string {
+  const label = text(value, 40)
+  if (!label) return ''
+  const key = label.toLowerCase().replace(/[\s_-]+/g, ' ').trim()
+  const labels: Record<string, string> = {
+    base: '原形',
+    'base form': '原形',
+    infinitive: '原形',
+    'infinitive form': '原形',
+    lemma: '原形',
+    present: '现在式',
+    'present tense': '现在式',
+    'present form': '现在式',
+    past: '过去式',
+    'past tense': '过去式',
+    'past form': '过去式',
+    'past participle': '过去分词',
+    'present participle': '现在分词',
+    gerund: '动名词',
+    'third person singular': '第三人称单数',
+    'third person singular present': '第三人称单数',
+    plural: '复数',
+    comparative: '比较级',
+    superlative: '最高级',
+  }
+  return labels[key] || label
+}
+
 export function vocabularyEnhancements(value: RecordValue, hasSource: boolean) {
   const source = safeObject(value.morphology)
   const forms = Array.isArray(source.forms) ? source.forms.filter((item: any) => item && typeof item === 'object')
-    .map((item: any) => ({ label: text(item.label, 40), word: text(item.word, 100) })).filter((item: any) => item.label && item.word).slice(0, 10) : []
-  const morphology = { lemma: text(source.lemma || value.lemma, 120), currentForm: text(source.currentForm, 80), ambiguous: source.ambiguous === true, note: text(source.note, 200), forms }
+    .map((item: any) => ({ label: morphologyLabel(item.label), word: text(item.word, 100) })).filter((item: any) => item.label && item.word).slice(0, 10) : []
+  const morphology = { lemma: text(source.lemma || value.lemma, 120), currentForm: morphologyLabel(source.currentForm), ambiguous: source.ambiguous === true, note: text(source.note, 200), forms }
   const example = safeObject(value.generatedExample || value.generated_example)
   const generatedExample = hasSource ? {} : { sentence: text(example.sentence, 500), translation: text(example.translation, 500) }
   return { morphology, generatedExample }
