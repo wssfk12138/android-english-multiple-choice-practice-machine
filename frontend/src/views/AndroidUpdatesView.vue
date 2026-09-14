@@ -541,7 +541,9 @@ onMounted(async () => {
         <span class="api-profile-icon"><Wifi :size="20" /></span>
         <div>
           <h2>设备同步</h2>
+          <small class="sync-summary">{{ lanSync.configured ? (lanSync.runtime.online ? '已连接' : '设备离线') : '尚未配置' }} · {{ lanSync.runtime.running ? '同步中' : '空闲' }}</small>
         </div>
+        <label class="lan-sync-header-toggle selection-option"><span>自动同步</span><input v-model="lanSync.auto" type="checkbox"></label>
       </div>
       <details class="sync-connection"><summary>连接</summary>
       <div class="lan-sync-connection-grid">
@@ -561,10 +563,6 @@ onMounted(async () => {
         </div>
       </div>
 
-        <label class="lan-sync-toggle selection-option">
-          <input v-model="lanSync.auto" type="checkbox">
-          <span class="lan-sync-toggle-copy"><strong>自动同步</strong><small>连接可用时按计划同步</small></span>
-        </label>
       </details>
       <div class="lan-sync-work-grid">
         <fieldset class="lan-category-options">
@@ -749,6 +747,9 @@ onMounted(async () => {
 .lan-sync-work-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }
 .lan-sync-operation-column { min-width:0; }
 .sync-connection { margin-bottom:16px; }
+.sync-summary { display:block; margin-top:2px; color:var(--muted); font-size:12px; }
+.lan-sync-header-toggle { display:flex; align-items:center; gap:8px; margin-left:auto; white-space:nowrap; }
+.lan-sync-header-toggle input { width:20px; height:20px; }
 @media(max-width:720px) { .lan-sync-work-grid { grid-template-columns:minmax(0,1fr); } }
 .lan-sync-status > span, .lan-category-options span { min-width: 0; overflow-wrap: anywhere; }
 .update-source-heading > div { min-width: 0; }
