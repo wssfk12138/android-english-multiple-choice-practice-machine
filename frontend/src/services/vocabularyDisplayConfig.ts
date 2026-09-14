@@ -4,8 +4,10 @@ export const VOCAB_DISPLAY_STORAGE_KEY = 'vocab-display-config'
 
 export type VocabDisplayKey =
   | 'common_meaning'
-  | 'contextual'
-  | 'sentence'
+  | 'phonetic'
+  | 'part_of_speech'
+  | 'source_sentence'
+  | 'model_sentence'
   | 'memory_hint'
   | 'synonyms'
   | 'antonyms'
@@ -16,8 +18,10 @@ export type VocabDisplayOption = { key: VocabDisplayKey; label: string }
 
 export const VOCAB_DISPLAY_OPTIONS: VocabDisplayOption[] = [
   { key: 'common_meaning', label: '常用释义' },
-  { key: 'contextual', label: '语境释义' },
-  { key: 'sentence', label: '真题例句' },
+  { key: 'phonetic', label: '音标' },
+  { key: 'part_of_speech', label: '词性' },
+  { key: 'source_sentence', label: '真题原句' },
+  { key: 'model_sentence', label: '模型例句' },
   { key: 'memory_hint', label: '记忆提示' },
   { key: 'synonyms', label: '同义词辨析' },
   { key: 'antonyms', label: '反义词辨析' },
@@ -27,8 +31,10 @@ export const VOCAB_DISPLAY_OPTIONS: VocabDisplayOption[] = [
 
 export const VOCAB_DISPLAY_DEFAULTS: Record<VocabDisplayKey, boolean> = {
   common_meaning: true,
-  contextual: true,
-  sentence: true,
+  phonetic: true,
+  part_of_speech: true,
+  source_sentence: true,
+  model_sentence: false,
   memory_hint: false,
   synonyms: false,
   antonyms: false,

@@ -13,16 +13,16 @@ const groups = computed(() => [
   { key: 'similar_forms', label: '形近词辨析', list: [...(props.entry.local_similar || []).map((item: any) => ({ ...item, local: true })), ...(props.entry.similar_forms || [])] },
   { key: 'memory_hint', label: '记忆提示', text: props.entry.memory_hint },
   { key: 'note', label: '我的笔记', text: props.entry.note },
-  ].filter(group => (group.key === 'source_sentence' || group.key === 'note' || props.config[group.key as keyof VocabDisplayConfig]) && (group.text || group.list?.length)))
+  ].filter(group => (props.config[group.key as keyof VocabDisplayConfig]) && (group.text || group.list?.length)))
 </script>
 <template>
   <div ref="root" class="vocab-memory-content">
     <section class="review-meaning-block detail-section">
-      <div class="review-meaning-heading"><small>常用释义</small><span v-if="entry.part_of_speech" class="review-part-of-speech">{{ entry.part_of_speech }}</span></div>
+      <div class="review-meaning-heading"><small>常用释义</small><span v-if="config.part_of_speech && entry.part_of_speech" class="review-part-of-speech">{{ entry.part_of_speech }}</span><span v-if="config.phonetic && entry.phonetic" class="review-phonetic">{{ entry.phonetic }}</span></div>
       <strong>{{ entry.common_meaning || entry.contextual_meaning || '释义待补充' }}</strong>
     </section>
     <template v-for="group in groups" :key="group.key">
-    <details v-if="!group.source" class="memory-layer">
+    <details v-if="!group.source" class="memory-layer" :open="props.expanded">
       <summary>{{ group.label }}</summary>
       <VocabularyEnrichment v-if="group.key === 'morphology'" :entry="entry" :show-morphology="true" :show-sentence="false" />
       <ul v-else-if="group.list" class="discrimination-list"><li v-for="(item, index) in group.list" :key="index"><strong>{{ item.word }}</strong><span>{{ item.note }}<em v-if="item.local" class="source-tag">本地</em></span></li></ul>
