@@ -27,7 +27,6 @@ import {
 
 const enrichmentEnabled = ref(loadVocabularyEnrichment())
 const dark = ref(false)
-const vocabDisplayOpen = ref(false)
 const vocabDisplayConfig = reactive<Record<VocabDisplayKey, boolean>>(loadVocabDisplayConfig())
 // 分组入口按规格固定顺序；设备与维护三项都落在“更新与远程题库”页的对应分区。
 const groups = [
@@ -94,19 +93,11 @@ onMounted(() => {
           <span><strong>深色模式</strong></span>
           <button class="settings-theme-switch" type="button" role="switch" :aria-checked="dark" aria-label="深色模式" @click="toggleTheme"><span aria-hidden="true"></span></button>
         </div>
-        <div class="settings-hub-row stack">
-          <button class="settings-hub-row-toggle" type="button" :aria-expanded="vocabDisplayOpen" @click="vocabDisplayOpen=!vocabDisplayOpen">
+        <RouterLink class="settings-hub-row link" to="/android-vocabulary-display">
             <span class="settings-hub-row-icon"><Eye :size="19" /></span>
             <span class="settings-hub-row-copy"><strong>单词本显示</strong><small>{{ vocabDisplaySummary }}</small></span>
-            <ChevronDown :size="19" class="settings-hub-chevron" :class="{ open: vocabDisplayOpen }" />
-          </button>
-          <div v-if="vocabDisplayOpen" class="settings-vocab-display-options">
-            <label v-for="option in VOCAB_DISPLAY_OPTIONS" :key="option.key" class="selection-option">
-              <input type="checkbox" :checked="option.key === 'common_meaning' || vocabDisplayConfig[option.key]" :disabled="option.key === 'common_meaning'" @change="toggleVocabDisplay(option.key)">
-              <span>{{ option.label }}</span>
-            </label>
-          </div>
-        </div>
+            <b class="settings-hub-chevron" aria-hidden="true">›</b>
+        </RouterLink>
       </div>
     </section>
 

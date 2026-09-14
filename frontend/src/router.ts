@@ -7,6 +7,7 @@ import PracticeView from './views/PracticeView.vue'
 import SettingsView from './views/SettingsView.vue'
 import WrongView from './views/WrongView.vue'
 import VocabularyView from './views/VocabularyView.vue'
+import AndroidVocabularyDisplayView from './views/AndroidVocabularyDisplayView.vue'
 import TrashView from './views/TrashView.vue'
 import AndroidUpdatesView from './views/AndroidUpdatesView.vue'
 import NotesHubView from './views/NotesHubView.vue'
@@ -21,6 +22,7 @@ export default createRouter({
     { path: '/practice/:id', component: PracticeView },
     { path: '/wrong', component: WrongView },
     { path: '/vocabulary', component: VocabularyView },
+    { path: '/android-vocabulary-display', component: AndroidVocabularyDisplayView },
     { path: '/imports', component: ImportView },
     { path: '/assistant', component: AiAssistant },
     { path: '/settings', component: SettingsView },

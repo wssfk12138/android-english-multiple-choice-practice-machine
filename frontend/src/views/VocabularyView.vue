@@ -393,6 +393,9 @@ onBeforeUnmount(() => {
   listObserver = null
 })
 onMounted(async () => {
+  if (!sessionStorage.getItem('vocab-enrichment-initial-scan-v1')) {
+    sessionStorage.setItem('vocab-enrichment-initial-scan-v1', '1')
+  }
   if (route.query.review === 'scheduled') await startReview()
   else await startPendingTranslations()
 })

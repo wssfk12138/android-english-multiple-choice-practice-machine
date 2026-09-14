@@ -57,7 +57,7 @@ type AiProfile = {
 
 const profiles = ref<AiProfile[]>([])
 const adapters = SELECTABLE_ADAPTERS
-const expanded = ref<number[]>([])
+const expandedProfileId = ref<number | null>(null)
 const busy = reactive<Record<string, boolean>>({})
 const notices = reactive<Record<number, string>>({})
 const message = ref('')
@@ -65,6 +65,7 @@ const error = ref('')
 const creating = ref(false)
 const moreMenuFor = ref<number | null>(null)
 const modelSearch = reactive<Record<number, string>>({})
+const modelVisibility = reactive<Record<number, 'all' | 'visible' | 'hidden'>>({})
 
 function blankProfile(): AiProfile {
   return {
@@ -160,9 +161,12 @@ function visibleModelCount(profile: AiProfile) {
 
 function filteredModels(profile: AiProfile) {
   const keyword = (modelSearch[profile.id] || '').trim().toLowerCase()
-  if (!keyword) return profile.models
-  return profile.models.filter(model =>
-    `${model.display_name} ${model.model_id}`.toLowerCase().includes(keyword))
+  const visibility = modelVisibility[profile.id] || 'all'
+  return profile.models.filter(model => {
+    const matchesKeyword = !keyword || `${model.display_name} ${model.model_id}`.toLowerCase().includes(keyword)
+    const matchesVisibility = visibility === 'all' || (visibility === 'visible' ? model.is_visible : !model.is_visible)
+    return matchesKeyword && matchesVisibility
+  })
 }
 
 function busyKey(action: string, id: number) {
@@ -170,9 +174,7 @@ function busyKey(action: string, id: number) {
 }
 
 function toggleExpanded(id: number) {
-  expanded.value = expanded.value.includes(id)
-    ? expanded.value.filter(item => item !== id)
-    : [...expanded.value, id]
+  expandedProfileId.value = expandedProfileId.value === id ? null : id
 }
 
 function toggleMoreMenu(id: number) {
@@ -376,7 +378,7 @@ onMounted(() => {
     <div class="api-profile-list">
       <article v-for="profile in profiles" :key="profile.id" class="api-profile-card">
         <header class="api-profile-summary">
-          <button class="api-profile-expand" type="button" :aria-expanded="expanded.includes(profile.id)" @click="toggleExpanded(profile.id)">
+          <button class="api-profile-expand" type="button" :aria-expanded="expandedProfileId === profile.id" @click="toggleExpanded(profile.id)">
             <span class="api-profile-icon"><Server :size="20" /></span>
             <span class="api-profile-copy">
               <span><strong>{{ profile.name }}</strong><small v-if="profile.is_default">默认</small></span>
@@ -386,7 +388,7 @@ onMounted(() => {
               <small>{{ visibleModelCount(profile) }} 个模型显示</small>
               <span :class="{ online: profile.enabled }">{{ profile.enabled ? '已启用' : '已停用' }}</span>
             </span>
-            <ChevronDown v-if="!expanded.includes(profile.id)" :size="19" />
+            <ChevronDown v-if="expandedProfileId !== profile.id" :size="19" />
             <ChevronUp v-else :size="19" />
           </button>
           <button
@@ -410,7 +412,7 @@ onMounted(() => {
           </div>
         </header>
 
-        <div v-if="expanded.includes(profile.id)" class="api-profile-body">
+        <div v-if="expandedProfileId === profile.id" class="api-profile-body">
           <p v-if="notices[profile.id]" class="api-profile-notice" role="status">{{ notices[profile.id] }}</p>
 
           <section class="api-detail-section" aria-labelledby="api-conn-title">
@@ -464,6 +466,11 @@ onMounted(() => {
             <summary><h3 id="api-manage-title">模型目录</h3></summary>
             <div class="api-model-toolbar">
               <div class="search-field"><Search :size="16" /><input v-model="modelSearch[profile.id]" placeholder="搜索模型"></div>
+              <div class="api-model-filter" role="group" aria-label="模型显示状态">
+                <button type="button" :class="{ active: (modelVisibility[profile.id] || 'all') === 'all' }" @click="modelVisibility[profile.id]='all'">全部</button>
+                <button type="button" :class="{ active: modelVisibility[profile.id] === 'visible' }" @click="modelVisibility[profile.id]='visible'">显示中</button>
+                <button type="button" :class="{ active: modelVisibility[profile.id] === 'hidden' }" @click="modelVisibility[profile.id]='hidden'">已隐藏</button>
+              </div>
               <div class="api-model-toolbar-actions">
                 <button class="button secondary compact" type="button" :disabled="busy[busyKey('sync',profile.id)]" @click="syncModels(profile)">
                   <RefreshCw :size="15" :class="{spinning:busy[busyKey('sync',profile.id)]}" />同步模型
@@ -472,6 +479,7 @@ onMounted(() => {
                 <button type="button" @click="setAllVisible(profile,false)"><EyeOff :size="15" />全部隐藏</button>
               </div>
             </div>
+            <p class="api-model-summary">共 {{ profile.models.length }} 个模型，显示 {{ visibleModelCount(profile) }} 个；当前列出 {{ filteredModels(profile).length }} 个</p>
             <div v-if="profile.models.length" class="api-model-list">
               <div v-for="model in filteredModels(profile)" :key="model.model_id" class="api-model-row" :class="{ unavailable: !model.is_available }">
                 <div><strong>{{ model.display_name || model.model_id }}</strong><small>{{ model.owned_by || model.provider || '接口模型' }}<template v-if="!model.is_available"> · 本次同步未发现</template></small></div>
@@ -528,3 +536,4 @@ onMounted(() => {
   .api-model-setup-grid > .api-detail-section + .api-detail-section { margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
 }
 </style>
+

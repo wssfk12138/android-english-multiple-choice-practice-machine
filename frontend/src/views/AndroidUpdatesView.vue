@@ -13,6 +13,7 @@ import {
   Wifi,
 } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { ArrowLeft } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { get, post, put } from '../api'
 import { confirmDialog } from '../platform/dialogs'
@@ -528,7 +529,8 @@ onMounted(async () => {
     <div class="page-head">
       <div class="page-title-row">
         <span class="page-title-icon page-title-icon-lucide"><Download :size="22" /></span>
-        <h1>更新与远程题库</h1>
+        <RouterLink v-if="activeSection" class="icon-button" to="/settings" aria-label="返回设置"><ArrowLeft :size="20" /></RouterLink>
+        <h1>{{ activeSection === 'sync' ? '设备同步' : activeSection === 'diagnostics' ? '诊断日志' : '更新与远程题库' }}</h1>
       </div>
     </div>
     <div v-if="error" class="warning" role="alert">{{ error }}</div>
