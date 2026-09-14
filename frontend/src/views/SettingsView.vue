@@ -448,26 +448,20 @@ onMounted(() => {
               </label>
             </section>
 
-            <details class="api-detail-section api-advanced-section">
-              <summary>高级参数与系统提示词</summary>
+            <section class="api-detail-section api-advanced-section">
+              <h3>推理设置</h3>
               <div class="grid grid-2">
-                <div class="field"><label for="profile-temperature">Temperature</label><input id="profile-temperature" v-model.number="profile.temperature" type="number" min="0" max="2" step=".1"></div>
                 <div class="field">
                   <label>默认推理强度</label>
                   <OptionSheet v-model="profile.reasoning_effort" :items="reasoningItems(profile)" title="选择推理强度" />
                   <small v-if="!adapterDefinition(profile).supportsReasoningEffort">该协议不发送推理强度，已选值会保留。</small>
                 </div>
               </div>
-              <div class="field"><label for="profile-prompt">附加系统提示词</label><textarea id="profile-prompt" v-model="profile.system_prompt" rows="3" placeholder="对该 API 下的模型统一生效"></textarea></div>
-              <div class="api-profile-hints">
-                <p class="field-hint">Temperature 越低越稳定，判分、题库导入和单词翻译建议 0.2–0.5。</p>
-                <p class="field-hint">长任务没有返回正文时，请重试或切换模型/API 配置。</p>
-              </div>
-            </details>
+            </section>
           </div>
 
-          <section class="api-detail-section" aria-labelledby="api-manage-title">
-            <h3 id="api-manage-title">模型管理</h3>
+          <details class="api-detail-section api-model-management">
+            <summary><h3 id="api-manage-title">模型目录</h3></summary>
             <div class="api-model-toolbar">
               <div class="search-field"><Search :size="16" /><input v-model="modelSearch[profile.id]" placeholder="搜索模型"></div>
               <div class="api-model-toolbar-actions">
@@ -496,12 +490,7 @@ onMounted(() => {
               <div v-if="!filteredModels(profile).length" class="api-model-empty">没有匹配的模型。</div>
             </div>
             <div v-else class="api-model-empty">还没有模型列表。保存配置后点击“同步模型”。</div>
-          </section>
-
-          <section class="api-detail-section" aria-labelledby="api-compat-title">
-            <h3 id="api-compat-title">兼容信息</h3>
-            <div class="field"><label for="profile-max-tokens">输出 Token 上限（已停用）</label><input id="profile-max-tokens" v-model.number="profile.max_tokens" type="number" disabled><small>保留旧配置兼容；当前不会向模型发送输出 Token 上限。</small></div>
-          </section>
+          </details>
 
           <div class="api-actions">
             <button class="button" type="button" :disabled="busy[busyKey('save',profile.id)]" @click="saveProfile(profile)">

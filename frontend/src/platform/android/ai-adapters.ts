@@ -159,7 +159,7 @@ const anthropic: AdapterDefinition = {
   serialize: (model, messages, options) => {
     const split = splitSystem(messages)
     return {
-      model, max_tokens: options.maxTokens || 4096, temperature: options.temperature,
+      model, ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}), temperature: options.temperature,
       ...(split.system ? { system: split.system } : {}),
       messages: split.messages.map(message => ({
         role: message.role,
@@ -282,7 +282,7 @@ const commandCode: AdapterDefinition = {
               ? { type: 'text', text: part.text }
               : { type: 'image', image: part.image_url.url }),
         })),
-        tools: [], system: split.system, max_tokens: options.maxTokens || 64000,
+        tools: [], system: split.system, ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
         stream: true, temperature: options.temperature,
         ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
       },

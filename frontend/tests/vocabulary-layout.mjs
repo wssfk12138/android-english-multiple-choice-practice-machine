@@ -185,11 +185,7 @@ try {
       cases++
     }
     const layers=page.locator('.review-answer .memory-layer')
-    if (width<=900 || height>width) {
-      await layers.nth(0).locator('summary').click()
-      await layers.nth(1).locator('summary').click()
-      await page.waitForFunction(()=>document.querySelectorAll('.review-answer details[open]').length===1)
-    }
+    assert.ok(await page.locator('.review-answer .memory-layer-static').filter({hasText:'真题原句'}).count() >= 1)
     const before=await page.locator('.review-actions button').evaluateAll(items=>items.map(el=>({x:el.offsetLeft,y:el.offsetTop,width:el.offsetWidth})))
     await page.getByRole('button',{name:'认识',exact:true}).click()
     await page.waitForFunction(()=>typeof globalThis.releaseRating==='function')

@@ -55,7 +55,7 @@ export function morphologyLabel(value: unknown): string {
     comparative: '比较级',
     superlative: '最高级',
   }
-  return labels[key] || label
+  return labels[key] || '词形待确认'
 }
 
 export function vocabularyEnhancements(value: RecordValue, hasSource: boolean) {
@@ -64,7 +64,7 @@ export function vocabularyEnhancements(value: RecordValue, hasSource: boolean) {
     .map((item: any) => ({ label: morphologyLabel(item.label), word: text(item.word, 100) })).filter((item: any) => item.label && item.word).slice(0, 10) : []
   const morphology = { lemma: text(source.lemma || value.lemma, 120), currentForm: morphologyLabel(source.currentForm), ambiguous: source.ambiguous === true, note: text(source.note, 200), forms }
   const example = safeObject(value.generatedExample || value.generated_example)
-  const generatedExample = hasSource ? {} : { sentence: text(example.sentence, 500), translation: text(example.translation, 500) }
+  const generatedExample = { sentence: text(example.sentence, 500), translation: text(example.translation, 500) }
   return { morphology, generatedExample }
 }
 
@@ -72,8 +72,7 @@ export function vocabularyEnhancements(value: RecordValue, hasSource: boolean) {
 export function validVocabularyEnhancements(value: RecordValue, term: string, hasSource: boolean): boolean {
   const { morphology, generatedExample } = vocabularyEnhancements(value, hasSource)
   if (!morphology.lemma || !morphology.currentForm || (morphology.ambiguous && !morphology.note)) return false
-  if (hasSource) return typeof value.contextualMeaning === 'string' && Boolean(value.contextualMeaning.trim())
-  if (!generatedExample.translation) return false
+  if (!generatedExample.translation || !generatedExample.sentence) return false
   return validSourceSentence({ surface_form: term, context_sentence: generatedExample.sentence })
 }
 
