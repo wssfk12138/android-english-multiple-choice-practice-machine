@@ -96,13 +96,21 @@ async function refreshLogs() {
 
 async function load() {
   try {
-    Object.assign(settings, await get('/android/updates/settings'))
-    await loadQuestionBankProfiles()
+    if (!activeSection.value || activeSection.value === 'sync') {
+      Object.assign(settings, await get('/android/updates/settings'))
+      await refreshLanSync()
+    }
+    if (!activeSection.value || activeSection.value === 'update') await loadQuestionBankProfiles()
   } catch (cause) {
     error.value = String(cause)
   }
-  await refreshLogs()
-  await refreshLanSync()
+  if (activeSection.value === 'diagnostics' || !activeSection.value) {
+    await refreshLogs()
+    if (databaseExportAvailable()) {
+      databaseChannelEnabled.value = true
+      await refreshDatabaseInfo()
+    }
+  }
 }
 
 async function refreshLanSync() {
@@ -504,11 +512,7 @@ function setSectionRef(name: string) {
 }
 
 onMounted(async () => {
-  load()
-  if (databaseExportAvailable()) {
-    databaseChannelEnabled.value = true
-    await refreshDatabaseInfo()
-  }
+  await load()
   // 设置中枢的“设备同步/诊断日志”等入口通过 ?section= 直接定位到对应分区。
   const section = String(route.query.section || '')
   if (section) {

@@ -4,11 +4,24 @@ import { LocalApiError } from './errors'
 
 // Device-local work. Never serialize jobs as learning results over LAN.
 let worker: Promise<void> | null = null
+let paused = false
+export function pauseVocabularyEnrichment() { paused = true }
+export function resumeVocabularyEnrichment() { paused = false; void startVocabularyEnrichmentWorker() }
+export async function queueMissingVocabularyEnrichment(limit = 200): Promise<number> {
+  const result = await run(
+    "INSERT INTO vocabulary_enrichment_jobs(entry_id) " +
+    "SELECT id FROM vocabulary_entries WHERE user_edited = 0 AND translation_status = 'ready' " +
+    "AND (morphology IS NULL OR morphology = '' OR generated_example IS NULL OR generated_example = '') " +
+    "AND id NOT IN (SELECT entry_id FROM vocabulary_enrichment_jobs) " +
+    "ORDER BY updated_at, id LIMIT ?", [limit])
+  return result.changes
+}
 export async function queueVocabularyEnrichment(id: number, contextChanged = false): Promise<void> {
   await run("INSERT INTO vocabulary_enrichment_jobs(entry_id) VALUES (?) ON CONFLICT(entry_id) DO UPDATE SET state='queued', error='', updated_at=CURRENT_TIMESTAMP WHERE vocabulary_enrichment_jobs.state NOT IN ('queued','inflight') OR ? = 1", [id, contextChanged ? 1 : 0])
 }
 async function work(): Promise<void> {
   while (true) {
+    if (paused) return
     const job = await row<{entry_id:number}>("SELECT entry_id FROM vocabulary_enrichment_jobs WHERE state='queued' ORDER BY updated_at,entry_id LIMIT 1")
     if (!job) return
     const claimed = await run("UPDATE vocabulary_enrichment_jobs SET state='inflight', error='', updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND state='queued'", [job.entry_id])
