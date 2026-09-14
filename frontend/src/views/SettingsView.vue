@@ -362,7 +362,7 @@ onMounted(() => {
           <div class="field"><label for="new-profile-key">API Key</label><input id="new-profile-key" v-model="newProfile.api_key" type="password" placeholder="本地接口通常可留空"></div>
           <div class="field">
             <label>默认推理强度</label>
-            <OptionSheet v-model="newProfile.reasoning_effort" :items="reasoningItems(newProfile)" title="选择推理强度" />
+            <OptionSheet v-model="newProfile.reasoning_effort" :disabled="!adapterDefinition(newProfile).supportsReasoningEffort" :items="reasoningItems(newProfile)" title="选择推理强度" />
           </div>
         </div>
         <div class="api-create-actions">
@@ -455,7 +455,7 @@ onMounted(() => {
               <div class="grid grid-2">
                 <div class="field">
                   <label>默认推理强度</label>
-                  <OptionSheet v-model="profile.reasoning_effort" :items="reasoningItems(profile)" title="选择推理强度" />
+                  <OptionSheet v-model="profile.reasoning_effort" :disabled="!adapterDefinition(profile).supportsReasoningEffort" :items="reasoningItems(profile)" title="选择推理强度" />
                   <small v-if="!adapterDefinition(profile).supportsReasoningEffort">该协议不发送推理强度，已选值会保留。</small>
                 </div>
               </div>
@@ -475,8 +475,8 @@ onMounted(() => {
                 <button class="button secondary compact" type="button" :disabled="busy[busyKey('sync',profile.id)]" @click="syncModels(profile)">
                   <RefreshCw :size="15" :class="{spinning:busy[busyKey('sync',profile.id)]}" />同步模型
                 </button>
-                <button type="button" @click="setAllVisible(profile,true)"><Eye :size="15" />全部显示</button>
-                <button type="button" @click="setAllVisible(profile,false)"><EyeOff :size="15" />全部隐藏</button>
+                <button type="button" @click="setAllVisible(profile,true)"><Eye :size="15" />整个配置全部显示</button>
+                <button type="button" @click="setAllVisible(profile,false)"><EyeOff :size="15" />整个配置全部隐藏</button>
               </div>
             </div>
             <p class="api-model-summary">共 {{ profile.models.length }} 个模型，显示 {{ visibleModelCount(profile) }} 个；当前列出 {{ filteredModels(profile).length }} 个</p>

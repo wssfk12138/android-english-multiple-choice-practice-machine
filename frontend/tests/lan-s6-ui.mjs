@@ -82,6 +82,8 @@ try {
     await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort())
     await page.goto(server.resolvedUrls.local[0] + '__s6')
     await page.locator('.named-keys').waitFor()
+    assert.equal(await page.getByRole('textbox',{name:'新密钥名称',exact:true}).count(),0)
+    await page.getByRole('button',{name:'管理密钥',exact:true}).click()
     if (android) for (const selector of ['.sync-connection']) {
       const panel=page.locator(selector)
       assert.equal(await panel.evaluate(el=>el.open),false)

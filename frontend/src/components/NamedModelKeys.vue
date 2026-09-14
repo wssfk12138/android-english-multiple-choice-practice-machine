@@ -9,6 +9,7 @@ const value = ref('')
 const busy = ref(false)
 const error = ref('')
 const drafts = ref<Record<string, string>>({})
+const managing = ref(false)
 async function edit(action: string, identity = '') {
   if (busy.value) return
   busy.value = true
@@ -27,6 +28,8 @@ async function edit(action: string, identity = '') {
 <template>
   <fieldset class="named-keys" :disabled="busy">
     <legend>API 密钥</legend>
+    <div class="key-summary"><span>{{ profile.keys?.find(key => key.id === profile.selected_key_id)?.name || (profile.has_api_key ? '已保存密钥' : '不使用密钥') }}</span><button type="button" :aria-expanded="managing" @click="managing=!managing">{{ managing ? '收起管理' : '管理密钥' }}</button></div>
+    <template v-if="managing">
     <label class="no-key"><input type="radio" :name="`key-${profile.id}`" :checked="!profile.selected_key_id" @change="edit('select')">不使用密钥</label>
     <div v-for="key in profile.keys || []" :key="key.id" class="key-row">
       <input type="radio" :name="`key-${profile.id}`" :checked="profile.selected_key_id === key.id" :aria-label="`选用 ${key.name}`" @change="edit('select', key.id)">
@@ -39,6 +42,8 @@ async function edit(action: string, identity = '') {
       <input v-model="value" aria-label="新 API 密钥" placeholder="API Key" type="password" maxlength="8192" autocomplete="new-password">
       <button type="button" :disabled="!name.trim() || !value.trim()" title="添加密钥" aria-label="添加密钥" @click="edit('add')"><Plus :size="18" /></button>
     </div>
+    </template>
+    <p v-if="busy" role="status">正在保存密钥…</p>
     <p v-if="error" role="alert">{{ error }}</p>
   </fieldset>
 </template>
@@ -46,6 +51,9 @@ async function edit(action: string, identity = '') {
 <style scoped>
 .named-keys { border: 0; padding: 0; margin: 12px 0; min-width: 0; }
 .named-keys legend { font-size: 1rem; font-weight: 600; margin-bottom: 8px; }
+.key-summary { display:flex; align-items:center; gap:12px; min-width:0; }
+.key-summary span { overflow-wrap:anywhere; min-width:0; }
+.named-keys .key-summary button { width:auto; min-width:88px; padding-inline:10px; flex-shrink:0; }
 .key-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) 44px 44px; align-items: center; gap: 8px; margin: 8px 0; }
 .new-key { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) 44px; gap: 8px; margin-top: 8px; }
 .named-keys input { min-width: 0; width: 100%; }

@@ -14,6 +14,8 @@ const fixtureProfile = {
   adapter: 'openai-chat',
   base_url: 'https://synthetic.example.test/openai-compatible/very-long-path/v1',
   has_api_key: true,
+  keys: [{ id: 'fixture-key', name: '合成已选密钥' }],
+  selected_key_id: 'fixture-key',
   enabled: true,
   is_default: true,
   default_model: 'synthetic-provider/long-model-name-for-layout-validation',
@@ -34,10 +36,21 @@ const fixtureProfile = {
 const apiStub = `
 const profile = ${JSON.stringify(fixtureProfile)};
 export async function get(path) {
-  if (path === '/ai/profiles') { const n=window.modelCount ?? 8; const models=Array.from({length:n},(_,i)=>({...profile.models[i%8],model_id:'model-'+i,is_visible:i%2===0})); return [{...structuredClone(profile),models},{...structuredClone(profile),id:8,name:'第二配置',models}]; }
+  if (path === '/ai/profiles') { const n=window.modelCount ?? 8; const models=Array.from({length:n},(_,i)=>({...profile.models[i%8],model_id:'model-'+i,is_visible:i%2===0})); return [{...structuredClone(profile),models},{...structuredClone(profile),id:8,name:'第二配置',adapter:'anthropic',models}]; }
   throw new Error('Unexpected mock GET: ' + path);
 }
-export async function post(path) {
+export async function post(path, body) {
+  if (path.endsWith('/keys')) {
+    window.keyActions = [...(window.keyActions || []), body.action];
+    if (body.action === 'rename') profile.keys.find(key => key.id === body.identity).name = body.name;
+    if (body.action === 'add') profile.keys.push({id:'added-key',name:body.name});
+    if (body.action === 'select') profile.selected_key_id = body.identity;
+    if (body.action === 'delete') {
+      profile.keys = profile.keys.filter(key => key.id !== body.identity);
+      if (profile.selected_key_id === body.identity) profile.selected_key_id = '';
+    }
+    return structuredClone({keys:profile.keys,selected_key_id:profile.selected_key_id,has_api_key:!!profile.selected_key_id});
+  }
   if (path === '/ai/profiles') return structuredClone(profile);
   if (path.endsWith('/models/sync')) return { models: structuredClone(profile.models) };
   if (path.endsWith('/test')) return { message: '合成连接成功' };
@@ -103,6 +116,45 @@ try {
       await page.locator('.new-profile .api-profile-body').waitFor()
       await page.locator('.api-profile-expand').first().click()
       await page.locator('.api-profile-card:not(.new-profile) .api-profile-body').waitFor()
+      const keyBox = page.locator('.named-keys').first()
+      assert.equal(await keyBox.getByPlaceholder('密钥名称').count(), 0)
+      await keyBox.getByRole('button', { name: '管理密钥', exact: true }).click()
+      assert.equal(await keyBox.getByPlaceholder('密钥名称').count(), 1)
+      assert.equal(await keyBox.getByLabel('新 API 密钥').getAttribute('type'), 'password')
+      await keyBox.getByLabel('密钥名称', {exact:true}).fill('重新命名的密钥')
+      await keyBox.getByRole('button', {name:'保存名称',exact:true}).click()
+      await page.waitForFunction(()=>window.keyActions?.includes('rename'))
+      assert.match(await keyBox.locator('.key-summary').innerText(),/重新命名的密钥/)
+      await keyBox.getByLabel('新密钥名称', {exact:true}).fill('新增合成密钥')
+      await keyBox.getByLabel('新 API 密钥', {exact:true}).fill('synthetic-secret-for-ui-test')
+      await keyBox.getByRole('button',{name:'添加密钥',exact:true}).click()
+      await page.waitForFunction(()=>window.keyActions?.includes('add'))
+      await keyBox.getByRole('radio',{name:'选用 新增合成密钥',exact:true}).check()
+      await page.waitForFunction(()=>window.keyActions?.includes('select'))
+      assert.match(await keyBox.locator('.key-summary').innerText(),/新增合成密钥/)
+      assert.equal(await keyBox.getByLabel('新 API 密钥').inputValue(),'')
+      assert.equal((await keyBox.innerText()).includes('synthetic-secret-for-ui-test'),false)
+      await keyBox.getByRole('button', { name: '收起管理', exact: true }).click()
+      assert.equal(await keyBox.getByPlaceholder('密钥名称').count(), 0)
+      assert.match(await keyBox.locator('.key-summary').innerText(),/新增合成密钥/)
+      await keyBox.getByRole('button', {name:'管理密钥',exact:true}).click()
+      await keyBox.locator('.key-row').last().getByRole('button',{name:'删除密钥',exact:true}).click()
+      await page.waitForFunction(()=>window.keyActions?.includes('delete'))
+      assert.match(await keyBox.locator('.key-summary').innerText(),/不使用密钥/)
+      const newProtocol = page.locator('.new-profile .option-sheet-trigger').first()
+      const newReasoning = page.locator('.new-profile .option-sheet-trigger').last()
+      assert.equal(await newReasoning.isEnabled(),true)
+      await newProtocol.click()
+      await page.getByRole('option',{name:/Anthropic Messages/}).click()
+      assert.equal(await newReasoning.isDisabled(),true)
+      await newProtocol.click()
+      await page.getByRole('option',{name:/OpenAI Chat 兼容/}).click()
+      assert.equal(await newReasoning.isEnabled(),true)
+      const reasoning = page.locator('.api-advanced-section .option-sheet-trigger')
+      assert.equal(await reasoning.isEnabled(),true)
+      await reasoning.click()
+      await page.getByRole('option',{name:'低',exact:true}).click()
+      assert.equal(await reasoning.innerText(),'低')
       await page.evaluate(({ width, height, fontScale }) => {
         document.documentElement.dataset.orientation = width > height ? 'landscape' : 'portrait'
         if (fontScale === 1) return
@@ -170,6 +222,8 @@ try {
     assert.equal(await page.locator('.api-model-row').count(),Math.floor(count/2))
     await page.getByRole('button',{name:'显示中',exact:true}).click()
     assert.equal(await page.locator('.api-model-row').count(),Math.ceil(count/2))
+    await page.getByRole('button',{name:'整个配置全部隐藏',exact:true}).click()
+    await page.getByRole('button',{name:'整个配置全部显示',exact:true}).click()
     await page.getByRole('button',{name:'保存配置',exact:true}).click()
     await page.waitForFunction(()=>window.savedProfile)
     const saved=await page.evaluate(()=>window.savedProfile)
@@ -178,6 +232,7 @@ try {
     await page.locator('.api-profile-expand').nth(1).click()
     assert.equal(await page.locator('.api-profile-body').count(),1)
     assert.equal(await page.locator('.api-profile-card').nth(0).locator('.api-profile-body').count(),0)
+    assert.equal(await page.locator('.api-profile-card').nth(1).locator('.api-advanced-section .option-sheet-trigger').isDisabled(), true)
     console.log('PASS model directory count/search/filter/preservation/single-open',count)
     await page.close()
   }
