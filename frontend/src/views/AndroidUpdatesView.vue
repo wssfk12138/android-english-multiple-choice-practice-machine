@@ -45,8 +45,9 @@ import { CATEGORY_LABELS, DEFAULT_CATEGORIES, type LanCategory } from '../platfo
 
 const router = useRouter()
 const route = useRoute()
+const props = defineProps<{ section?: string }>()
 const sectionRefs: Record<string, HTMLElement | null> = {}
-const activeSection = computed(() => String(route.query.section || ''))
+const activeSection = computed(() => props.section || String(route.query.section || ''))
 const settings = reactive({
   question_bank_catalog_url: '',
 })

@@ -26,6 +26,8 @@ export default createRouter({
     { path: '/settings', component: SettingsView },
     { path: '/trash', component: TrashView },
     { path: '/android-updates', component: AndroidUpdatesView },
+    { path: '/android-sync', component: AndroidUpdatesView, props: { section: 'sync' } },
+    { path: '/android-diagnostics', component: AndroidUpdatesView, props: { section: 'diagnostics' } },
     { path: '/notes', component: NotesHubView },
     { path: '/mobile-settings', component: MobileSettingsView },
     { path: '/help', component: HelpView },

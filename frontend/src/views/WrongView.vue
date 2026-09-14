@@ -336,7 +336,6 @@ async function archive(unitIds: number[]) {
                   </button>
                   <div v-if="moreMenuFor === unit.unit_id" class="wrong-more-menu" role="menu">
                     <button class="wrong-more-item" role="menuitem" type="button" :disabled="!unit.current_count || Boolean(analyzingKey)" @click="analyzeUnit(unit)"><Sparkles :size="14" />{{ analyzingKey === `unit-${unit.unit_id}` ? '分析中…' : analysisLabel(unit) }}</button>
-                    <button class="wrong-more-item danger-text" type="button" role="menuitem" @click="archive([unit.unit_id])"><Trash2 :size="15" />删除错题</button>
                   </div>
                 </div>
               </div>
