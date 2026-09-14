@@ -80,6 +80,7 @@ const notice = ref('')
 const error = ref('')
 const scannerOpen = ref(false)
 const scannedPairing = ref<LanSyncQrPayload['pairing']>()
+const syncConnectionOpen = ref(false)
 const packageKey = (item: any) => `${item.packageId}@${item.contentVersion}`
 const allPackagesSelected = computed(() => Boolean(questionBankCatalog.value?.packages?.length)
   && questionBankCatalog.value.packages.every((item: any) => selectedPackages.value.includes(packageKey(item))))
@@ -123,6 +124,7 @@ async function refreshLanSync() {
     lanSync.effectiveCategories = result.effective_categories || []
     lanSync.auto = Boolean(result.auto)
     lanSync.configured = Boolean(result.configured)
+    syncConnectionOpen.value = !lanSync.configured
     Object.assign(lanSync.runtime, result.runtime || {}, {
       lastSyncAt: result.runtime?.lastSyncAt || result.last_sync_at || '',
     })
@@ -545,7 +547,7 @@ onMounted(async () => {
         </div>
         <label class="lan-sync-header-toggle selection-option"><span>自动同步</span><input v-model="lanSync.auto" type="checkbox"></label>
       </div>
-      <details class="sync-connection"><summary>连接</summary>
+      <details class="sync-connection" :open="syncConnectionOpen" @toggle="syncConnectionOpen = ($event.target as HTMLDetailsElement).open"><summary>连接</summary>
       <div class="lan-sync-connection-grid">
         <div class="field">
           <label for="lan-sync-host">电脑端地址</label>

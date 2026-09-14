@@ -1,5 +1,5 @@
 import { enrichVocabularyEntry } from './ai'
-import { row, run } from './database'
+import { row, rows, run } from './database'
 import { LocalApiError } from './errors'
 
 // Device-local work. Never serialize jobs as learning results over LAN.
@@ -15,6 +15,14 @@ export async function queueMissingVocabularyEnrichment(limit = 200): Promise<num
     "AND id NOT IN (SELECT entry_id FROM vocabulary_enrichment_jobs) " +
     "ORDER BY updated_at, id LIMIT ?", [limit])
   return result.changes
+}
+export async function vocabularyEnrichmentProgress(): Promise<{ queued: number; inflight: number; ready: number; failed: number }> {
+  const items = await rows<{ state: string; count: number }>('SELECT state, COUNT(*) AS count FROM vocabulary_enrichment_jobs GROUP BY state')
+  const progress = { queued: 0, inflight: 0, ready: 0, failed: 0 }
+  for (const item of items) {
+    if (item.state in progress) progress[item.state as keyof typeof progress] = Number(item.count) || 0
+  }
+  return progress
 }
 export async function queueVocabularyEnrichment(id: number, contextChanged = false): Promise<void> {
   await run("INSERT INTO vocabulary_enrichment_jobs(entry_id) VALUES (?) ON CONFLICT(entry_id) DO UPDATE SET state='queued', error='', updated_at=CURRENT_TIMESTAMP WHERE vocabulary_enrichment_jobs.state NOT IN ('queued','inflight') OR ? = 1", [id, contextChanged ? 1 : 0])
