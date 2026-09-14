@@ -34,7 +34,7 @@ const fixtureProfile = {
 const apiStub = `
 const profile = ${JSON.stringify(fixtureProfile)};
 export async function get(path) {
-  if (path === '/ai/profiles') return [structuredClone(profile)];
+  if (path === '/ai/profiles') { const n=window.modelCount ?? 8; const models=Array.from({length:n},(_,i)=>({...profile.models[i%8],model_id:'model-'+i,is_visible:i%2===0})); return [{...structuredClone(profile),models},{...structuredClone(profile),id:8,name:'第二配置',models}]; }
   throw new Error('Unexpected mock GET: ' + path);
 }
 export async function post(path) {
@@ -43,7 +43,7 @@ export async function post(path) {
   if (path.endsWith('/test')) return { message: '合成连接成功' };
   throw new Error('Unexpected mock POST: ' + path);
 }
-export async function put() { return {}; }
+export async function put(path,body) { window.savedProfile=body; return {}; }
 export async function del() { return {}; }
 `
 
@@ -98,10 +98,10 @@ try {
       page.on('pageerror', error => errors.push(error.message))
       await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort())
       await page.goto(server.resolvedUrls.local[0] + '__settings-layout')
-      await page.locator('.api-profile-card').waitFor()
+      await page.locator('.api-profile-card').first().waitFor()
       await page.getByRole('button', { name: '添加 API 配置', exact: true }).click()
       await page.locator('.new-profile .api-profile-body').waitFor()
-      await page.locator('.api-profile-expand').click()
+      await page.locator('.api-profile-expand').first().click()
       await page.locator('.api-profile-card:not(.new-profile) .api-profile-body').waitFor()
       await page.evaluate(({ width, height, fontScale }) => {
         document.documentElement.dataset.orientation = width > height ? 'landscape' : 'portrait'
@@ -112,10 +112,13 @@ try {
       }, { width, height, fontScale })
 
       for (const advanced of await page.locator('.api-advanced-section').all()) {
-        assert.equal(await advanced.getAttribute('open'),null)
-        await advanced.locator('summary').click()
-        assert.equal(await advanced.evaluate(el=>el.open),true)
+        assert.equal(await advanced.locator('summary').count(),0)
+        assert.match(await advanced.innerText(),/推理强度/)
       }
+      const catalog = page.locator('.api-model-management')
+      assert.equal(await catalog.evaluate(el=>el.open),false)
+      await catalog.locator('summary').click()
+      assert.equal(await catalog.evaluate(el=>el.open),true)
       const geometry = await page.evaluate(() => {
         const visible = element => {
           const style = getComputedStyle(element)
@@ -148,6 +151,35 @@ try {
       console.log(`${width}x${height}-font-${fontScale}: create, details and save bounds passed`)
       await page.close()
     }
+  }
+  for (const count of [0,1,100,1000]) {
+    const page=await browser.newPage({viewport:{width:1280,height:800}})
+    await page.addInitScript(n=>window.modelCount=n,count)
+    await page.goto(server.resolvedUrls.local[0]+'__settings-layout')
+    await page.locator('.api-profile-expand').first().click()
+    const catalog=page.locator('.api-model-management')
+    await catalog.waitFor()
+    assert.match(await catalog.locator('summary').innerText(),new RegExp('共 '+count+' 个，显示 '+Math.ceil(count/2)+' 个'))
+    await catalog.locator('summary').click()
+    assert.equal(await page.locator('.api-model-row').count(),count)
+    if(count){ const r=await page.locator('.api-model-list').boundingBox();assert.ok(r.height<=322&&r.width<=462,JSON.stringify(r)) }
+    await page.getByPlaceholder('搜索模型').fill('no-matches')
+    assert.equal(await page.locator('.api-model-row').count(),0)
+    await page.getByPlaceholder('搜索模型').fill('')
+    await page.getByRole('button',{name:'已隐藏',exact:true}).click()
+    assert.equal(await page.locator('.api-model-row').count(),Math.floor(count/2))
+    await page.getByRole('button',{name:'显示中',exact:true}).click()
+    assert.equal(await page.locator('.api-model-row').count(),Math.ceil(count/2))
+    await page.getByRole('button',{name:'保存配置',exact:true}).click()
+    await page.waitForFunction(()=>window.savedProfile)
+    const saved=await page.evaluate(()=>window.savedProfile)
+    assert.equal(saved.temperature,fixtureProfile.temperature)
+    assert.equal(saved.system_prompt,fixtureProfile.system_prompt)
+    await page.locator('.api-profile-expand').nth(1).click()
+    assert.equal(await page.locator('.api-profile-body').count(),1)
+    assert.equal(await page.locator('.api-profile-card').nth(0).locator('.api-profile-body').count(),0)
+    console.log('PASS model directory count/search/filter/preservation/single-open',count)
+    await page.close()
   }
 } finally {
   await browser?.close()

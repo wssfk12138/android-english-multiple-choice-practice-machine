@@ -74,7 +74,7 @@ const settle = async () => {
 const editLabel = '\u7f16\u8f91'
 const saveLabel = '\u4fdd\u5b58\u4fee\u6539'
 const cancelLabel = '\u53d6\u6d88'
-const manual = { phonetic: '/manual/', part_of_speech: 'noun', contextual_meaning: 'Synthetic context', common_meaning: 'Synthetic meaning', note: 'Synthetic note <b>plain text</b>' }
+const manual = { phonetic: '/manual/', part_of_speech: 'noun', common_meaning: 'Synthetic meaning', note: 'Synthetic note <b>plain text</b>' }
 
 function loadModule(path, modules) {
   const context = { exports: {}, require(name) {
@@ -116,6 +116,7 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
     './database': database,
     './errors': errors,
     './model-key-store': {},
+    './vocabulary-enrichment-fields': {},
     './native-http': {},
     './ai-adapters': {},
     '../../vocabulary-context': {
@@ -168,6 +169,7 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
         name: 'VocabularyEnrichmentStub',
         setup() { return () => vue.h('span', { class: 'vocabulary-enrichment-stub' }) },
       } }
+      if (name === '../platform/runtime') return { platformRuntime: { isAndroid: false } }
       if (name === '../platform/dialogs') return { confirmDialog: async () => true }
       if (name === '../services/vocabularyDisplayConfig') return {
         loadVocabDisplayConfig: () => ({
@@ -204,7 +206,7 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
     async fill(values) {
       const form = byClass(detail(), 'vocab-edit')[0]
       const fields = find(form, item => ['input', 'textarea'].includes(item.tag))
-      assert.equal(fields.length, 5)
+      assert.equal(fields.length, Object.keys(manual).length)
       for (const [index, key] of Object.keys(manual).entries()) {
         fields[index].value = values[key]
         fields[index].dispatchEvent({ type: 'input' })

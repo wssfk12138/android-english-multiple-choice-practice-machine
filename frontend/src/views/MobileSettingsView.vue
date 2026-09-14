@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import {
   BookOpen,
-  ChevronDown,
   CloudUpload,
   Database,
   Download,
@@ -12,22 +11,16 @@ import {
   NotebookText,
   ScrollText,
   Settings2,
-  Sun,
   Trash2,
 } from 'lucide-vue-next'
-import { computed, onMounted, reactive, ref } from 'vue'
-import { loadVocabularyEnrichment, saveVocabularyEnrichment } from '../services/vocabularyTranslationConfig'
+import { computed } from 'vue'
+import '../settings-hub.css'
 import {
   VOCAB_DISPLAY_OPTIONS,
   loadVocabDisplayConfig,
-  saveVocabDisplayConfig,
-  type VocabDisplayKey,
 } from '../services/vocabularyDisplayConfig'
 
-const enrichmentEnabled = ref(loadVocabularyEnrichment())
-const dark = ref(false)
-const vocabDisplayConfig = reactive<Record<VocabDisplayKey, boolean>>(loadVocabDisplayConfig())
-// 分组入口按规格固定顺序；设备与维护三项都落在“更新与远程题库”页的对应分区。
+// 每个设置入口对应独立页面。
 const groups = [
   {
     title: '题库与数据',
@@ -46,35 +39,13 @@ const groups = [
     title: '设备与维护',
     items: [
       { label: '设备同步', to: '/android-sync', icon: CloudUpload },
-      { label: '更新与远程题库', to: '/android-updates?section=update', icon: Download },
+      { label: '更新与远程题库', to: '/android-updates', icon: Download },
       { label: '诊断日志', to: '/android-diagnostics', icon: ScrollText },
     ],
   },
 ] as const
 
-const vocabDisplaySummary = computed(() => {
-  const enabled = VOCAB_DISPLAY_OPTIONS.filter(option => option.key === 'common_meaning' || vocabDisplayConfig[option.key])
-  return enabled.length ? enabled.map(option => option.label).join('、') : '已全部隐藏'
-})
-
-function toggleVocabDisplay(key: VocabDisplayKey) {
-  vocabDisplayConfig[key] = !vocabDisplayConfig[key]
-  saveVocabDisplayConfig({ ...vocabDisplayConfig })
-}
-
-function applyTheme() {
-  document.documentElement.classList.toggle('dark', dark.value)
-  localStorage.setItem('linjian-theme', dark.value ? 'dark' : 'light')
-}
-function toggleTheme() {
-  dark.value = !dark.value
-  applyTheme()
-}
-
-onMounted(() => {
-  dark.value = document.documentElement.classList.contains('dark')
-  document.documentElement.classList.toggle('dark', dark.value)
-})
+const vocabDisplaySummary = computed(() => '已开启 ' + VOCAB_DISPLAY_OPTIONS.filter(option => loadVocabDisplayConfig()[option.key]).length + ' 项')
 </script>
 
 <template>
@@ -86,14 +57,10 @@ onMounted(() => {
     <section class="settings-hub-group" aria-labelledby="hub-appearance-title">
       <h2 id="hub-appearance-title" class="settings-hub-group-title">外观与显示</h2>
       <div class="settings-hub-rows">
-        <div class="settings-hub-row">
-          <span class="settings-hub-row-icon"><Moon v-if="dark" :size="19" /><Sun v-else :size="19" /></span>
-          <span><strong>深色模式</strong></span>
-          <button class="settings-theme-switch" type="button" role="switch" :aria-checked="dark" aria-label="深色模式" @click="toggleTheme"><span aria-hidden="true"></span></button>
-        </div>
+        <RouterLink class="settings-hub-row link" to="/android-appearance"><span class="settings-hub-row-icon"><Moon :size="19" /></span><span><strong>外观与显示</strong><small>浅色或深色主题</small></span><b class="settings-hub-chevron">›</b></RouterLink>
         <RouterLink class="settings-hub-row link" to="/android-vocabulary-display">
             <span class="settings-hub-row-icon"><Eye :size="19" /></span>
-            <span class="settings-hub-row-copy"><strong>单词本显示</strong><small>{{ vocabDisplaySummary }}</small></span>
+            <span class="settings-hub-row-copy"><strong>单词显示</strong><small>{{ vocabDisplaySummary }}</small></span>
             <b class="settings-hub-chevron" aria-hidden="true">›</b>
         </RouterLink>
       </div>
@@ -129,37 +96,3 @@ onMounted(() => {
     <div class="settings-hub-brand" aria-hidden="true"><Database :size="15" />学习数据保存在本机，可随时在设备同步中备份</div>
   </div>
 </template>
-
-<style scoped>
-.settings-theme-switch { width: 52px; height: 48px; padding: 10px 0; border: 0; background: transparent; cursor: pointer; flex-shrink: 0; }
-.settings-theme-switch > span { display: block; position: relative; width: 52px; height: 28px; border-radius: 14px; background: var(--muted); }
-.settings-theme-switch > span::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: white; }
-.settings-theme-switch[aria-checked="true"] > span { background: var(--primary); }
-.settings-theme-switch[aria-checked="true"] > span::after { transform: translateX(24px); }
-.settings-theme-switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-
-.settings-hub-group { margin: 0 0 18px; }
-.settings-hub-group-title { margin: 0 0 8px; padding: 0 4px; color: var(--muted); font-size: 13px; font-weight: 700; letter-spacing: .04em; }
-.settings-hub-rows { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-sm); }
-.settings-hub-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) 52px; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 6px 14px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; background: transparent; color: var(--ink); text-align: left; }
-.settings-hub-rows > :last-child { border-bottom: 0; }
-.settings-hub-row.link { min-height: 56px; }
-.settings-hub-row.link:hover { background: var(--primary-faint); }
-.settings-hub-row-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--primary-soft); color: var(--primary); }
-.settings-hub-row strong { font-size: 16px; line-height: 1.5; font-weight: 600; }
-.settings-hub-row-copy { display: grid; gap: 1px; min-width: 0; }
-.settings-hub-row-copy small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.settings-hub-chevron { justify-self: end; color: var(--muted); transition: transform .2s ease; }
-.settings-hub-chevron.open { transform: rotate(180deg); }
-.settings-hub-row.stack { display: block; padding: 0; }
-.settings-hub-row-toggle { display: grid; width: 100%; min-height: 56px; padding: 6px 14px; grid-template-columns: 32px minmax(0, 1fr) 52px; gap: 12px; align-items: center; border: 0; background: transparent; color: var(--ink); text-align: left; }
-.settings-hub-row-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-.settings-vocab-display-options { display: grid; gap: 0; padding: 2px 14px 12px 58px; }
-.settings-vocab-display-options label { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--line); font-size: 15px; }
-.settings-vocab-display-options label:last-child { border-bottom: 0; }
-.settings-vocab-display-options input { width: 19px; height: 19px; }
-.settings-hub-brand { display: flex; align-items: center; gap: 7px; justify-content: center; margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.6; }
-@media (max-width: 720px) {
-  .settings-hub-row, .settings-hub-row-toggle { grid-template-columns: 32px minmax(0, 1fr) 52px; }
-}
-</style>

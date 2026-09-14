@@ -8,7 +8,8 @@ import { del, get, post, put } from '../api'
 import { confirmDialog } from '../platform/dialogs'
 import { loadVocabDisplayConfig } from '../services/vocabularyDisplayConfig'
 import { reconcileDueQueue, orderedDueKeys, completeDueWord, wordKey, type DueQueue } from '../vocabulary-due-queue'
-import { queueMissingVocabularyEnrichment, startVocabularyEnrichmentWorker } from '../platform/android/vocabulary-enrichment-runner'
+import { nextTick } from 'vue'
+import { platformRuntime } from '../platform/runtime'
 
 const route = useRoute()
 const items = ref<any[]>([])
@@ -89,7 +90,22 @@ function applyLoadedPage(result: any) {
 }
 const reviewWord = computed(() => reviewItems.value[reviewIndex.value])
 const displayConfig = ref(loadVocabDisplayConfig())
-const expandedAll = ref(false)
+const expandedAll = ref(true)
+const expansionToken = ref(0)
+const enrichment = ref<any>(null)
+async function enrichmentAction(action: string) {
+  if (!platformRuntime.isAndroid) return
+  try {
+    enrichment.value = await post('/vocabulary/enrichment-runs', { action })
+    startTranslationRefresh()
+  } catch (cause) { error.value = String(cause) }
+}
+async function initializeEnrichment() {
+  if (!platformRuntime.isAndroid) return
+  await enrichmentAction('inventory')
+  await nextTick()
+  if (!reviewDisposed) await enrichmentAction('start')
+}
 function isAndroidPortrait() {
   return document.documentElement.dataset.platform === 'android'
     && document.documentElement.dataset.orientation === 'portrait'
@@ -134,16 +150,21 @@ function stopTranslationRefresh() {
 }
 
 async function refreshTranslationStatuses() {
-  if (translationRefreshBusy || reviewDisposed || reviewMode.value) return
+  if (translationRefreshBusy || reviewDisposed) return
   if (document.visibilityState === 'hidden') return
   translationRefreshTick += 1
   if (translationRefreshTick % translationRefreshStride() !== 0) return
   translationRefreshBusy = true
   try {
     const next: any = await get('/vocabulary/translation-status')
+    if (platformRuntime.isAndroid) {
+      const wasWaiting = enrichment.value?.waiting_configuration
+      enrichment.value = await get('/vocabulary/enrichment-status')
+      if (wasWaiting && !enrichment.value.waiting_configuration && !enrichment.value.paused) await enrichmentAction('start')
+    }
     const previous = translationProgress.value
     translationProgress.value = next
-    if (!(next.queued > 0 || next.translating > 0 || next.enrichment_queued > 0 || next.enrichment_inflight > 0)) {
+    if (!(next.queued > 0 || next.translating > 0 || next.enrichment_queued > 0 || next.enrichment_inflight > 0 || enrichment.value?.waiting_configuration)) {
       stopTranslationRefresh()
     }
     if (editing.value || reviewMode.value) return
@@ -177,8 +198,6 @@ async function startPendingTranslations() {
     })
     await load()
     startTranslationRefresh()
-    // Enrol legacy ready entries in a bounded background pass; never block the first list render.
-    void queueMissingVocabularyEnrichment(200).then(() => startVocabularyEnrichmentWorker()).catch(() => {})
   } catch (cause) {
     error.value = String(cause)
     await load()
@@ -228,7 +247,7 @@ async function select(id: number, toggle = true) {
     error.value = ''
     Object.assign(editForm, selected.value)
     editing.value = false
-    expandedAll.value = false
+    expandedAll.value = true
   } catch (e) {
     error.value = String(e)
   }
@@ -398,6 +417,7 @@ onBeforeUnmount(() => {
 onMounted(async () => {
   if (route.query.review === 'scheduled') await startReview()
   else await startPendingTranslations()
+  void initializeEnrichment()
 })
 onBeforeUnmount(stopTranslationRefresh)
 
@@ -411,7 +431,7 @@ const statChips = computed(() => [
 
 const listFilters = [
   ['all', '全部单词'],
-  ['review', '今日复习'],
+  ['review', '每日一背'],
   ['frequent', '高频词'],
   ['learning', '学习中'],
   ['mastered', '已掌握'],
@@ -429,6 +449,14 @@ function filterCount(key: string) {
 
 <template>
   <div class="page vocabulary-page">
+    <section v-if="enrichment && (enrichment.queued || enrichment.inflight || enrichment.failed || enrichment.error)" class="vocab-enrichment-status" aria-live="polite">
+      <span>历史词条补缺 · 已完成 {{ enrichment.ready }} · 待补 {{ enrichment.queued + enrichment.inflight }} · 失败 {{ enrichment.failed }}</span>
+      <small>{{ enrichment.waiting_configuration ? '等待配置默认模型' : enrichment.profile }} · {{ enrichment.paused ? '已暂停（当前请求完成后停止）' : '后台小批量补缺' }}</small>
+      <button class="button ghost" @click="enrichmentAction(enrichment.paused ? 'resume' : 'pause')">{{ enrichment.paused ? '继续补缺' : '暂停补缺' }}</button>
+      <button v-if="enrichment.failed" class="button ghost" @click="enrichmentAction('retry')">重试失败词条</button>
+      <p v-if="enrichment.error" class="error" role="alert">补缺已停止：{{ enrichment.error }}</p>
+      <button v-if="enrichment.error && !enrichment.failed" class="button ghost" @click="enrichmentAction('start')">重试补缺队列</button>
+    </section>
     <div class="page-head">
       <div><h1>我的单词本</h1><span v-if="currentBankScope" class="muted">当前题库</span></div>
       <div style="display:flex;gap:8px;align-items:center">
@@ -518,7 +546,7 @@ function filterCount(key: string) {
             <section v-if="selected?.id===word.id" class="portrait-vocab-detail" aria-label="单词详情">
               <div class="vocab-detail-head">
                 <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2><VocabularyTerm :term="selected.lemma || selected.term" /></h2><p>{{ selected.phonetic }}<span v-if="selected.part_of_speech">{{ selected.phonetic ? ' · ' : '' }}{{ selected.part_of_speech }}</span></p></div>
-                <div class="vocab-tools"><button class="button ghost" @click="expandedAll=!expandedAll">{{ expandedAll ? '收起' : '显示全部栏目' }}</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" aria-label="删除单词" @click="removeEntry"><Trash2 :size="17" /></button></div>
+                <div class="vocab-tools"><button class="button ghost" @click="expandedAll=true; expansionToken++">展开已启用栏目</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" aria-label="删除单词" @click="removeEntry"><Trash2 :size="17" /></button></div>
               </div>
               <div v-if="!editing && selected.translation_status!=='ready'" class="vocab-pending-panel">
                 <RefreshCw :size="22" /><strong>{{ translationStatusText(selected.translation_status, true) }}</strong>
@@ -526,12 +554,12 @@ function filterCount(key: string) {
                 <button v-if="selected.translation_status==='failed' || selected.translation_status==='pending'" class="button secondary" @click="retryTranslation">重试全部待翻译</button>
               </div>
               <template v-if="!editing && hasSelectedContent">
-                <VocabularyMemoryContent :entry="selected" :config="displayConfig" :expanded="expandedAll" />
+                <VocabularyMemoryContent :entry="selected" :config="displayConfig" :expanded="expandedAll" :expansion-token="expansionToken" />
                 <p v-if="selected.enrichment_status === 'failed'" class="error vocab-enrich-error">补全失败：{{ selected.enrichment_error }}</p>
                 <button v-if="selected.enrichment_status === 'failed'" class="button secondary" @click="retryTranslation">重试失败任务</button>
                 <div class="detail-actions"><button class="button secondary" @click="put(`/vocabulary/${selected.id}`,{manually_frequent:!selected.manually_frequent}).then(()=>load())"><Star :size="16" />{{ selected.manually_frequent ? '取消重点' : '标记重点' }}</button><button class="button" @click="put(`/vocabulary/${selected.id}`,{study_status:selected.study_status==='mastered'?'learning':'mastered'}).then(()=>load())"><Check :size="16" />{{ selected.study_status === 'mastered' ? '恢复学习' : '标记已掌握' }}</button></div>
               </template>
-              <div v-else-if="editing" class="vocab-edit"><label>音标<input v-model="editForm.phonetic"></label><label>词性<input v-model="editForm.part_of_speech"></label><label>当前语境释义<textarea rows="3" v-model="editForm.contextual_meaning"></textarea></label><label>常用释义<textarea rows="3" v-model="editForm.common_meaning"></textarea></label><label>我的笔记<textarea rows="4" v-model="editForm.note"></textarea></label><div><button class="button" @click="saveEdit">保存修改</button><button class="button ghost" @click="editing=false">取消</button></div></div>
+              <div v-else-if="editing" class="vocab-edit"><label>音标<input v-model="editForm.phonetic"></label><label>词性<input v-model="editForm.part_of_speech"></label><label>常用释义<textarea rows="3" v-model="editForm.common_meaning"></textarea></label><label>我的笔记<textarea rows="4" v-model="editForm.note"></textarea></label><div><button class="button" @click="saveEdit">保存修改</button><button class="button ghost" @click="editing=false">取消</button></div></div>
             </section>
           </template>
           <div v-if="!items.length" class="empty">这里还没有符合条件的单词。</div>
@@ -542,7 +570,7 @@ function filterCount(key: string) {
       <section class="vocab-detail desktop-vocab-detail card" v-if="selected">
         <div class="vocab-detail-head">
           <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2><VocabularyTerm :term="selected.lemma || selected.term" /></h2><p>{{ selected.phonetic }}<span v-if="selected.part_of_speech">{{ selected.phonetic ? ' · ' : '' }}{{ selected.part_of_speech }}</span></p></div>
-          <div class="vocab-tools"><button class="button ghost" @click="expandedAll=!expandedAll">{{ expandedAll ? '收起全部' : '显示全部栏目' }}</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" @click="removeEntry"><Trash2 :size="17" /></button></div>
+          <div class="vocab-tools"><button class="button ghost" @click="expandedAll=true; expansionToken++">展开已启用栏目</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" @click="removeEntry"><Trash2 :size="17" /></button></div>
         </div>
         <div v-if="!editing && selected.translation_status!=='ready'" class="vocab-pending-panel">
           <RefreshCw :size="22" /><strong>{{ translationStatusText(selected.translation_status, true) }}</strong>
@@ -550,7 +578,7 @@ function filterCount(key: string) {
           <button v-if="selected.translation_status==='failed' || selected.translation_status==='pending'" class="button secondary" @click="retryTranslation">重试全部待翻译</button>
         </div>
         <template v-if="!editing && hasSelectedContent">
-                <VocabularyMemoryContent :entry="selected" :config="displayConfig" :expanded="expandedAll" />
+                <VocabularyMemoryContent :entry="selected" :config="displayConfig" :expanded="expandedAll" :expansion-token="expansionToken" />
                 <p v-if="selected.enrichment_status === 'failed'" class="error vocab-enrich-error">补全失败：{{ selected.enrichment_error }}</p>
                 <button v-if="selected.enrichment_status === 'failed'" class="button secondary" @click="retryTranslation">重试失败任务</button>
           <div class="detail-actions">
@@ -561,7 +589,7 @@ function filterCount(key: string) {
         <div v-else-if="editing" class="vocab-edit">
           <label>音标<input v-model="editForm.phonetic"></label>
           <label>词性<input v-model="editForm.part_of_speech"></label>
-          <label>当前语境释义<textarea rows="3" v-model="editForm.contextual_meaning"></textarea></label>
+
           <label>常用释义<textarea rows="3" v-model="editForm.common_meaning"></textarea></label>
           <label>我的笔记<textarea rows="4" v-model="editForm.note"></textarea></label>
           <div><button class="button" @click="saveEdit">保存修改</button><button class="button ghost" @click="editing=false">取消</button></div>

@@ -187,6 +187,22 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (pathname === '/vocabulary/home' && method === 'GET') {
     return await homeVocabulary(Number(url.searchParams.get('limit') || 20)) as T
   }
+  if (pathname === '/vocabulary/enrichment-status' && method === 'GET') {
+    const jobs = await import('./vocabulary-enrichment-runner')
+    return { ...await jobs.vocabularyEnrichmentProgress(), error: jobs.vocabularyEnrichmentError } as T
+  }
+  if (pathname === '/vocabulary/enrichment-runs' && method === 'POST') {
+    const jobs = await import('./vocabulary-enrichment-runner')
+    if (body?.action === 'inventory') await jobs.inventoryVocabularyEnrichment()
+    else if (body?.action === 'pause') await jobs.pauseVocabularyEnrichment()
+    else if (body?.action === 'resume') await jobs.resumeVocabularyEnrichment()
+    else if (body?.action === 'retry') {
+      await jobs.resumeVocabularyEnrichment()
+      void jobs.retryPendingVocabularyEnrichments().catch(jobs.reportVocabularyEnrichmentError)
+    }
+    if (body?.action === 'start' || body?.action === 'resume') void jobs.startVocabularyEnrichmentWorker().catch(jobs.reportVocabularyEnrichmentError)
+    return await jobs.vocabularyEnrichmentProgress() as T
+  }
   if (pathname === '/vocabulary/translation-status' && method === 'GET') {
     const { rows } = await import('./database')
     const groups = await rows<{ status: string; count: number }>(
@@ -265,11 +281,11 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   }
   if (pathname === '/android/lan-sync/settings' && method === 'PUT') {
     const result = await updateLanSyncSettings({
-      lan_sync_host: body?.host,
-      lan_sync_passcode: body?.passcode,
+      ...(body?.host !== undefined ? { lan_sync_host: body.host } : {}),
+      ...(body?.passcode !== undefined ? { lan_sync_passcode: body.passcode } : {}),
       pairing: body?.pairing,
       categories: body?.categories,
-      lan_sync_auto: body?.auto ? '1' : '0',
+      ...(body?.auto !== undefined ? { lan_sync_auto: body.auto ? '1' : '0' } : {}),
     })
     return { ...result, runtime: await refreshSyncState() } as T
   }

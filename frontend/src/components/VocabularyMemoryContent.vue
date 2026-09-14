@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import VocabularyEnrichment from './VocabularyEnrichment.vue'
 import type { VocabDisplayConfig } from '../services/vocabularyDisplayConfig'
-const props = defineProps<{ entry: any; config: VocabDisplayConfig; expanded?: boolean }>()
+const props = withDefaults(defineProps<{ entry: any; config: VocabDisplayConfig; expanded?: boolean; expansionToken?: number }>(), { expanded: true })
 const root = ref<HTMLElement>()
+watch(() => [props.entry.id, props.expansionToken, props.expanded], async () => {
+  await nextTick()
+  root.value?.querySelectorAll('details').forEach(detail => { detail.open = props.expanded })
+})
 const groups = computed(() => [
   { key: 'source_sentence', label: '真题原句', text: props.entry.latest_sentence, source: true },
   { key: 'model_sentence', label: '模型例句', text: props.entry.generated_example?.sentence, translation: props.entry.generated_example?.translation },
@@ -17,9 +21,9 @@ const groups = computed(() => [
 </script>
 <template>
   <div ref="root" class="vocab-memory-content">
-    <section class="review-meaning-block detail-section">
-      <div class="review-meaning-heading"><small>常用释义</small><span v-if="config.part_of_speech && entry.part_of_speech" class="review-part-of-speech">{{ entry.part_of_speech }}</span><span v-if="config.phonetic && entry.phonetic" class="review-phonetic">{{ entry.phonetic }}</span></div>
-      <strong>{{ entry.common_meaning || entry.contextual_meaning || '释义待补充' }}</strong>
+    <section v-if="config.common_meaning || config.part_of_speech || config.phonetic" class="review-meaning-block detail-section">
+      <div class="review-meaning-heading"><small v-if="config.common_meaning">常用释义</small><span v-if="config.part_of_speech && entry.part_of_speech" class="review-part-of-speech">{{ entry.part_of_speech }}</span><span v-if="config.phonetic && entry.phonetic" class="review-phonetic">{{ entry.phonetic }}</span></div>
+      <strong v-if="config.common_meaning">{{ entry.common_meaning || entry.contextual_meaning || '释义待补充' }}</strong>
     </section>
     <template v-for="group in groups" :key="group.key">
     <details v-if="!group.source" class="memory-layer" :open="props.expanded">

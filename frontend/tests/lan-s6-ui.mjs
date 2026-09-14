@@ -46,7 +46,7 @@ const fixture = function () {
   }
 }
 const entry = '(' + fixture.toString() + ')();' +
-  'import {createApp,reactive,h} from "vue";import View from "/src/views/' + (android ? 'AndroidUpdatesView' : 'UpdatesView') + '.vue";' +
+  'import {createApp,reactive,h} from "vue";import View from "/src/views/' + (android ? 'AndroidSyncView' : 'UpdatesView') + '.vue";' +
   'import Keys from "/src/components/NamedModelKeys.vue";import "/src/styles.css";import "/src/study-theme.css";' +
   'const profile=reactive({id:1,keys:[{id:"fixture-key",name:"Synthetic key"}],selected_key_id:"fixture-key",has_api_key:true});' +
   'createApp({render:()=>h("main",[h(View),h("section",{class:"page"},[h(Keys,{profile})])])}).mount("#app");'
@@ -82,7 +82,7 @@ try {
     await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort())
     await page.goto(server.resolvedUrls.local[0] + '__s6')
     await page.locator('.named-keys').waitFor()
-    if (android) for (const selector of ['.sync-connection','[data-update-section=catalog]','[data-update-section=update]']) {
+    if (android) for (const selector of ['.sync-connection']) {
       const panel=page.locator(selector)
       assert.equal(await panel.evaluate(el=>el.open),false)
       await panel.locator(':scope > summary').click()

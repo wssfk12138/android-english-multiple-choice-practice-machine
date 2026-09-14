@@ -13,7 +13,7 @@ const lanSyncSerialization = read('../src/platform/android/lan-sync-serializatio
 const syncScheduler = read('../src/platform/android/sync-scheduler.ts')
 const syncCoordinator = read('../src/platform/android/sync-coordinator.ts')
 const vocabulary = read('../src/platform/android/vocabulary.ts')
-const updates = read('../src/views/AndroidUpdatesView.vue')
+const updates = read('../src/views/AndroidSyncView.vue')
 
 assert.match(app, /startAutoSync()/, 'Android startup must start the sync scheduler')
 assert.match(app, /stopAutoSync()/, 'Android teardown must stop the sync scheduler')

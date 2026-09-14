@@ -463,7 +463,7 @@ onMounted(() => {
           </div>
 
           <details class="api-detail-section api-model-management">
-            <summary><h3 id="api-manage-title">模型目录</h3></summary>
+            <summary><h3 id="api-manage-title">模型目录 · 共 {{ profile.models.length }} 个，显示 {{ visibleModelCount(profile) }} 个</h3></summary>
             <div class="api-model-toolbar">
               <div class="search-field"><Search :size="16" /><input v-model="modelSearch[profile.id]" placeholder="搜索模型"></div>
               <div class="api-model-filter" role="group" aria-label="模型显示状态">

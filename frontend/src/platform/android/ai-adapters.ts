@@ -157,6 +157,9 @@ const anthropic: AdapterDefinition = {
   chatUrl: baseUrl => { const base = cleanBase(baseUrl); return `${base}${base.endsWith('/v1') ? '' : '/v1'}/messages` },
   headers: apiKey => ({ ...(apiKey ? { 'x-api-key': apiKey } : {}), 'anthropic-version': '2023-06-01' }),
   serialize: (model, messages, options) => {
+    if (!Number.isSafeInteger(options.maxTokens) || Number(options.maxTokens) <= 0) {
+      throw new Error('Anthropic Messages 协议要求明确的 max_tokens；当前未取得该模型可靠的输出容量，无法使用服务端默认上限。请改用支持省略上限的协议配置。')
+    }
     const split = splitSystem(messages)
     return {
       model, ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}), temperature: options.temperature,

@@ -13,6 +13,7 @@ export type VocabDisplayKey =
   | 'antonyms'
   | 'similar_forms'
   | 'morphology'
+  | 'note'
 
 export type VocabDisplayOption = { key: VocabDisplayKey; label: string }
 
@@ -27,6 +28,7 @@ export const VOCAB_DISPLAY_OPTIONS: VocabDisplayOption[] = [
   { key: 'antonyms', label: '反义词辨析' },
   { key: 'similar_forms', label: '形近词辨析' },
   { key: 'morphology', label: '显示单词词形' },
+  { key: 'note', label: '我的笔记' },
 ]
 
 export const VOCAB_DISPLAY_DEFAULTS: Record<VocabDisplayKey, boolean> = {
@@ -40,6 +42,7 @@ export const VOCAB_DISPLAY_DEFAULTS: Record<VocabDisplayKey, boolean> = {
   antonyms: false,
   similar_forms: false,
   morphology: true,
+  note: true,
 }
 
 export type VocabDisplayConfig = Record<VocabDisplayKey, boolean>
@@ -48,7 +51,12 @@ export function loadVocabDisplayConfig(): VocabDisplayConfig {
   try {
     const saved = JSON.parse(localStorage.getItem(VOCAB_DISPLAY_STORAGE_KEY) || '{}')
     if (saved && typeof saved === 'object') {
-      return { ...VOCAB_DISPLAY_DEFAULTS, ...saved }
+      const config = { ...VOCAB_DISPLAY_DEFAULTS }
+      if (typeof saved.sentence === 'boolean' && typeof saved.source_sentence !== 'boolean') config.source_sentence = saved.sentence
+      for (const { key } of VOCAB_DISPLAY_OPTIONS) {
+        if (typeof saved[key] === 'boolean') config[key] = saved[key]
+      }
+      return config
     }
   } catch {
     // 旧数据无效时回退默认值。
@@ -57,6 +65,7 @@ export function loadVocabDisplayConfig(): VocabDisplayConfig {
 }
 
 export function saveVocabDisplayConfig(config: VocabDisplayConfig) {
+  config = Object.fromEntries(VOCAB_DISPLAY_OPTIONS.map(({ key }) => [key, typeof config[key] === 'boolean' ? config[key] : VOCAB_DISPLAY_DEFAULTS[key]])) as VocabDisplayConfig
   localStorage.setItem(VOCAB_DISPLAY_STORAGE_KEY, JSON.stringify(config))
   window.dispatchEvent(new CustomEvent('vocab-display-change', { detail: { ...config } }))
 }

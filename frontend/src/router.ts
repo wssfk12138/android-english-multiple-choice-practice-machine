@@ -14,9 +14,10 @@ import AndroidSyncView from './views/AndroidSyncView.vue'
 import AndroidDiagnosticsView from './views/AndroidDiagnosticsView.vue'
 import NotesHubView from './views/NotesHubView.vue'
 import MobileSettingsView from './views/MobileSettingsView.vue'
+import AndroidAppearanceView from './views/AndroidAppearanceView.vue'
 import HelpView from './views/HelpView.vue'
 
-export default createRouter({
+const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: DashboardView },
@@ -34,6 +35,16 @@ export default createRouter({
     { path: '/android-diagnostics', component: AndroidDiagnosticsView },
     { path: '/notes', component: NotesHubView },
     { path: '/mobile-settings', component: MobileSettingsView },
+    { path: '/android-appearance', component: AndroidAppearanceView },
     { path: '/help', component: HelpView },
   ],
 })
+
+// Global guard also handles legacy links when only the query changes.
+router.beforeEach(to => {
+  if (to.path !== '/android-updates' || !to.query.section) return
+  if (to.query.section === 'sync') return '/android-sync'
+  if (to.query.section === 'diagnostics') return '/android-diagnostics'
+  return '/android-updates'
+})
+export default router

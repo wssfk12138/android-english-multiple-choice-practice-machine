@@ -54,15 +54,20 @@ export function morphologyLabel(value: unknown): string {
     'plural form': '复数',
     comparative: '比较级',
     superlative: '最高级',
+    uncountable: '不可数',
+    'uncountable noun': '不可数',
+    'mass noun': '不可数',
+    '3rd person singular': '第三人称单数',
   }
+  if (Object.values(labels).includes(label) || label === '词形待确认') return label
   return labels[key] || '词形待确认'
 }
 
 export function vocabularyEnhancements(value: RecordValue, hasSource: boolean) {
   const source = safeObject(value.morphology)
   const forms = Array.isArray(source.forms) ? source.forms.filter((item: any) => item && typeof item === 'object')
-    .map((item: any) => ({ label: morphologyLabel(item.label), word: text(item.word, 100) })).filter((item: any) => item.label && item.word).slice(0, 10) : []
-  const morphology = { lemma: text(source.lemma || value.lemma, 120), currentForm: morphologyLabel(source.currentForm), ambiguous: source.ambiguous === true, note: text(source.note, 200), forms }
+    .map((item: any) => ({ label: morphologyLabel(item.label), rawLabel: text(item.rawLabel || item.label, 100), word: text(item.word, 100) })).filter((item: any) => item.label && item.word).slice(0, 10) : []
+  const morphology = { lemma: text(source.lemma || value.lemma, 120), currentForm: morphologyLabel(source.currentForm), rawCurrentForm: text(source.rawCurrentForm || source.currentForm, 100), ambiguous: source.ambiguous === true, note: text(source.note, 200), forms }
   const example = safeObject(value.generatedExample || value.generated_example)
   const generatedExample = { sentence: text(example.sentence, 500), translation: text(example.translation, 500) }
   return { morphology, generatedExample }
@@ -70,6 +75,11 @@ export function vocabularyEnhancements(value: RecordValue, hasSource: boolean) {
 
 /** Reject incomplete responses before marking a paid translation successful. */
 export function validVocabularyEnhancements(value: RecordValue, term: string, hasSource: boolean): boolean {
+  const raw = safeObject(value.morphology)
+  if (typeof raw.lemma !== 'string' || !raw.lemma.trim() || typeof raw.currentForm !== 'string' || !raw.currentForm.trim()
+    || typeof raw.ambiguous !== 'boolean' || typeof raw.note !== 'string' || !Array.isArray(raw.forms)) return false
+  if (raw.forms.some((form: any) => !form || typeof form.label !== 'string' || !form.label.trim() || typeof form.word !== 'string' || !form.word.trim())) return false
+  if (morphologyLabel(raw.currentForm) === '词形待确认' && (!raw.ambiguous || !raw.note.trim())) return false
   const { morphology, generatedExample } = vocabularyEnhancements(value, hasSource)
   if (!morphology.lemma || !morphology.currentForm || (morphology.ambiguous && !morphology.note)) return false
   if (!generatedExample.translation || !generatedExample.sentence) return false
@@ -78,14 +88,14 @@ export function validVocabularyEnhancements(value: RecordValue, term: string, ha
 
 /** Guard values as well as timestamps: two edits may share a SQLite second. */
 export function vocabularyWriteGuard(entry: RecordValue) {
-  const fields = ['term', 'user_edited', 'common_meaning', 'contextual_meaning', 'morphology', 'generated_example', 'contextual_occurrence_key']
+  const fields = ['term', 'user_edited', 'lemma', 'phonetic', 'part_of_speech', 'common_meaning', 'memory_hint', 'synonyms', 'antonyms', 'similar_forms', 'contextual_meaning', 'morphology', 'generated_example', 'contextual_occurrence_key']
   return { sql: fields.map(field => field + ' IS ?').join(' AND '), values: fields.map(field => entry[field] ?? null) }
 }
 
 export function projectVocabulary(entry: RecordValue, history: RecordValue[]): RecordValue {
   const latest = latestSourceOccurrence(history)
   const contextKey = latest ? occurrenceKey(latest) : ''
-  return { ...entry, ...{ morphology: safeObject(entry.morphology), generated_example: safeObject(entry.generated_example) },
+  return { ...entry, ...{ morphology: vocabularyEnhancements(entry, Boolean(latest)).morphology, generated_example: safeObject(entry.generated_example) },
     occurrences: latest ? [latest] : [], latest_sentence: latest?.context_sentence || '', context_key: contextKey,
     contextual_meaning: contextKey && entry.contextual_occurrence_key === contextKey ? entry.contextual_meaning : '' }
 }

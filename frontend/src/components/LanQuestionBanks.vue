@@ -53,6 +53,7 @@ async function download() {
       <button class="icon-button" :disabled="busy" title="检查电脑共享题库" aria-label="检查电脑共享题库" @click="refresh"><RefreshCw :size="18" /></button>
     </div>
     <p v-if="error" class="warning" role="alert">{{ error }}</p>
+    <p v-if="busy" role="status">正在处理，请稍候…</p>
     <template v-if="catalog">
       <label v-for="item in catalog.packages" :key="item.packageId" class="bank selection-option">
         <input v-model="selected" type="checkbox" :value="item.packageId" :disabled="busy">
@@ -65,7 +66,7 @@ async function download() {
           <option v-for="profile in questionBankProfilesState.items" :key="profile.id" :value="profile.id">{{ profile.name }}</option>
         </select>
       </label>
-      <button class="button" :disabled="busy || !selected.length" @click="download"><Download :size="16" />{{ busy ? '处理中' : `下载所选题库 (${selected.length})` }}</button>
+      <button class="button" :disabled="busy || !selected.length" @click="download"><Download :size="16" />下载所选题库 ({{ selected.length }})</button>
     </template>
   </section>
 </template>

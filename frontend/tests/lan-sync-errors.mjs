@@ -29,7 +29,7 @@ assert.equal(classifyLanSyncError(new LocalApiError(500, '向电脑端推送数�
 assert.equal(classifyLanSyncError(new LocalApiError(401, '向电脑端推送数据失败：401')).code, 'AUTH_EXPIRED')
 
 const source = readFileSync(new URL('../src/platform/android/sync-scheduler.ts', import.meta.url), 'utf8')
-const view = readFileSync(new URL('../src/views/AndroidUpdatesView.vue', import.meta.url), 'utf8')
+const view = readFileSync(new URL('../src/views/AndroidSyncView.vue', import.meta.url), 'utf8')
 assert.ok(view.includes('lanSync.runtime.autoPaused && lanSync.runtime.errorCode ==='))
 assert.ok(view.includes('自动同步已暂停，请处理上述问题后手动同步'))
 const schedulerModule = { exports: {} }

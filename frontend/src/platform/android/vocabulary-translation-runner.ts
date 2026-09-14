@@ -1,4 +1,3 @@
-import { startVocabularyEnrichmentWorker } from './vocabulary-enrichment-runner'
 import { translateVocabularyEntries } from './ai'
 import { rows, run } from './database'
 import { queueTranslations } from './vocabulary'
@@ -55,7 +54,6 @@ async function work() {
 }
 
 export function startVocabularyTranslationWorker(): Promise<void> {
-  void startVocabularyEnrichmentWorker()
   if (!worker) {
     worker = work().finally(() => { worker = null })
   }

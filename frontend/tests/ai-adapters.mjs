@@ -21,6 +21,14 @@ const messages = [
   },
 ]
 const options = { temperature: 0.2, maxTokens: 321, reasoningEffort: 'high' }
+for (const adapter of SELECTABLE_ADAPTERS) {
+  if (adapter.id === 'anthropic') {
+    assert.throws(()=>adapter.serialize('synthetic',messages,{temperature:0.2}),/max_tokens.*可靠/)
+  } else {
+    const body=JSON.stringify(adapter.serialize('synthetic',messages,{temperature:0.2}))
+    assert.doesNotMatch(body,/max_tokens|max_output_tokens|maxOutputTokens/)
+  }
+}
 
 assert.equal(DEFAULT_ADAPTER, 'openai-chat')
 assert.deepEqual(
