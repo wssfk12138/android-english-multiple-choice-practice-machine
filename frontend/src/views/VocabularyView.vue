@@ -311,7 +311,7 @@ async function rate(rating: string) {
     if (!reviewItems.value.length || reviewIndex.value >= reviewItems.value.length) {
       reviewMode.value = false
       reviewIndex.value = 0
-      notice.value = targetMode === 'scheduled' ? '今日到期复习已完成' : '本轮额外巩固已完成'
+      notice.value = targetMode === 'scheduled' ? '今天的复习已完成，可继续额外巩固' : '本轮额外巩固已完成'
       await load()
     }
   } catch (cause) { error.value = String(cause) }
@@ -401,7 +401,7 @@ onBeforeUnmount(stopTranslationRefresh)
 const statChips = computed(() => [
   { key: 'all', label: '全部', count: counts.value.total || 0 },
   { key: 'frequent', label: '高频词', count: counts.value.frequent || 0 },
-  { key: 'review', label: '今日到期', count: counts.value.review || 0 },
+  { key: 'review', label: '每日一背', count: counts.value.review || 0 },
   { key: 'mastered', label: '已掌握', count: counts.value.mastered || 0 },
   { key: 'pending', label: '等待翻译', count: counts.value.pending || 0 },
 ])
@@ -429,7 +429,7 @@ function filterCount(key: string) {
     <div class="page-head">
       <div><h1>我的单词本</h1><span v-if="currentBankScope" class="muted">当前题库</span></div>
       <div style="display:flex;gap:8px;align-items:center">
-        <button class="button" @click="startReview"><BookOpen :size="17" />今日到期 {{ counts.review || 0 }}</button>
+        <button class="button" @click="startReview"><BookOpen :size="17" />每日一背 · 待背 {{ counts.review || 0 }} 词</button>
       </div>
     </div>
     <div v-if="error" class="warning">{{ error }}</div>
@@ -450,6 +450,7 @@ function filterCount(key: string) {
     </div>
 
     <section v-if="!reviewMode" class="vocab-reinforcement card">
+      <div class="vocab-tool-row"><div class="search-field"><Search :size="16" /><input v-model="search" placeholder="搜索单词或释义"></div><button class="vocab-filter-toggle" type="button" :aria-expanded="filtersExpanded" @click="filtersExpanded = !filtersExpanded"><span>筛选：<strong>{{ activeFilterLabel }}</strong> · {{ filterCount(filter) }}</span><ChevronDown :size="16" :class="{ rotated: filtersExpanded }" /></button></div>
       <div><strong>额外巩固</strong><span>不改变正式复习计划，可反复练习</span></div>
       <div class="vocab-reinforcement-actions">
         <button v-for="size in [5, 10, 20]" :key="size" class="button secondary compact" type="button" @click="startReinforcement(size)">{{ size }} 词</button>
@@ -495,12 +496,7 @@ function filterCount(key: string) {
 
     <div v-else class="vocabulary-layout">
       <div class="vocab-list-column">
-        <aside class="vocab-filters card">
-          <div class="search-field"><Search :size="16" /><input v-model="search" placeholder="搜索单词或释义"></div>
-          <button class="vocab-filter-toggle" type="button" :aria-expanded="filtersExpanded" aria-controls="vocabulary-filter-options" @click="filtersExpanded = !filtersExpanded">
-            <span>筛选：<strong>{{ activeFilterLabel }}</strong> · {{ filterCount(filter) }}</span>
-            <ChevronDown :size="16" :class="{ rotated: filtersExpanded }" aria-hidden="true" />
-          </button>
+        <aside class="vocab-filters-inline">
           <div v-if="filtersExpanded" id="vocabulary-filter-options" class="vocab-filter-options" role="group" aria-label="单词本筛选项">
             <label v-for="item in listFilters" :key="item[0]" class="selection-option" :class="{ active: filter === item[0] }">
               <input v-model="filter" type="radio" name="vocabulary-filter" :value="item[0]"><span>{{ item[1] }} · {{ filterCount(item[0]) }}</span>
@@ -575,11 +571,15 @@ function filterCount(key: string) {
 
 <style scoped>
 .vocab-reinforcement {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
+.vocab-tool-row { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.vocab-tool-row .search-field { margin: 0; min-width: 0; }
+.vocab-filters-inline { display: contents; }
 
 .vocab-reinforcement > div:first-child {
   display: grid;
@@ -632,6 +632,8 @@ function filterCount(key: string) {
 .vocab-enrich-error { white-space: normal; overflow-wrap: anywhere; line-height: 1.7; }
 
 @media (max-width: 720px) {
+  .vocab-reinforcement { grid-template-columns: 1fr; align-items: stretch; }
+  .vocab-tool-row { grid-template-columns: 1fr; }
   .vocab-reinforcement {
     align-items: flex-start;
     flex-direction: column;

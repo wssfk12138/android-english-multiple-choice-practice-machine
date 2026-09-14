@@ -329,6 +329,7 @@ async function archive(unitIds: number[]) {
               </button>
               <div v-if="!selecting" class="wrong-scope-actions">
                 <button class="button compact wrong-retry-button" type="button" :disabled="!unit.current_count || Boolean(startingKey)" @click="retryUnit(unit)"><Play :size="14" />{{ startingKey === `unit-${unit.unit_id}` ? '启动中…' : '重做' }}</button>
+                <button class="button compact danger-text wrong-delete-button" type="button" @click="archive([unit.unit_id])"><Trash2 :size="14" />删除</button>
                 <div class="wrong-more">
                   <button class="icon-button" type="button" :aria-label="`${unit.unit_title} 更多操作`" :aria-expanded="moreMenuFor === unit.unit_id" @click="moreMenuFor = moreMenuFor === unit.unit_id ? null : unit.unit_id">
                     <MoreHorizontal :size="17" />

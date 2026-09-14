@@ -49,6 +49,9 @@ export function morphologyLabel(value: unknown): string {
     'third person singular': '第三人称单数',
     'third person singular present': '第三人称单数',
     plural: '复数',
+    singular: '单数',
+    'singular form': '单数',
+    'plural form': '复数',
     comparative: '比较级',
     superlative: '最高级',
   }

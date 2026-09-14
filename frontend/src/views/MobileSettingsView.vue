@@ -49,7 +49,7 @@ const groups = [
     title: '设备与维护',
     items: [
       { label: '设备同步', to: '/android-updates?section=sync', icon: CloudUpload },
-      { label: '更新与远程题库', to: '/android-updates', icon: Download },
+      { label: '更新与远程题库', to: '/android-updates?section=update', icon: Download },
       { label: '诊断日志', to: '/android-updates?section=diagnostics', icon: ScrollText },
     ],
   },
@@ -109,8 +109,6 @@ onMounted(() => {
         </div>
       </div>
     </section>
-
-    <section class="settings-hub-group"><h2 class="settings-hub-group-title">单词翻译</h2><label class="selection-option"><input v-model="enrichmentEnabled" type="checkbox" @change="saveVocabularyEnrichment(enrichmentEnabled)"><span>翻译时补全词形与例句</span></label></section>
 
     <section v-for="group in groups" :key="group.title" class="settings-hub-group" :aria-labelledby="`hub-${group.title}`">
       <h2 :id="`hub-${group.title}`" class="settings-hub-group-title">{{ group.title }}</h2>

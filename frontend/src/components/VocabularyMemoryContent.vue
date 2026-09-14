@@ -5,7 +5,6 @@ import type { VocabDisplayConfig } from '../services/vocabularyDisplayConfig'
 const props = defineProps<{ entry: any; config: VocabDisplayConfig; expanded?: boolean }>()
 const root = ref<HTMLElement>()
 const groups = computed(() => [
-  { key: 'contextual', label: '本句语境', text: props.entry.contextual_meaning !== props.entry.common_meaning ? props.entry.contextual_meaning : '' },
   { key: 'sentence', label: props.entry.latest_sentence ? '真题原句' : '模型例句', text: props.entry.latest_sentence || props.entry.generated_example?.sentence, translation: props.entry.latest_sentence ? '' : props.entry.generated_example?.translation },
   { key: 'morphology', label: '词形变化', text: props.entry.morphology?.currentForm },
   { key: 'synonyms', label: '同义词辨析', list: props.entry.synonyms },
@@ -13,7 +12,7 @@ const groups = computed(() => [
   { key: 'similar_forms', label: '形近词辨析', list: [...(props.entry.local_similar || []).map((item: any) => ({ ...item, local: true })), ...(props.entry.similar_forms || [])] },
   { key: 'memory_hint', label: '记忆提示', text: props.entry.memory_hint },
   { key: 'note', label: '我的笔记', text: props.entry.note },
-].filter(group => (group.key === 'note' || props.expanded || props.config[group.key as keyof VocabDisplayConfig]) && (group.text || group.list?.length)))
+].filter(group => (group.key === 'note' || props.config[group.key as keyof VocabDisplayConfig]) && (group.text || group.list?.length)))
 function narrow() { return matchMedia('(max-width: 900px), (orientation: portrait)').matches }
 function toggle(event: Event) {
   const target = event.target as HTMLDetailsElement
@@ -32,7 +31,7 @@ watch(() => props.entry.id, () => root.value?.querySelectorAll('details').forEac
       <div class="review-meaning-heading"><small>常用释义</small><span v-if="entry.part_of_speech" class="review-part-of-speech">{{ entry.part_of_speech }}</span></div>
       <strong>{{ entry.common_meaning || entry.contextual_meaning || '释义待补充' }}</strong>
     </section>
-    <details v-for="group in groups" :key="group.key" class="memory-layer" @toggle="toggle">
+    <details v-for="group in groups" :key="group.key" class="memory-layer" :open="group.key === 'sentence'" @toggle="toggle">
       <summary>{{ group.label }}</summary>
       <VocabularyEnrichment v-if="group.key === 'morphology'" :entry="entry" :show-morphology="true" :show-sentence="false" />
       <ul v-else-if="group.list" class="discrimination-list"><li v-for="(item, index) in group.list" :key="index"><strong>{{ item.word }}</strong><span>{{ item.note }}<em v-if="item.local" class="source-tag">本地</em></span></li></ul>

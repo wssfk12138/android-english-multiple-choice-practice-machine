@@ -46,6 +46,7 @@ import { CATEGORY_LABELS, DEFAULT_CATEGORIES, type LanCategory } from '../platfo
 const router = useRouter()
 const route = useRoute()
 const sectionRefs: Record<string, HTMLElement | null> = {}
+const activeSection = computed(() => String(route.query.section || ''))
 const settings = reactive({
   question_bank_catalog_url: '',
 })
@@ -528,7 +529,7 @@ onMounted(async () => {
     <div v-if="error" class="warning" role="alert">{{ error }}</div>
     <div v-if="notice" class="settings-success" role="status"><PackageCheck :size="17" />{{ notice }}</div>
 
-    <section :ref="setSectionRef('sync')" class="card update-source-card" data-update-section="sync">
+    <section v-if="!activeSection || activeSection === 'sync'" :ref="setSectionRef('sync')" class="card update-source-card" data-update-section="sync">
       <div class="update-source-heading">
         <span class="api-profile-icon"><Wifi :size="20" /></span>
         <div>
@@ -591,9 +592,9 @@ onMounted(async () => {
       </div></div>
     </section>
 
-    <LanQuestionBanks :key="lanSync.hostId" />
+    <LanQuestionBanks v-if="!activeSection || activeSection === 'update'" :key="lanSync.hostId" />
 
-    <details :open="route.query.section === 'catalog'" :ref="setSectionRef('catalog')" class="card update-source-card" data-update-section="catalog">
+    <details v-if="!activeSection || activeSection === 'update'" :open="route.query.section === 'catalog'" :ref="setSectionRef('catalog')" class="card update-source-card" data-update-section="catalog">
       <summary class="update-source-heading">
         <span class="api-profile-icon"><Download :size="20" /></span>
         <div><h2>远程题库</h2></div>
@@ -627,7 +628,7 @@ onMounted(async () => {
       </div>
     </details>
 
-    <details :open="route.query.section === 'update'" :ref="setSectionRef('update')" class="card update-source-card" data-update-section="update">
+    <details v-if="!activeSection || activeSection === 'update'" :open="route.query.section === 'update'" :ref="setSectionRef('update')" class="card update-source-card" data-update-section="update">
       <summary class="update-source-heading">
         <span class="api-profile-icon"><PackageCheck :size="20" /></span>
         <div><h2>程序更新</h2></div>
@@ -641,7 +642,7 @@ onMounted(async () => {
       </div>
     </details>
 
-    <section :ref="setSectionRef('diagnostics')" class="card diagnostic-card" data-update-section="diagnostics">
+    <section v-if="!activeSection || activeSection === 'diagnostics'" :ref="setSectionRef('diagnostics')" class="card diagnostic-card" data-update-section="diagnostics">
       <div class="diagnostic-heading">
         <div class="update-source-heading">
           <span class="api-profile-icon"><FileWarning :size="20" /></span>
@@ -657,7 +658,7 @@ onMounted(async () => {
           <ClipboardCopy :size="16" />复制日志
         </button>
         <button class="button" type="button" :disabled="!diagnosticLogs.length" @click="shareLogs">
-          <Send :size="16" />导出并系统分享
+          <Send :size="16" />分享诊断日志
         </button>
         <button class="button ghost diagnostic-clear" type="button" :disabled="!diagnosticLogs.length" @click="clearLogs">
           <Trash2 :size="16" />清空
@@ -668,7 +669,7 @@ onMounted(async () => {
           <ClipboardCopy :size="16" />复制学习历史只读诊断
         </button>
         <button class="button secondary" type="button" @click="shareHistoryDiagnostics">
-          <Send :size="16" />导出并系统分享
+          <Send :size="16" />分享学习历史
         </button>
       </div>
       <template v-if="databaseChannelEnabled">
@@ -677,7 +678,7 @@ onMounted(async () => {
             <Save :size="16" />导出应用数据库副本
           </button>
           <button class="button" type="button" :disabled="!databaseExport || busy === 'database-share'" @click="shareDatabaseCopy">
-            <Send :size="16" />导出并系统分享
+            <Send :size="16" />分享数据库副本
           </button>
         </div>
         <p v-if="databaseInfo?.exists" class="diagnostic-meta">当前库 {{ databaseInfo.fileName }}，{{ formatDatabaseSize(databaseInfo.size || 0) }}，{{ databaseInfo.tableCount ?? 0 }} 张表，日志模式 {{ databaseInfo.journalMode }}。</p>
