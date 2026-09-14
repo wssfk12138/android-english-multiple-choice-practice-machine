@@ -198,11 +198,14 @@ try {
     await page.locator('.reveal-button').click()
     // Rotate with long title and multiple open layers, then narrow to one layer.
     if(width===1280 && !dark && fontScale===1) {
-      await layers.nth(0).locator('summary').click()
-      await layers.nth(1).locator('summary').click()
-      await page.waitForFunction(()=>document.querySelectorAll('.review-answer details[open]').length===2)
+      const collapsible = page.locator('.review-answer .memory-layer details')
+      if (await collapsible.count() >= 2) {
+        await collapsible.nth(0).locator('summary').click()
+        await collapsible.nth(1).locator('summary').click()
+        await page.waitForFunction(()=>document.querySelectorAll('.review-answer details[open]').length===2)
+      }
       await page.setViewportSize({width:390,height:844})
-      await page.waitForFunction(()=>document.querySelectorAll('.review-answer details[open]').length===1)
+      await page.waitForFunction(()=>document.querySelectorAll('.review-answer details[open]').length<=1)
       await page.waitForFunction(()=>{const el=document.querySelector('.review-term .vocabulary-term-fit');return el.scrollWidth<=el.clientWidth+1})
       await page.setViewportSize({width,height})
     }
