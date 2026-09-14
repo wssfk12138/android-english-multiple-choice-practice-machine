@@ -655,7 +655,8 @@ onMounted(async () => {
         </div>
         <span class="pill">{{ diagnosticLogs.length }} 条</span>
       </div>
-      <div class="diagnostic-actions">
+      <div class="diagnostic-layout-grid">
+      <div class="diagnostic-group"><h3>常用操作</h3><div class="diagnostic-actions">
         <button class="button secondary" type="button" @click="copyReportTemplate">
           <ClipboardCopy :size="16" />复制问题报告模板
         </button>
@@ -668,15 +669,15 @@ onMounted(async () => {
         <button class="button ghost diagnostic-clear" type="button" :disabled="!diagnosticLogs.length" @click="clearLogs">
           <Trash2 :size="16" />清空
         </button>
-      </div>
-      <div class="diagnostic-actions">
+      </div></div>
+      <div class="diagnostic-group"><h3>学习历史与内测工具</h3><div class="diagnostic-actions">
         <button class="button secondary" type="button" @click="copyHistoryDiagnostics">
           <ClipboardCopy :size="16" />复制学习历史只读诊断
         </button>
         <button class="button secondary" type="button" @click="shareHistoryDiagnostics">
           <Send :size="16" />分享学习历史
         </button>
-      </div>
+      </div></div></div>
       <template v-if="databaseChannelEnabled">
         <div class="diagnostic-actions">
           <button class="button secondary" type="button" :disabled="busy === 'database-export'" @click="exportDatabaseCopy">
@@ -766,6 +767,10 @@ onMounted(async () => {
 .lan-category-options label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 0; }
 .lan-category-options input { width: 18px; height: 18px; flex: 0 0 18px; }
 .diagnostic-meta { margin:10px 0 0; color:var(--muted); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+.diagnostic-layout-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-bottom:16px; }
+.diagnostic-group { min-width:0; }
+.diagnostic-group h3 { margin:0 0 8px; font-size:14px; }
+@media (max-width:720px) { .diagnostic-layout-grid { grid-template-columns:minmax(0,1fr); } }
 .catalog-destination-dialog { text-align: left; }
 .catalog-destination-choice { display: flex; gap: 10px; align-items: flex-start; padding: 11px; border: 1px solid var(--line); border-radius: 12px; margin-top: 12px; }
 .catalog-destination-choice input { margin-top: 4px; min-width: 20px; min-height: 20px; }
