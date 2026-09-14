@@ -21,16 +21,18 @@ const groups = computed(() => [
       <div class="review-meaning-heading"><small>常用释义</small><span v-if="entry.part_of_speech" class="review-part-of-speech">{{ entry.part_of_speech }}</span></div>
       <strong>{{ entry.common_meaning || entry.contextual_meaning || '释义待补充' }}</strong>
     </section>
-    <details v-for="group in groups" v-if="!group.source" :key="group.key" class="memory-layer">
+    <template v-for="group in groups" :key="group.key">
+    <details v-if="!group.source" class="memory-layer">
       <summary>{{ group.label }}</summary>
       <VocabularyEnrichment v-if="group.key === 'morphology'" :entry="entry" :show-morphology="true" :show-sentence="false" />
       <ul v-else-if="group.list" class="discrimination-list"><li v-for="(item, index) in group.list" :key="index"><strong>{{ item.word }}</strong><span>{{ item.note }}<em v-if="item.local" class="source-tag">本地</em></span></li></ul>
       <template v-else><p>{{ group.text }}</p><p v-if="group.translation">{{ group.translation }}</p></template>
     </details>
-    <section v-for="group in groups" v-else :key="group.key" class="memory-layer memory-layer-static">
+    <section v-else class="memory-layer memory-layer-static">
       <h4>{{ group.label }}</h4>
       <p>{{ group.text }}</p><small v-if="entry.occurrences?.length">{{ entry.occurrences[0].year || '未知年份' }} · {{ entry.occurrences[0].unit_title || entry.occurrences[0].unit_type || '' }}</small>
     </section>
+    </template>
   </div>
 </template>
 <style scoped>
