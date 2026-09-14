@@ -8,7 +8,6 @@ import {
   ExternalLink,
   Eye,
   Import,
-  LibraryBig,
   Moon,
   NotebookText,
   ScrollText,
@@ -33,7 +32,6 @@ const groups = [
   {
     title: '题库与数据',
     items: [
-      { label: '题库管理', to: '/library', icon: LibraryBig },
       { label: '导入题库', to: '/imports', icon: Import },
       { label: '回收站', to: '/trash', icon: Trash2 },
     ],
