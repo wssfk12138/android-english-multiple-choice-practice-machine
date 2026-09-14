@@ -8,6 +8,7 @@ import { del, get, post, put } from '../api'
 import { confirmDialog } from '../platform/dialogs'
 import { loadVocabDisplayConfig } from '../services/vocabularyDisplayConfig'
 import { reconcileDueQueue, orderedDueKeys, completeDueWord, wordKey, type DueQueue } from '../vocabulary-due-queue'
+import { queueMissingVocabularyEnrichment, startVocabularyEnrichmentWorker } from '../platform/android/vocabulary-enrichment-runner'
 
 const route = useRoute()
 const items = ref<any[]>([])
@@ -176,6 +177,8 @@ async function startPendingTranslations() {
     })
     await load()
     startTranslationRefresh()
+    // Enrol legacy ready entries in a bounded background pass; never block the first list render.
+    void queueMissingVocabularyEnrichment(200).then(() => startVocabularyEnrichmentWorker()).catch(() => {})
   } catch (cause) {
     error.value = String(cause)
     await load()
