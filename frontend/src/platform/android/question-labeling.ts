@@ -264,7 +264,7 @@ attention_points 只能写抽象方法，不复述原题或泄露答案。每个
         }),
       },
     ],
-    { maxTokens: Math.max(4200, Number(profile.max_tokens || 0)), responseFormat: { type: 'json_object' } },
+    { responseFormat: { type: 'json_object' } },
   )
   const labels = parseJson(raw).labels
   if (!Array.isArray(labels)) throw new Error('模型没有返回题目标签数组')
