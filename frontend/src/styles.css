@@ -2613,7 +2613,7 @@ html[data-platform="android"] .practice-submit-actions .button { min-width:0; wh
   }
 
   html[data-platform="android"] .wrong-unit-row {
-    grid-template-columns: 34px minmax(0, 1fr);
+    grid-template-columns: 34px minmax(0, 1fr) auto;
     gap: 8px;
     padding: 10px;
     border-radius: 12px;
@@ -2621,19 +2621,18 @@ html[data-platform="android"] .practice-submit-actions .button { min-width:0; wh
 
   html[data-platform="android"] .wrong-unit-row .wrong-level-stats,
   html[data-platform="android"] .wrong-scope-actions {
-    grid-column: 2;
+    grid-column: auto;
     justify-content: flex-start;
   }
 
   html[data-platform="android"] .wrong-scope-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
+    display: flex;
+    width: auto;
     gap: 6px;
   }
 
   html[data-platform="android"] .wrong-scope-actions .button {
-    width: 100%;
+    width: auto;
   }
 
   html[data-platform="android"] .wrong-analysis-categories {
