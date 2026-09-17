@@ -1182,7 +1182,13 @@ export async function run(
 // 只用于“多条写必须同时生效”的合并场景：集合内取不到 SELECT 结果，
 // 读值仍由调用方在事务外单独读取。
 export async function executeSet(set: { statement: string; values?: unknown[] }[]): Promise<void> {
-  await (await androidDatabase()).executeSet(set, true, 'no')
+  // 原生端逐条执行 row.getJSONArray("values")，缺省该键会直接抛 JSONException，
+  // 这里统一补空数组，无参语句也能安全合并。
+  await (await androidDatabase()).executeSet(
+    set.map(item => ({ statement: item.statement, values: item.values || [] })),
+    true,
+    'no',
+  )
 }
 
 const runTransactionSerially = createSerialQueue()
