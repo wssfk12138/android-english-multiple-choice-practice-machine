@@ -1,8 +1,22 @@
 # 当前工作
 
-> 最后更新：2026-09-17（第八轮：到期队列首屏分页 + 后台增量补齐、复习身份标量化、分页暴露的进度分母修复；两树各自本地提交、alpha.94 / beta.6-test.18 出包装机、1200 词库真机 1034ms → 124ms、平板公测库复原 119 旧库）。提交：内测 `9162bf7`（5 文件，+272 / −39）与紧随其后的第八轮记录提交 `9f149f7`，公测 `f5b335e`（同范围 5 文件）；**两树均未推送**。门禁：内测 `test:all` 77 passed / 0 failed、`pnpm run build` EXIT=0、`git diff --check` 干净；公测 `node tests/run-all.mjs` 71 passed / 10 failed / 3 prereq-skipped，失败文件集合与改动前基线逐文件一致，`pnpm run build` EXIT=0。装机：内测 `0.1.0-alpha.94` / 94 / 70,181,737B、公测 `0.1.0-beta.6-test.18` / 122 / 74,618,800B。平板真机（1200 词夹具 / 903 条到期）：可见 1034 → 124ms、桥载荷 298,086 → 3,502B、桥调用 3 → 2、SQL 950 → 62ms。全部结论、证据与未验证项见[第八轮记录](history/2026-09-17-load-surfaces-round8.md)；手机本次未改动。
+> 最后更新：2026-09-17（内测 alpha.96：修掉被静默吞掉的旧库清理迁移，内测库 16,461,824 → 9,506,816 字节，用户数据逐表零变化；启动准备 187 → 97 次桥调用、preparedAt 3101 → 1875/2005/2031ms；内测冷启动 `am start -W` 858/849/882ms。提交 `03fd49a`（9 文件，+519 / −87，**未推送**）。门禁：`pnpm run build` EXIT=0、`node tests/run-all.mjs` 77 passed / 0 failed。英语一题库本就是最新 r3，本轮未替换。全部结论、证据与未验证项见[本轮记录](history/2026-09-17-internal-alpha96-migration.md)；第八轮内容保留在下方。
 
-## 当前接手入口：加载路径治本优化（第八轮已完成，到期队列主瓶颈已消除）
+## 当前接手入口：内测 alpha.96 旧库清理解阻与启动准备收缩（已完成）
+
+**先读[本轮记录](history/2026-09-17-internal-alpha96-migration.md)**：含授权与边界、缺陷 C/D 的源码落点、内测库迁移前后逐表计数与用户数据指纹、冷启动与启动准备数据、题库版本结论、未验证项与下一轮候选。
+
+要点：`frontend/src/platform/android/database.ts` 的题库包去重/清理迁移因 `questionValues` 与 `questionScope` 参数错位（54 参数 / 81 绑定）每次启动都抛错并被 catch 吞掉，内测库长期保留 4 个题库包；改为 `[...paperValues]` 后迁移首次成功，`duplicate-profile-package-v1` 与 `legacy-question-bank-prune-v1` 落库，内测库 16,461,824 → 9,506,816 字节，旧英语一 1.0.0 与旧英语二 1.0.0 包被删除。同一 catch 新增 `describeError()`，启动与 VACUUM 失败不再只打 `[object Object]`。
+
+**内测用户数据零变化**：`practice_sessions` 33、`practice_answers` 1057、`wrong_stats` 155 行（Σ 75）、`vocabulary_entries` 216 / `vocabulary_occurrences` 224、`vocabulary_reviews` 1006（到期 943），迁移前后逐项一致，`practice_answers` 孤儿 0；`integrity_check` ok。
+
+加载卡顿口径：自测包（同一份代码、可调试）启动准备桥调用追踪 187 → 97 次、preparedAt 3101 → 1875/2005/2031ms（`boot-int-fix-1.json.json` 的 44 次 / 1278ms 三次复测无法重现，按一次性异常处理，勿引用）；内测包 `am start -W` 858/849/882ms、gfxinfo janky 28.04%（该帧数据无同场景改前基线，只作描述）。**未宣称全部卡顿已消除**；剩余重复 SQL 约 434ms 与三项下一轮候选见记录第 8 节。
+
+题库版本：内测英语一 `wssfk.postgraduate-english-one.2010-2026` / `1.1.0` / `2026-09-r3`，与设备 805/805 题、107/107 unit 全等，**本就是最新，本轮未替换**（旧题库的删除是上面那次清理迁移的结果）。**不得用 ESQ 里的 `labels/*.json` 覆盖设备标注**（730 条中 340 条不同）。
+
+注意：内测包是 release 非 debuggable、没有 9229 端口，桥调用计数与写路径测量只能在公测或自测包上做；记录第 8 节的三项候选（Dashboard 首屏 JOIN 合并、`app_settings` 逐键批量化、8877 更新检查延后）本轮未做，且**不要动 `native-http.ts` 的全局超时**。
+
+## 第八轮：加载路径治本优化（已完成，作为本轮对照基线）
 
 **先读[第八轮记录](history/2026-09-17-load-surfaces-round8.md)**：含本轮授权与决定、5 文件变更集与两树同哈希、L1/L2/L3 实现细节与配套约束、门禁结果、出包哈希与装机、平板真机对照（五场景 / 到期队列逐轮 / 119 旧库复原）、未完成与未验证项、已排除路线。
 
@@ -16,7 +30,7 @@
 
 注意：内测包是 release 非 debuggable、**没有 9229 端口**，桥调用计数这类需要调试端口的测量只能在公测 debuggable 包上做（两树本轮 5 文件已同哈希）。已排除路线见第八轮记录第 8 节，勿重复投入。
 
-## 上一轮：最终横屏整改及单词本性能修复
+## 更早：最终横屏整改及单词本性能修复
 
 最终 UI 规格以 [9 月 16 日最后预览与方案](../design-review-2026-09-16/selected-revision/README.md)及其决定清单为准，覆盖每日一背、单词本设置、设置首页、模型与 API、首页图标、错题操作和分析历史。它收窄并取代 R3 等旧稿中冲突的 UI 要求；历史设计文件中的“暂不开发”是当时状态，已被当前任务的明确实施指令取代。
 
