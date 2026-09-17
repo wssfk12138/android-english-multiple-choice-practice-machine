@@ -1,4 +1,4 @@
-import { frequentQuestionIds, resumablePracticeSession } from './study-todos'
+import { frequentQuestionIds, resumablePracticeSession, studyTodoCountColumns, studyTodoCountValues } from './study-todos'
 import { preservesCandidateOrder } from './candidate-order-policy'
 import { readSnapshot, restoreUnit, historicalRetrySnapshot, snapshotGradeMany, requireSnapshotChoice, snapshotChoiceRequired } from './practice-snapshots'
 import type { SQLiteDBConnection } from '@capacitor-community/sqlite'
@@ -968,17 +968,19 @@ export async function submitSession(sessionId: number): Promise<JsonRecord> {
 
 export async function dashboard(): Promise<JsonRecord> {
   const profileId = await activeQuestionBankProfileId()
+  // 首页要的六项统计是同一块屏幕的同一次读取：试卷/篇目/题目/错题四个标量直接取
+  // 计数，到期词与高频题复用学习待办的那两段片段（同一份语义，不出现第二份实现）。
+  // 拆成三条时每项都要跨一次 SQLite→JS 桥（平板实测固定开销 5~10ms/次，拆开
+  // 9.5 + 8.7 + 7.8 = 26ms），合成一条后只跨一次，同一批 join 也不再扫三遍。
   const counts = await row<JsonRecord>(
     `SELECT
       (SELECT COUNT(*) FROM papers WHERE status = 'published' AND profile_id = ? AND deleted_at IS NULL) AS paper_count,
       (SELECT COUNT(*) FROM units u JOIN papers p ON p.id = u.paper_id WHERE p.profile_id = ? AND p.deleted_at IS NULL) AS unit_count,
       (SELECT COUNT(*) FROM questions q JOIN units u ON u.id = q.unit_id JOIN papers p ON p.id = u.paper_id WHERE p.profile_id = ? AND p.deleted_at IS NULL) AS question_count,
-      (SELECT COUNT(*) FROM wrong_stats w JOIN questions q ON q.id = w.question_id JOIN units u ON u.id = q.unit_id JOIN papers p ON p.id = u.paper_id WHERE w.wrong_count > 0 AND p.profile_id = ? AND p.deleted_at IS NULL) AS wrong_count`,
-    [profileId, profileId, profileId, profileId],
+      (SELECT COUNT(*) FROM wrong_stats w JOIN questions q ON q.id = w.question_id JOIN units u ON u.id = q.unit_id JOIN papers p ON p.id = u.paper_id WHERE w.wrong_count > 0 AND p.profile_id = ? AND p.deleted_at IS NULL) AS wrong_count,
+      ${studyTodoCountColumns}`,
+    [profileId, profileId, profileId, profileId, ...studyTodoCountValues(profileId)],
   )
-  // 高频题定义沿用错题列表的同一份查询，避免首页再拉一遍全表 wrong_stats 后
-  // 在 JS 里重复判定一次。
-  const frequentCount = (await frequentQuestionIds()).length
   const recentSessions = await rows<JsonRecord>(
     `SELECT s.id, s.mode, s.status, s.started_at, s.submitted_at,
        s.score, s.max_score, p.year
@@ -1007,7 +1009,11 @@ export async function dashboard(): Promise<JsonRecord> {
   )
   return {
     ...counts,
-    frequent_count: frequentCount,
+    profile_id: profileId,
+    // 学习待办卡片的到期词/高频题数量跟着 /startup 一起返回，前端就不必再发一次
+    // /study-todos 把续练与高频题聚合重跑一遍。
+    review_count: Number(counts?.review_count || 0),
+    frequent_count: Number(counts?.frequent_count || 0),
     unit_type_counts: unitTypeCounts,
     paper_type_counts: paperTypeCounts,
     recent_sessions: recentSessions,
@@ -1140,11 +1146,12 @@ export async function archiveWrongUnits(unitIds: number[]): Promise<JsonRecord> 
           )).values || []
         : []
       const state = (await db.query('SELECT * FROM wrong_analysis_states WHERE unit_id = ?', [unitId])).values?.[0] || null
+      const reports = await archiveAnalysis(db, unitId)
       await db.run(
         `INSERT INTO trash_entries
           (deletion_batch_id, resource_type, resource_id, resource_name, profile_id, metadata, purge_after)
          VALUES (?, 'wrong_archive', ?, ?, ?, ?, ?)`,
-        [batchId, unitId, String(unit.title), profileId, JSON.stringify({ current, rounds, round_questions: roundQuestions, state }), purgeAfter],
+        [batchId, unitId, String(unit.title), profileId, JSON.stringify({ current, rounds, round_questions: roundQuestions, state, reports }), purgeAfter],
         false,
       )
       await db.run('DELETE FROM wrong_current_questions WHERE unit_id = ?', [unitId], false)
@@ -1155,3 +1162,4 @@ export async function archiveWrongUnits(unitIds: number[]): Promise<JsonRecord> 
   })
   return { archived, batch_id: batchId }
 }
+import { archiveAnalysis } from './wrong-analysis-history'

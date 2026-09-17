@@ -57,7 +57,7 @@ function fixture() {
       publishDocumentImport: async () => { counts.publishes++; return {} },
     },
     './question-bank-profiles': profiles,
-    './question-bank': { listEsqImports: async () => [] },
+    './question-bank': { listEsqImports: async () => [], sweepEmptyPaperSessions: async () => {} },
     './errors': errors.exports,
   })[name] || {} }
   vm.runInNewContext(compile(read('platform/android/local-api.ts')), local)

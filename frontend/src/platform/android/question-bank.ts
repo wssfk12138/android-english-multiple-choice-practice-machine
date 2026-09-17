@@ -785,7 +785,17 @@ export async function publishEsqImport(
   }
 }
 
-async function sweepEmptyPaperSessions() {
+// 空会话清扫是维护动作，不是读取的一部分：挂在请求边界每次启动执行一次即可。
+// 原先每次 /papers 都无条件执行这条 UPDATE，把一个写事务塞进纯读路径，既拖慢
+// 首页与试卷库首屏，又把 updated_at 刷成新值，让 LAN 同步看到无意义的行变更。
+// 清扫结果不影响 listPapers 本身（进行中会话本来就要求有作答或整篇提交），
+// 它的作用是让首页“最近练习”和续练不再看到早就放弃的空会话。
+let emptySessionSweepStarted = false
+
+export async function sweepEmptyPaperSessions(): Promise<void> {
+  // 先立标记再写库：并发请求同时命中也只放行一个，一次启动只尝试一次。
+  if (emptySessionSweepStarted) return
+  emptySessionSweepStarted = true
   await run(
     `UPDATE practice_sessions SET status = 'abandoned', updated_at = CURRENT_TIMESTAMP
      WHERE mode = 'paper' AND status = 'active'
@@ -799,9 +809,8 @@ async function sweepEmptyPaperSessions() {
 
 export async function listPapers(): Promise<JsonRecord[]> {
   const profileId = await activeQuestionBankProfileId()
-  await sweepEmptyPaperSessions()
   return rows(
-    `SELECT p.*,
+    `SELECT p.id, p.year, p.subject, p.title, p.status,
        COUNT(DISTINCT u.id) AS unit_count,
        COUNT(q.id) AS question_count,
        (SELECT ps.id FROM practice_sessions ps

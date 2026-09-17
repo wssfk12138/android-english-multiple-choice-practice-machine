@@ -40,11 +40,27 @@ export async function listProfiles(): Promise<JsonRecord[]> {
      FROM ai_profiles p ORDER BY p.is_default DESC, p.id`,
   )
   const result = []
+  // 模型行按配置逐条查询时，每个配置都要多跨一次 SQLite→JS 桥；配置页面上
+  // 每个配置都是一次往返，条数越多首屏越慢。这里一次取回后在 JS 里分桶，
+  // 分桶内的顺序仍等价于原来的 ORDER BY model_id。
+  const modelsByProfile = new Map<number, JsonRecord[]>()
+  if (profiles.length) {
+    const models = await rows<JsonRecord>(
+      `SELECT * FROM ai_profile_models WHERE profile_id IN (${profiles.map(() => '?').join(', ')}) ORDER BY profile_id, model_id`,
+      profiles.map(profile => profile.id),
+    )
+    for (const model of models) {
+      const bucket = modelsByProfile.get(Number(model.profile_id)) || []
+      bucket.push(model)
+      modelsByProfile.set(Number(model.profile_id), bucket)
+    }
+  }
   for (const profile of profiles) {
-    const keys = await namedKeySummary(profile.id)
+    // profile 来自上面同一条 SELECT p.* 的完整行，密钥库不必再回查一次存在性。
+    const keys = await namedKeySummary(profile.id, true)
     result.push(profilePayload(
       { ...profile, ...keys },
-      await rows('SELECT * FROM ai_profile_models WHERE profile_id = ? ORDER BY model_id', [profile.id]),
+      modelsByProfile.get(Number(profile.id)) || [],
     ))
   }
   return result
@@ -478,7 +494,7 @@ export async function translateVocabularyEntries(entryIds: number[]): Promise<nu
   )
   if (!items.length) return 0
   for (const entry of items) {
-    const projection = projectVocabulary(entry, await rows<JsonRecord>('SELECT * FROM vocabulary_occurrences WHERE entry_id = ?', [entry.id]))
+    const projection = projectVocabulary(entry, await rows<JsonRecord>(`SELECT ${occurrenceProjectionColumns} FROM vocabulary_occurrences WHERE entry_id = ?`, [entry.id]))
     entry.sentence = projection.latest_sentence
     entry.contextKey = projection.context_key
   }
@@ -511,7 +527,7 @@ export async function translateVocabularyEntries(entryIds: number[]): Promise<nu
       || !['synonyms', 'antonyms', 'similarForms'].every(field => Array.isArray(item[field]))) continue
     if (!validVocabularyEnhancements(item, requested.term, Boolean(requested.sentence))) continue
     const enhancements = vocabularyEnhancements(item, Boolean(requested.sentence))
-    const current = projectVocabulary({}, await rows<JsonRecord>('SELECT * FROM vocabulary_occurrences WHERE entry_id = ?', [id]))
+    const current = projectVocabulary({}, await rows<JsonRecord>(`SELECT ${occurrenceProjectionColumns} FROM vocabulary_occurrences WHERE entry_id = ?`, [id]))
     if (current.context_key !== requested.contextKey) continue
     const guard = vocabularyWriteGuard(requested)
     const clean = (value: unknown, limit = 1000) =>
@@ -563,7 +579,7 @@ export async function enrichVocabularyEntry(id: number): Promise<void> {
   try {
     const entry = await row<JsonRecord>('SELECT * FROM vocabulary_entries WHERE id = ?', [id])
     if (!entry) throw new LocalApiError(404, '单词不存在')
-    const projection = projectVocabulary(entry, await rows<JsonRecord>('SELECT * FROM vocabulary_occurrences WHERE entry_id = ?', [id]))
+    const projection = projectVocabulary(entry, await rows<JsonRecord>(`SELECT ${occurrenceProjectionColumns} FROM vocabulary_occurrences WHERE entry_id = ?`, [id]))
     const profile = await row<JsonRecord>("SELECT * FROM ai_profiles WHERE enabled = 1 AND TRIM(default_model) <> '' ORDER BY is_default DESC, id LIMIT 1")
     if (!profile) throw new LocalApiError(400, '请先配置并启用一个用于单词翻译的模型')
     const content = await chatCompletion(profile.id, profile.default_model, [
@@ -574,7 +590,7 @@ export async function enrichVocabularyEntry(id: number): Promise<void> {
     if (result.entryId !== id) throw new LocalApiError(502, '模型未返回匹配的词条')
     const fields = vocabularyEnhancements(result, Boolean(projection.latest_sentence))
     if (!validVocabularyEnhancements(result, entry.term, Boolean(projection.latest_sentence))) throw new LocalApiError(502, '模型未完整返回词形或例句，请重试')
-    const current = projectVocabulary({}, await rows<JsonRecord>('SELECT * FROM vocabulary_occurrences WHERE entry_id = ?', [id]))
+    const current = projectVocabulary({}, await rows<JsonRecord>(`SELECT ${occurrenceProjectionColumns} FROM vocabulary_occurrences WHERE entry_id = ?`, [id]))
     if (current.context_key !== projection.context_key) throw new LocalApiError(409, '真题语境已更新，请重新补全')
     for (const field of ['lemma', 'phonetic', 'partOfSpeech', 'commonMeaning', 'memoryHint']) {
       if (typeof result[field] !== 'string') throw new LocalApiError(502, '模型缺少字段：' + field)
@@ -704,11 +720,18 @@ export async function analyzeWrongQuestions(
   if (!unitIds.length) throw new LocalApiError(400, '没有可分析的篇目')
   const scopeKey = scopeKeyOf(unitIds)
 
-  const report = await row<JsonRecord>(
+  let report = await row<JsonRecord>(
     `SELECT * FROM wrong_analysis_reports
      WHERE scope_key = ? ORDER BY id DESC LIMIT 1`,
     [scopeKey],
   )
+  // A shared report can retain its original scope after one member is recycled.
+  // It must never become the cached result or snapshot for a different live scope.
+  if (report) {
+    let members: number[] = []
+    try { members = JSON.parse(report.unit_ids).map(Number) } catch { /* legacy invalid membership */ }
+    if (members.length !== unitIds.length || unitIds.some(id => !members.includes(id))) report = null
+  }
   const states = await rows<JsonRecord>(
     `SELECT unit_id, report_id, analyzed_session_id, analyzed_at
      FROM wrong_analysis_states
@@ -928,4 +951,4 @@ export async function analyzeWrongQuestions(
 }
 
 export { chatCompletion }
-import { projectVocabulary, vocabularyEnhancements, validVocabularyEnhancements, vocabularyWriteGuard } from '../../vocabulary-context'
+import { occurrenceProjectionColumns, projectVocabulary, vocabularyEnhancements, validVocabularyEnhancements, vocabularyWriteGuard } from '../../vocabulary-context'

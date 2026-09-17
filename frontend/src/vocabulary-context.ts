@@ -1,5 +1,13 @@
 /** A conservative source projection. Encounter history stays in storage. */
 type RecordValue = Record<string, any>
+/**
+ * 出现记录只服务于 projectVocabulary：有效来源句判断用 source_kind/surface_form/
+ * context_sentence，语境键用 sync_id/created_at/year/unit_title，卡片还需要
+ * unit_type 做兜底展示。整行读取会把 context_before/context_after/selection_start
+ * 和同步簿记列一起搬过 SQLite→JS 桥，每条记录都为从不读取的列付费，所以所有
+ * 调用方统一使用这份投影；同步和迁移仍按整表处理，不受这里影响。
+ */
+export const occurrenceProjectionColumns = 'entry_id, year, unit_title, unit_type, source_kind, surface_form, context_sentence, created_at, sync_id'
 export function validSourceSentence(occurrence: RecordValue): boolean {
   if (['question', 'fragment'].includes(String(occurrence.source_kind || ''))) return false
   const sentence = String(occurrence.context_sentence || '').trim()

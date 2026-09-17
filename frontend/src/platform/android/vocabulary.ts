@@ -3,9 +3,12 @@ import { vocabularyProfileCondition } from './study-todos'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
 import { row, rows, run, transaction } from './database'
 import { LocalApiError } from './errors'
-import { projectVocabulary } from '../../vocabulary-context'
+import { occurrenceProjectionColumns, projectVocabulary } from '../../vocabulary-context'
+import type { SQLiteDBConnection } from '@capacitor-community/sqlite'
 
 type JsonRecord = Record<string, any>
+// 事务内的读写优先走事务句柄（与 practice.ts 约定一致）；缺省时回落到共享连接。
+type TransactionDb = Pick<SQLiteDBConnection, 'query' | 'run'>
 
 function normalizeTerm(value: string): string {
   return value.trim().replaceAll('’', "'").replace(/\s+/g, ' ').toLowerCase()
@@ -152,13 +155,35 @@ function reviewRevision(entry: JsonRecord): string {
   return JSON.stringify([entry.normalized_term, entry.last_reviewed_at, entry.next_review_at, entry.updated_at, entry.review_count || 0])
 }
 
-// 评分只需要更新后的卡片身份；返回完整详情会让每次评分都付出出现记录查询和
-// 整本词库相似词匹配的代价，而复习界面从不读取这些字段。
-async function reviewAck(id: number): Promise<JsonRecord> {
-  const entry = await reviewEntry(id)
+// 评分与并发校验只需要更新后的卡片身份；读整行会把同义词、例句、语境键
+// 一起搬过桥，而复习界面从不读取这些字段。
+const reviewStateColumns = [
+  'id', 'normalized_term', 'last_reviewed_at', 'next_review_at', 'updated_at',
+  'study_status', 'review_stage', 'lapse_count',
+  '(SELECT COUNT(*) FROM vocabulary_reviews WHERE entry_id=vocabulary_entries.id) AS review_count',
+].join(', ')
+
+async function reviewState(id: number, db?: TransactionDb): Promise<JsonRecord> {
+  const statement = `SELECT ${reviewStateColumns} FROM vocabulary_entries WHERE id = ?`
+  const entry = db
+    ? (await db.query(statement, [id])).values?.[0] as JsonRecord | undefined
+    : await row<JsonRecord>(statement, [id])
+  if (!entry) throw new LocalApiError(404, '单词不存在')
+  return entry
+}
+
+async function reviewRun(db: TransactionDb | undefined, statement: string, values: unknown[] = []): Promise<void> {
+  if (db) {
+    await db.run(statement, values, false)
+    return
+  }
+  await run(statement, values)
+}
+
+function reviewAckOf(entry: JsonRecord): JsonRecord {
   return {
     id: Number(entry.id),
-    review_revision: entry.review_revision,
+    review_revision: reviewRevision(entry),
     next_review_at: entry.next_review_at || null,
     review_count: Number(entry.review_count || 0),
     review_stage: Number(entry.review_stage || 0),
@@ -178,7 +203,7 @@ async function serializeDetails(entry: JsonRecord): Promise<JsonRecord> {
   const synonyms = discriminationList(entry.synonyms)
   const antonyms = discriminationList(entry.antonyms)
   const similarForms = discriminationList(entry.similar_forms)
-  const projection = projectVocabulary(entry, await rows('SELECT * FROM vocabulary_occurrences WHERE entry_id = ?', [id]))
+  const projection = projectVocabulary(entry, await rows(`SELECT ${occurrenceProjectionColumns} FROM vocabulary_occurrences WHERE entry_id = ?`, [id]))
   return {
     ...projection,
     synonyms,
@@ -260,6 +285,22 @@ export async function addVocabulary(body: JsonRecord): Promise<JsonRecord> {
   }
 }
 
+// 到期队列与巩固候选只回传“清单”列：卡片抬头、队列排序（reconcileDueQueue）、
+// 评分确认与乐观并发（reviewRevision）真正读取的字段。展开内容（释义、例句、
+// 同义词、记忆提示、出现记录）改为卡片成为当前卡时按需单条读取。
+// 实测（155 词到期队列）：28 列整行 + 整队出现记录 228,680 B，清单 63,045 B，
+// 单张卡片详情 1,430 B——裁剪整行只能省 11%，裁剪到清单才是量级差别。
+// reviewRevision 依赖的 normalized_term/last_reviewed_at/next_review_at/
+// updated_at 与 review_count 子查询全部保留，清单与详情给出同一份卡片身份。
+// 实测（155 词到期队列，平板无线调试）：再裁掉复习流程从不读取的 lemma/
+// study_status/review_stage/lapse_count 后，载荷 62,478 B → 50,373 B、
+// 同一条语句 96.4 ms → 68.3 ms。这四个列只服务浏览列表、编辑表单与卡片详情。
+const queueEntryColumns = [
+  'id', 'term', 'normalized_term', 'phonetic',
+  'translation_status', 'last_result',
+  'next_review_at', 'last_reviewed_at', 'created_at', 'updated_at',
+].join(', ')
+
 export async function listVocabulary(searchParams: URLSearchParams): Promise<JsonRecord> {
   const status = searchParams.get('status') || 'all'
   const search = searchParams.get('search') || ''
@@ -268,6 +309,10 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
   // they pass limit=all; the browsing list pages instead. The response shape
   // is identical in both cases.
   const limitAll = searchParams.get('limit') === 'all'
+  // Browsing does not render memory content or encounter history.
+  const summary = !limitAll && searchParams.get('projection') === 'summary'
+  // 到期队列（limit=all）与巩固候选（limit=<n>）都走清单投影。
+  const queue = searchParams.get('projection') === 'queue'
   const limit = limitAll ? 0 : Math.max(1, Math.min(Number(searchParams.get('limit')) || 100, 500))
   const offset = limitAll ? 0 : Math.max(0, Number(searchParams.get('offset')) || 0)
   const dueNow = new Date().toISOString()
@@ -289,9 +334,11 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
     conditions.push('(term LIKE ? OR lemma LIKE ? OR contextual_meaning LIKE ? OR common_meaning LIKE ?)')
     values.push(...Array(4).fill(`%${search.trim()}%`))
   }
+  const itemColumns = summary
+    ? 'id, term, lemma, common_meaning, contextual_meaning, contextual_occurrence_key, part_of_speech, encounter_count, study_status, translation_status'
+    : queue ? queueEntryColumns : '*'
   const items = await rows<JsonRecord>(
-    `SELECT *,
-       (SELECT COUNT(*) FROM vocabulary_reviews WHERE entry_id=vocabulary_entries.id) AS review_count,
+    `SELECT ${itemColumns}${summary ? '' : ', (SELECT COUNT(*) FROM vocabulary_reviews WHERE entry_id=vocabulary_entries.id) AS review_count'},
        CASE WHEN encounter_count >= 2 OR manually_frequent = 1 THEN 1 ELSE 0 END AS is_frequent
      FROM vocabulary_entries
      WHERE ${conditions.join(' AND ')}
@@ -316,13 +363,16 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
     profileOnly ? [dueNow, values[0]] : [dueNow],
   )
   const byEntry = new Map<number, JsonRecord[]>()
-  const itemIds = items.map(item => Number(item.id)).filter(Number.isInteger)
+  // 清单只回传词条本身；出现记录的批量读取只服务于完整投影
+  // （完整列表，以及 summary 里回落到语境释义所需的有效来源校验）。
+  const itemIds = (queue ? [] : items.filter(item => !summary || (!item.common_meaning && item.contextual_meaning)))
+    .map(item => Number(item.id)).filter(Number.isInteger)
   for (let offset = 0; offset < itemIds.length; offset += 500) {
     const batch = itemIds.slice(offset, offset + 500)
     if (!batch.length) continue
     const placeholders = batch.map(() => '?').join(', ')
     const occurrences = await rows<JsonRecord>(
-      `SELECT * FROM vocabulary_occurrences WHERE entry_id IN (${placeholders})`,
+      `SELECT ${occurrenceProjectionColumns} FROM vocabulary_occurrences WHERE entry_id IN (${placeholders})`,
       batch,
     )
     for (const occurrence of occurrences) {
@@ -331,7 +381,13 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
       byEntry.set(Number(occurrence.entry_id), history)
     }
   }
-  return { items: items.map(item => projectVocabulary({...item, review_revision: reviewRevision(item)}, byEntry.get(Number(item.id)) || [])), counts, scope_key: profileOnly ? `profile:${await activeQuestionBankProfileId()}` : 'all' }
+  return { items: items.map(item => {
+    if (queue) return { ...item, review_revision: reviewRevision(item) }
+    if (!summary) return projectVocabulary({...item, review_revision: reviewRevision(item)}, byEntry.get(Number(item.id)) || [])
+    const contextual = !item.common_meaning && item.contextual_meaning
+      ? projectVocabulary(item, byEntry.get(Number(item.id)) || []).contextual_meaning : ''
+    return { ...item, contextual_meaning: contextual, is_frequent: Boolean(item.is_frequent) }
+  }), counts, scope_key: profileOnly ? `profile:${values[0]}` : 'all' }
 }
 
 export async function homeVocabulary(limit: number): Promise<JsonRecord> {
@@ -375,7 +431,7 @@ export async function updateVocabulary(id: number, body: JsonRecord): Promise<Js
   }
   if (assignments.length) {
     if (typeof body.contextual_meaning === 'string') {
-      const projection = projectVocabulary({}, await rows('SELECT * FROM vocabulary_occurrences WHERE entry_id = ?', [id]))
+      const projection = projectVocabulary({}, await rows(`SELECT ${occurrenceProjectionColumns} FROM vocabulary_occurrences WHERE entry_id = ?`, [id]))
       assignments.push('contextual_occurrence_key = ?')
       values.push(projection.context_key ?? '')
     }
@@ -402,42 +458,41 @@ export async function retryVocabulary(_id: number): Promise<{ ok: true }> {
 }
 
 export async function reviewVocabulary(id: number, rating: string, mode = 'scheduled', expectedRevision?: string): Promise<JsonRecord> {
-  return transaction(async () => {
-    const current = await reviewEntry(id)
-    if (expectedRevision !== undefined && expectedRevision !== current.review_revision) {
+  return transaction(async db => {
+    const current = await reviewState(id, db)
+    if (expectedRevision !== undefined && expectedRevision !== reviewRevision(current)) {
       throw new LocalApiError(409, '复习记录已更新，请刷新当前单词后重新评分')
     }
-    return applyVocabularyReview(id, rating, mode)
+    return applyVocabularyReview(id, rating, mode, current, db)
   })
 }
 
-async function applyVocabularyReview(id: number, rating: string, mode = 'scheduled'): Promise<JsonRecord> {
+async function applyVocabularyReview(id: number, rating: string, mode = 'scheduled', current?: JsonRecord, db?: TransactionDb): Promise<JsonRecord> {
   if (!['again', 'hard', 'know', 'fluent'].includes(rating)) throw new LocalApiError(400, '无效的复习评价')
   if (!['scheduled', 'reinforcement'].includes(mode)) throw new LocalApiError(400, '无效的复习模式')
-  const entry = await row<{ review_stage: number }>('SELECT review_stage FROM vocabulary_entries WHERE id = ?', [id])
-  if (!entry) throw new LocalApiError(404, '单词不存在')
+  const entry = current || await reviewState(id, db)
   const now = new Date()
   if (mode === 'reinforcement') {
-    await run(
+    await reviewRun(db,
       "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, 'reinforcement', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)",
       [id, rating, now.toISOString()],
     )
-    return reviewAck(id)
+    return reviewAckOf(await reviewState(id, db))
   }
   let stage = Math.max(0, Math.min(7, Number(entry.review_stage || 0)))
   stage = rating === 'again' ? 0 : rating === 'hard' ? Math.max(0, stage - 1) : rating === 'know' ? Math.min(7, stage + 1) : Math.min(7, stage + 2)
   const delays = [10 / 1440, 1, 3, 7, 14, 30, 60, 120]
   const next = new Date(now.getTime() + delays[stage] * 86400000).toISOString()
-  await run(
+  await reviewRun(db,
     `UPDATE vocabulary_entries SET review_stage = ?, last_result = ?, study_status = ?, lapse_count = lapse_count + ?,
       last_reviewed_at = ?, next_review_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
     [stage, rating, rating === 'fluent' ? 'mastered' : 'learning', rating === 'again' ? 1 : 0, now.toISOString(), next, id],
   )
-  await run(
+  await reviewRun(db,
     "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, 'scheduled', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)",
     [id, rating, next],
   )
-  return reviewAck(id)
+  return reviewAckOf(await reviewState(id, db))
 }
 
 export async function queueTranslations(entryIds: number[]): Promise<JsonRecord> {

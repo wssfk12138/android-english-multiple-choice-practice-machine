@@ -1,5 +1,6 @@
 import { row, rows, run, transaction } from './database'
 import { LocalApiError } from './errors'
+import { restoreAnalysis, pruneAnalysis, reconcileArchivedAnalysis } from './wrong-analysis-history'
 
 type JsonRecord = Record<string, any>
 
@@ -14,7 +15,20 @@ function newBatch() {
   }
 }
 
-export async function activeQuestionBankProfileId(): Promise<number> {
+// 活跃题库配置会被首页、单词本、错题本、学习待办等几乎每条读取路径解析一次。
+// 单次解析要跨两次 SQLite→JS 桥（app_settings 取值 + 校验题库仍在），平板上实测
+// 每次约 360ms，首页一次加载就要重复付出十余次。原生连接在本进程内是单例，而
+// 写入活跃题库的位置只有本模块的 activate / delete 两处，因此进程内缓存有效，
+// 并由这两个写入点负责失效。
+let activeProfileCache: number | null = null
+let activeProfilePending: Promise<number> | null = null
+
+export function resetActiveQuestionBankProfileCache(): void {
+  activeProfileCache = null
+  activeProfilePending = null
+}
+
+async function loadActiveQuestionBankProfileId(): Promise<number> {
   const setting = await row<{ value: string }>(
     "SELECT value FROM app_settings WHERE key = 'active_question_bank_profile_id'",
   )
@@ -42,6 +56,17 @@ export async function activeQuestionBankProfileId(): Promise<number> {
     [String(fallback.id)],
   )
   return Number(fallback.id)
+}
+
+export async function activeQuestionBankProfileId(): Promise<number> {
+  if (activeProfileCache !== null) return activeProfileCache
+  // 并发调用共用一个解析过程，避免同一屏内的多个区块各读一遍。
+  if (!activeProfilePending) {
+    activeProfilePending = loadActiveQuestionBankProfileId()
+      .then(id => { activeProfileCache = id; return id })
+      .finally(() => { activeProfilePending = null })
+  }
+  return activeProfilePending
 }
 
 export async function listQuestionBankProfiles(): Promise<JsonRecord[]> {
@@ -110,6 +135,7 @@ export async function activateQuestionBankProfile(id: number): Promise<JsonRecor
     [String(id)],
   )
   await run('UPDATE question_bank_profiles SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id])
+  resetActiveQuestionBankProfileCache()
   return { activated: true, profile_id: id }
 }
 
@@ -217,6 +243,8 @@ export async function deleteQuestionBankProfile(id: number): Promise<JsonRecord>
       )
     }
   })
+  // 被删除的就是当前活跃题库时事务内已改写活跃值，缓存必须跟着失效。
+  if (activeId === id) resetActiveQuestionBankProfileCache()
   return { trashed: true, batch_id: batchId, purge_after: purgeAfter }
 }
 
@@ -332,6 +360,7 @@ export async function listTrash(): Promise<JsonRecord[]> {
 }
 
 export async function restoreTrash(id: number, body: JsonRecord = {}): Promise<JsonRecord> {
+  await transaction(reconcileArchivedAnalysis)
   const entry = await row<JsonRecord>(
     'SELECT * FROM trash_entries WHERE id = ? AND restored_at IS NULL',
     [id],
@@ -447,6 +476,7 @@ export async function restoreTrash(id: number, body: JsonRecord = {}): Promise<J
           [profileId, previousStatus, item.resource_id], false,
         )
       } else if (item.resource_type === 'wrong_archive') {
+        await restoreAnalysis(db, metadata.reports || [])
         for (const retryRound of metadata.rounds || []) {
           await db.run(
             `INSERT OR REPLACE INTO wrong_retry_rounds
@@ -500,6 +530,7 @@ export async function restoreTrash(id: number, body: JsonRecord = {}): Promise<J
 }
 
 export async function purgeTrash(id: number): Promise<JsonRecord> {
+  await transaction(reconcileArchivedAnalysis)
   const entry = await row<JsonRecord>(
     'SELECT * FROM trash_entries WHERE id = ? AND restored_at IS NULL',
     [id],
@@ -526,11 +557,13 @@ export async function purgeTrash(id: number): Promise<JsonRecord> {
       await db.run('DELETE FROM question_bank_profiles WHERE id = ?', [item.resource_id], false)
     }
     await db.run('DELETE FROM trash_entries WHERE deletion_batch_id = ?', [entry.deletion_batch_id], false)
+    await pruneAnalysis(db)
   })
   return { purged: true, batch_id: entry.deletion_batch_id, count: group.length }
 }
 
 export async function purgeExpiredTrash() {
+  await transaction(reconcileArchivedAnalysis)
   const expired = await rows<{ id: number }>(
     'SELECT id FROM trash_entries WHERE restored_at IS NULL AND purge_after <= CURRENT_TIMESTAMP ORDER BY id',
   )

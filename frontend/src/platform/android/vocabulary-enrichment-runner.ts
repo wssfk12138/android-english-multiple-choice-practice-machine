@@ -32,7 +32,7 @@ let inventory: Promise<void> | null = null
 export function inventoryVocabularyEnrichment(): Promise<void> {
   if (!inventory) inventory = (async () => {
     if (await setting(migrationKey) === 'done') return
-    while (await queueMissingVocabularyEnrichment(200) === 200) { /* bounded database batches; no model calls */ }
+    while (await queueMissingVocabularyEnrichment(200) === 200) { await new Promise(resolve => setTimeout(resolve, 0)) }
     // Unknown labels need one controlled repair too. Existing jobs (including
     // checked empty results and failures) remain authoritative and are not reset.
     let afterId = 0
@@ -45,6 +45,7 @@ export function inventoryVocabularyEnrichment(): Promise<void> {
         afterId = entry.id
       }
       if (batch.length < 200) break
+      await new Promise(resolve => setTimeout(resolve, 0))
     }
     await run('INSERT OR REPLACE INTO app_settings(key,value) VALUES (?,?)', [migrationKey, 'done'])
   })().finally(() => { inventory = null })

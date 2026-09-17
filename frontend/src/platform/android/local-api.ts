@@ -1,10 +1,11 @@
 import { agentTurn, saveAgentExchange, conversation } from './ai'
+import { wrongAnalysisHistory } from './wrong-analysis-history'
 import { studyTodos } from './study-todos'
 import { analyzeWrongQuestions, analyzeWrongStatus, createProfile, createConversation, deleteConversation, deleteProfile, listConversations, listProfiles, selectorModels, sendChat, setAllModelVisibility, setModelVisibility, syncModels, testProfile, updateProfile } from './ai'
 import { LocalApiError } from './errors'
 import { chooseSnapshot } from './practice-snapshots'
 import { abandonIfEmpty, archiveWrongUnits, createSession, dashboard, getSession, listWrong, saveAnswer, submitSession, submitUnit } from './practice'
-import { createEsqImport, listEsqImports, listPapers, publishEsqImport, readEsqImport } from './question-bank'
+import { createEsqImport, listEsqImports, listPapers, publishEsqImport, readEsqImport, sweepEmptyPaperSessions } from './question-bank'
 import { addVocabulary, deleteVocabulary, homeVocabulary, listVocabulary, reviewVocabulary, retryVocabulary, serializeEntry, updateVocabulary } from './vocabulary'
 import { checkAppUpdate, checkQuestionBankCatalog, downloadQuestionBankPackage, installAppUpdate, readUpdateSettings, updateSettings } from './app-update'
 import {
@@ -69,6 +70,9 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   } else {
     await ensureContentRemediation()
   }
+  // 每次启动只做一次的空会话清扫挂在这里，而不是挂在 /papers 里：读取路径保持
+  // 只读，清扫自己一次失败也只影响这一次维护，不会拖垮任何界面首屏。
+  void sweepEmptyPaperSessions().catch(() => {})
   const method = String(options.method || 'GET').toUpperCase()
   const url = new URL(path, 'https://local.english-practice.invalid')
   const pathname = url.pathname
@@ -324,6 +328,7 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (pathname === '/ai/wrong-analysis-status' && method === 'GET') {
     return await analyzeWrongStatus() as T
   }
+  if (pathname === '/ai/wrong-analysis-history' && method === 'GET') return await wrongAnalysisHistory(Number(url.searchParams.get('unit_id'))) as T
   if (pathname === '/ai/analyze-wrong' && method === 'POST') {
     return await analyzeWrongQuestions(
       (body?.question_ids || []).map(Number).filter(Boolean),

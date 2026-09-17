@@ -52,7 +52,12 @@ for (const test of tests) {
     rows.push({ test, status: 'PREREQ', note: 'needs PLAYWRIGHT_MODULE', ms: 0 })
     continue
   }
-  const runner = stripTypes.has(test) ? ['node', '--experimental-strip-types', test] : ['node', test]
+  // The child runs with cwd=tests, so pass the file name relative to that cwd.
+  // Passing the caller-side path (tests/foo.mjs) made every test fail with
+  // MODULE_NOT_FOUND when this aggregate runner itself was launched from
+  // frontend.
+  const testPath = path.join(here, test)
+  const runner = stripTypes.has(test) ? [process.execPath, '--experimental-strip-types', testPath] : [process.execPath, testPath]
   const t0 = Date.now()
   const result = spawnSync(runner[0], [...runner.slice(1)], { cwd: here, encoding: 'utf8', timeout: 300000, env })
   const ms = Date.now() - t0
