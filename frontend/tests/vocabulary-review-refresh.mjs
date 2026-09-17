@@ -7,21 +7,29 @@ const compile = s => ts.transpileModule(s, {compilerOptions:{module:ts.ModuleKin
 const queueModule = { exports:{} }; vm.runInNewContext(compile(read('vocabulary-due-queue.ts')), queueModule)
 const source = read('views/VocabularyView.vue').split('<script setup lang="ts">')[1].split('</script>')[0]
 const ast = ts.createSourceFile('view.ts', source, ts.ScriptTarget.Latest, true)
-const names = ['persistDueQueue','reviewRevision','refreshDueQueue','loadDueQueue','refreshReviewOnForeground','rate']
+const names = ['persistDueQueue','reviewRevision','refreshDueQueue','loadDueQueue','refreshReviewOnForeground','rate',
+  'beginReview','startReview','startReinforcement','loadReinforcement','snapshotOf','refreshReviewSnapshot','cacheReviewDetail','reviewDetailOf','loadReviewDetail','ensureReviewDetails','applyCounts','displayCount']
 const functions = ast.statements.filter(s => ts.isFunctionDeclaration(s) && names.includes(s.name?.text)).map(s => s.getText(ast)).join('\n').replaceAll('\\n','\n')
 const word = id => ({id,term:'word'+id,normalized_term:'word'+id,translation_status:'ready',created_at:'2020-01-01'})
 const value = v => ({value:v})
 function setup() {
   const ctx = { ...queueModule.exports, exports:{}, Map, JSON, String,
     currentBankScope:false, reviewMode:value(true), reviewKind:value('scheduled'), reviewSaving:value(false), reviewIndex:value(0), reveal:value(true), error:value(''), notice:value(''), scheduledWords:value([word(1),word(2)]),
-    counts:value({}), document:{visibilityState:'visible'}, localStorage:{getItem:()=>null,setItem:()=>{}}, load:async()=>{} }
-  ctx.reviewItems = {get value(){return ctx.scheduledWords.value}}
+    reinforcementWords:value([]), reinforcementSize:value(10), filter:value('all'), reviewLoading:value(false),
+    reviewDetails:value({}), reviewDetailError:value(''), reviewSnapshot:value(null),
+    countsLoaded:value(false), listLoaded:value(false), listLoading:value(false),
+    counts:value({}), document:{visibilityState:'visible'}, localStorage:{getItem:()=>null,setItem:()=>{}}, load:async()=>{ctx.loadCalls++} }
+  ctx.reviewItems = {get value(){return ctx.reviewKind.value==='reinforcement'?ctx.reinforcementWords.value:ctx.scheduledWords.value}}
   ctx.reviewWord = {get value(){return ctx.reviewItems.value[ctx.reviewIndex.value]}}
-  ctx.words = [word(1),word(2)]; ctx.posts = []; ctx.getCount = 0
-  ctx.get = async()=>{ ctx.getCount++; return {items:ctx.words} }
+  ctx.words = [word(1),word(2)]; ctx.posts = []; ctx.getCount = 0; ctx.getArgs = []; ctx.loadCalls = 0
+  ctx.details = {1:{id:1,common_meaning:'释义-1',latest_sentence:'原句-1'},2:{id:2,common_meaning:'释义-2',latest_sentence:'原句-2'}}
+  ctx.get = async path=>{ ctx.getCount++; ctx.getArgs.push(path)
+    const detail = /^\/vocabulary\/(\d+)$/.exec(path)
+    if (detail) return { ...ctx.details[Number(detail[1])] }
+    return { items:ctx.words, counts:{}, scope_key:'all' } }
   ctx.post = async(path)=>{ctx.posts.push(path);ctx.words=ctx.words.filter(w=>path!== '/vocabulary/'+w.id+'/review')}
   vm.createContext(ctx)
-  vm.runInContext(compile('let dueRefreshPromise: Promise<void>|null=null; let reviewDisposed=false; let dueQueueStorageKey="";let dueQueue=reconcileDueQueue(null,[]);\n'.replaceAll('\\n','\n')+functions+'\nthis.api={rate,refreshDueQueue,refreshReviewOnForeground,dispose:()=>{reviewDisposed=true}};'.replaceAll('\\n','\n')),ctx)
+  vm.runInContext(compile('let dueRefreshPromise: Promise<void>|null=null; let reviewDisposed=false; let dueQueueStorageKey="";let dueQueue=reconcileDueQueue(null,[]);let reviewLoadToken=0;let reviewSessionToken=0;let reviewDetailPending=new Set();\n'.replaceAll('\\n','\n')+functions+'\nthis.api={rate,refreshDueQueue,refreshReviewOnForeground,startReinforcement,loadReviewDetail,ensureReviewDetails,snapshotOf,refreshReviewSnapshot,cacheReviewDetail,loadDueQueue,applyCounts,displayCount,dispose:()=>{reviewDisposed=true}};'.replaceAll('\\n','\n')),ctx)
   return ctx
 }
 {
@@ -63,7 +71,125 @@ function setup() {
 }
 {
  const c=setup();c.scheduledWords.value[0].review_revision='old';c.words[0].review_revision='new'
- await c.api.rate('hard');assert.equal(c.posts.length,0)
+ c.post=async()=>{throw Object.assign(Error('stale'),{status:409})}
+ await c.api.rate('hard');assert.equal(c.reviewWord.value.review_revision,'new');assert.equal(c.reveal.value,false)
+ assert.match(c.notice.value,/重新评分/);assert.equal(c.reviewSaving.value,false)
+}
+// Android revisions make the transaction authoritative without a full due-set read.
+{
+ const c=setup();c.scheduledWords.value[0].review_revision='current'
+ await c.api.rate('know');assert.equal(c.getCount,0);assert.equal(c.posts.length,1);assert.equal(c.reviewWord.value.id,2)
+}
+{
+ const c=setup();c.scheduledWords.value[0].review_revision='current';c.words=[word(2)]
+ c.post=async()=>{throw Object.assign(Error('deleted'),{status:404})}
+ await c.api.rate('hard');assert.equal(c.reviewWord.value.id,2);assert.equal(c.reveal.value,false);assert.equal(c.getCount,1)
+}
+{
+ const c=setup();c.scheduledWords.value[0].review_revision='current'
+ c.post=async()=>{throw Error('disk full')}
+ await c.api.rate('fluent');assert.equal(c.getCount,0);assert.equal(c.reviewWord.value.id,1);assert.match(c.error.value,/disk full/)
+}
+{
+ const c=setup();c.scheduledWords.value[0].review_revision='current'
+ c.post=async()=>{throw Object.assign(Error('stale'),{status:409})};c.get=async()=>{throw Error('refresh failed')}
+ await c.api.rate('hard');assert.equal(c.reviewWord.value.id,1);assert.equal(c.reviewSaving.value,false);assert.match(c.error.value,/refresh failed/)
+}
+
+// 队列读清单：一次桥调用，卡片不含展开字段（释义/原句），详情按需再读。
+{
+ const c=setup();await c.api.loadDueQueue()
+ assert.equal(c.getArgs[0],'/vocabulary?status=review&limit=all&projection=queue')
+ assert.equal(c.getCount,1);assert.equal(c.scheduledWords.value.length,2)
+ const snap=c.api.snapshotOf(c.scheduledWords.value[0])
+ assert.equal(snap.term,'word1');assert.equal('common_meaning' in snap,false);assert.equal('latest_sentence' in snap,false)
+ assert.equal(c.reviewSnapshot.value,null)
+}
+// 当前卡优先预取下一张：翻卡只付单条详情，不再重读整队。
+{
+ const c=setup();await c.api.loadDueQueue()
+ await c.api.ensureReviewDetails()
+ assert.deepEqual(c.getArgs.slice(1),['/vocabulary/1','/vocabulary/2'])
+ assert.equal(c.getCount,3)
+ c.api.refreshReviewSnapshot()
+ assert.equal(c.reviewSnapshot.value.term,'word1')
+ assert.equal(c.reviewSnapshot.value.common_meaning,'释义-1')
+ assert.equal(c.reviewSnapshot.value.latest_sentence,'原句-1')
+ assert.equal(c.reviewDetailError.value,'')
+}
+// 详情已缓存时不再重复读取；巩固模式不触发队列详情读取。
+{
+ const c=setup();await c.api.loadDueQueue();await c.api.ensureReviewDetails()
+ await c.api.ensureReviewDetails();assert.equal(c.getCount,3)
+ c.reviewKind.value='reinforcement';c.reinforcementWords.value=[word(7)]
+ await c.api.ensureReviewDetails()
+ assert.equal(c.getCount,4);assert.equal(c.getArgs[3],'/vocabulary/7')
+ assert.equal(c.getArgs.filter(p=>p.startsWith('/vocabulary?')).length,1)
+}
+// 详情读取失败只置错误、保留队列与评分能力，不做整队重读。
+{
+ const c=setup();await c.api.loadDueQueue()
+ const before=c.scheduledWords.value
+ c.get=async path=>{c.getCount++;c.getArgs.push(path);throw Error('detail down')}
+ c.getCount=0;c.getArgs=[]
+ await c.api.loadReviewDetail(c.scheduledWords.value[0])
+ assert.equal(c.getCount,1);assert.match(c.reviewDetailError.value,/detail down/)
+ assert.equal(c.scheduledWords.value,before);assert.equal(c.scheduledWords.value.length,2)
+ assert.equal(c.reviewMode.value,true);assert.equal(c.reviewLoading.value,false)
+}
+// 巩固候选按清单投影批量取（limit=probe），只保留 ready 项且截断到本轮条数。
+{
+ const c=setup()
+ const pool=[...Array(6)].map((_,i)=>({...word(i+1),translation_status:'ready'}))
+ pool.push({...word(99),translation_status:'translating'})
+ c.words=pool
+ await c.api.startReinforcement(5)
+ assert.equal(c.getArgs[0],'/vocabulary?status=all&limit=15&projection=queue')
+ assert.equal(c.getCount,1)
+ assert.equal(c.reinforcementWords.value.length,5)
+ assert.ok(c.reinforcementWords.value.every(w=>w.translation_status==='ready'))
+ assert.equal(c.reviewKind.value,'reinforcement');assert.equal(c.reviewMode.value,true)
+ assert.equal(c.reviewLoading.value,false);assert.equal(c.reviewIndex.value,0)
+}
+// 巩固评分不重读浏览列表，直接推进到下一张。
+{
+ const c=setup();await c.api.startReinforcement(2)
+ assert.equal(c.reinforcementWords.value.length,2)
+ const postsBefore=c.posts.length
+ await c.api.rate('good')
+ assert.equal(c.posts.length,postsBefore+1)
+ assert.equal(c.reviewIndex.value,1);assert.equal(c.loadCalls,0)
+ assert.equal(c.reviewWord.value.id,2)
+}
+
+// 新一轮复习从空缓存开始：词条内容被后台补全改写后，不会沿用上一轮的旧释义。
+{
+ const c=setup();await c.api.loadDueQueue();await c.api.ensureReviewDetails()
+ assert.equal(c.getCount,3)
+ c.details[1]={id:1,common_meaning:'改写后的释义',latest_sentence:'改写后的原句'}
+ c.words=[{...word(1)}]
+ c.getCount=0;c.getArgs=[]
+ await c.api.startReinforcement(1)
+ assert.equal(c.getArgs[0],'/vocabulary?status=all&limit=3&projection=queue')
+ await c.api.ensureReviewDetails()
+ assert.deepEqual(c.getArgs.slice(1),['/vocabulary/1'])
+ c.api.refreshReviewSnapshot()
+ assert.equal(c.reviewSnapshot.value.common_meaning,'改写后的释义')
+ assert.equal(c.reviewSnapshot.value.latest_sentence,'改写后的原句')
+}
+
+// 计数读到之前显示占位符：界面不得把“还没读到”渲染成 0 个单词。
+{
+ const c=setup()
+ assert.equal(c.api.displayCount(0),'—')
+ assert.equal(c.api.displayCount(undefined),'—')
+ c.api.applyCounts({total:3,frequent:0,mastered:0,pending:0,review:3})
+ assert.equal(c.countsLoaded.value,true)
+ assert.equal(c.counts.value.total,3)
+ assert.equal(c.api.displayCount(c.counts.value.total),3)
+ assert.equal(c.api.displayCount(0),0)
 }
 
 console.log('PASS due review: deleted/synced cards, failed save, overlapping refresh, duplicate rating, foreground and disposal')
+console.log('PASS counts placeholder: unknown counts never render as zero')
+console.log('PASS queue contract: list-only payload, on-demand detail, detail failure isolation, reinforcement probe')

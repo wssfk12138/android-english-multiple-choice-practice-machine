@@ -45,11 +45,25 @@ db.exec(`ALTER TABLE practice_sessions ADD COLUMN sync_id TEXT;
   ALTER TABLE wrong_stats ADD COLUMN updated_at TEXT`)
 
 const statements = []
+const executedSets = []
+let transactionCalls = 0
 const database = {
   row: async (sql, values = []) => { statements.push(sql); return db.prepare(sql).get(...values) },
   rows: async (sql, values = []) => { statements.push(sql); return db.prepare(sql).all(...values) },
   run: async (sql, values = []) => { statements.push(sql); return db.prepare(sql).run(...values) },
+  // 评分把两条写语句合并成一次原生 executeSet：一次桥调用 + 一个原生事务。
+  // 原生插件在 set 内不取 SELECT 结果（oneRowStatement 只走 executeInsert/
+  // executeUpdateDelete），桩同样只按顺序执行语句。
+  executeSet: async (set, transaction = true, returnMode = 'no') => {
+    executedSets.push({ set, transaction, returnMode })
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      for (const item of set) { statements.push(item.statement); db.prepare(item.statement).run(...(item.values || [])) }
+      db.exec('COMMIT')
+    } catch (error) { db.exec('ROLLBACK'); throw error }
+  },
   transaction: async operation => {
+    transactionCalls++
     db.exec('BEGIN IMMEDIATE')
     try {
       const result = await operation({
@@ -216,6 +230,35 @@ assert.ok(occurrenceSelects.length, '必须真实查询出现记录')
 for (const sql of occurrenceSelects) {
   assert.ok(!/SELECT \*/i.test(sql), `出现记录查询不得整行读取：${sql}`)
 }
+
+// ---------------------------------------------------------------- 2b. 评分合并为单次原生调用
+const txBefore = transactionCalls
+const reviewMark = bridgeCalls()
+const ack = await vocabulary.reviewVocabulary(11, 'hard', 'scheduled', dueItem.review_revision)
+const reviewCalls = since(reviewMark)
+// 评分链路的语句形状：两次状态读取（乐观并发校验 + 回执）与一次 executeSet
+// 里的两条写语句。旧的 transaction() 外壳还要额外付两次 isTransactionActive
+// 与显式 BEGIN/COMMIT 的跨桥往返。
+assert.equal(reviewCalls.length, 4, `评分只允许“读状态 + 两条写语句 + 读回执”，实际 ${reviewCalls.length} 条`)
+assert.equal(executedSets.length, 1, '评分必须一次 executeSet 写完两条语句')
+assert.equal(executedSets[0].transaction, true, 'executeSet 必须自带原生事务，失败整组回滚')
+assert.equal(executedSets[0].returnMode, 'no', 'executeSet 不得要求回执列（原生 set 取不到 SELECT 结果）')
+// 展开成宿主域数组再比较：模块在 vm 沙箱里，跨域数组的原型不同会让 deepEqual 失败。
+assert.deepEqual([...executedSets[0].set.map(item => item.statement.trim().split(/\s+/)[0])], ['UPDATE', 'INSERT'],
+  '写入顺序必须保持先改词条（顺位/到期）再记账')
+assert.equal(executedSets[0].set[0].values.length, 7, '词条更新必须绑定全部七个参数')
+assert.equal(transactionCalls - txBefore, 0, '评分不得再包 transaction() 外壳')
+for (const sql of reviewCalls) assert.ok(!/SELECT \*/i.test(sql), `评分路径不得整行读取：${sql}`)
+assert.equal(ack.id, 11)
+assert.equal(ack.review_count, 2)
+assert.equal(ack.review_revision, (await vocabulary.serializeEntry(11)).review_revision, '回执版本必须与随后读到的版本一致')
+assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vocabulary_reviews WHERE entry_id = 11').get().n, 2, '评分必须新增一条复习记录')
+
+// summary 投影必须保留语境来源键：列表回落到语境释义时要用它校验“这条释义
+// 是否仍属于最近的有效来源”（projectVocabulary 的 contextual_meaning 守卫）。
+const summaryRows = await vocabulary.listVocabulary(new URLSearchParams('projection=summary&limit=2'))
+assert.equal(summaryRows.items.find(item => item.id === 11).contextual_occurrence_key, 'occ-sync-11')
+assert.equal(summaryRows.items.find(item => item.id === 11).review_revision, undefined, 'summary 投影不回传卡片身份')
 
 // ---------------------------------------------------------------- 3. 高频题计数
 const studyTodos = load('study-todos', {

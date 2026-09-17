@@ -1,14 +1,11 @@
 import { queueVocabularyEnrichment } from './vocabulary-enrichment-runner'
 import { vocabularyProfileCondition } from './study-todos'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
-import { row, rows, run, transaction } from './database'
+import { executeSet, row, rows, run } from './database'
 import { LocalApiError } from './errors'
 import { occurrenceProjectionColumns, projectVocabulary } from '../../vocabulary-context'
-import type { SQLiteDBConnection } from '@capacitor-community/sqlite'
 
 type JsonRecord = Record<string, any>
-// 事务内的读写优先走事务句柄（与 practice.ts 约定一致）；缺省时回落到共享连接。
-type TransactionDb = Pick<SQLiteDBConnection, 'query' | 'run'>
 
 function normalizeTerm(value: string): string {
   return value.trim().replaceAll('’', "'").replace(/\s+/g, ' ').toLowerCase()
@@ -163,21 +160,10 @@ const reviewStateColumns = [
   '(SELECT COUNT(*) FROM vocabulary_reviews WHERE entry_id=vocabulary_entries.id) AS review_count',
 ].join(', ')
 
-async function reviewState(id: number, db?: TransactionDb): Promise<JsonRecord> {
-  const statement = `SELECT ${reviewStateColumns} FROM vocabulary_entries WHERE id = ?`
-  const entry = db
-    ? (await db.query(statement, [id])).values?.[0] as JsonRecord | undefined
-    : await row<JsonRecord>(statement, [id])
+async function reviewState(id: number): Promise<JsonRecord> {
+  const entry = await row<JsonRecord>(`SELECT ${reviewStateColumns} FROM vocabulary_entries WHERE id = ?`, [id])
   if (!entry) throw new LocalApiError(404, '单词不存在')
   return entry
-}
-
-async function reviewRun(db: TransactionDb | undefined, statement: string, values: unknown[] = []): Promise<void> {
-  if (db) {
-    await db.run(statement, values, false)
-    return
-  }
-  await run(statement, values)
 }
 
 function reviewAckOf(entry: JsonRecord): JsonRecord {
@@ -458,41 +444,39 @@ export async function retryVocabulary(_id: number): Promise<{ ok: true }> {
 }
 
 export async function reviewVocabulary(id: number, rating: string, mode = 'scheduled', expectedRevision?: string): Promise<JsonRecord> {
-  return transaction(async db => {
-    const current = await reviewState(id, db)
-    if (expectedRevision !== undefined && expectedRevision !== reviewRevision(current)) {
-      throw new LocalApiError(409, '复习记录已更新，请刷新当前单词后重新评分')
-    }
-    return applyVocabularyReview(id, rating, mode, current, db)
-  })
+  // 集合内取不到 SELECT 结果，所以并发校验在写库之前单独读一次；写库本身
+  // （更新词条 + 记账）合并成一次桥调用、一个原生事务，失败整组回滚。
+  const current = await reviewState(id)
+  if (expectedRevision !== undefined && expectedRevision !== reviewRevision(current)) {
+    throw new LocalApiError(409, '复习记录已更新，请刷新当前单词后重新评分')
+  }
+  return applyVocabularyReview(id, rating, mode, current)
 }
 
-async function applyVocabularyReview(id: number, rating: string, mode = 'scheduled', current?: JsonRecord, db?: TransactionDb): Promise<JsonRecord> {
+async function applyVocabularyReview(id: number, rating: string, mode = 'scheduled', current?: JsonRecord): Promise<JsonRecord> {
   if (!['again', 'hard', 'know', 'fluent'].includes(rating)) throw new LocalApiError(400, '无效的复习评价')
   if (!['scheduled', 'reinforcement'].includes(mode)) throw new LocalApiError(400, '无效的复习模式')
-  const entry = current || await reviewState(id, db)
+  const entry = current || await reviewState(id)
   const now = new Date()
-  if (mode === 'reinforcement') {
-    await reviewRun(db,
-      "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, 'reinforcement', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)",
-      [id, rating, now.toISOString()],
-    )
-    return reviewAckOf(await reviewState(id, db))
+  const set: { statement: string; values?: unknown[] }[] = []
+  let nextReviewAt = now.toISOString()
+  if (mode === 'scheduled') {
+    let stage = Math.max(0, Math.min(7, Number(entry.review_stage || 0)))
+    stage = rating === 'again' ? 0 : rating === 'hard' ? Math.max(0, stage - 1) : rating === 'know' ? Math.min(7, stage + 1) : Math.min(7, stage + 2)
+    const delays = [10 / 1440, 1, 3, 7, 14, 30, 60, 120]
+    nextReviewAt = new Date(now.getTime() + delays[stage] * 86400000).toISOString()
+    set.push({
+      statement: `UPDATE vocabulary_entries SET review_stage = ?, last_result = ?, study_status = ?, lapse_count = lapse_count + ?,
+        last_reviewed_at = ?, next_review_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      values: [stage, rating, rating === 'fluent' ? 'mastered' : 'learning', rating === 'again' ? 1 : 0, now.toISOString(), nextReviewAt, id],
+    })
   }
-  let stage = Math.max(0, Math.min(7, Number(entry.review_stage || 0)))
-  stage = rating === 'again' ? 0 : rating === 'hard' ? Math.max(0, stage - 1) : rating === 'know' ? Math.min(7, stage + 1) : Math.min(7, stage + 2)
-  const delays = [10 / 1440, 1, 3, 7, 14, 30, 60, 120]
-  const next = new Date(now.getTime() + delays[stage] * 86400000).toISOString()
-  await reviewRun(db,
-    `UPDATE vocabulary_entries SET review_stage = ?, last_result = ?, study_status = ?, lapse_count = lapse_count + ?,
-      last_reviewed_at = ?, next_review_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    [stage, rating, rating === 'fluent' ? 'mastered' : 'learning', rating === 'again' ? 1 : 0, now.toISOString(), next, id],
-  )
-  await reviewRun(db,
-    "INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, 'scheduled', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)",
-    [id, rating, next],
-  )
-  return reviewAckOf(await reviewState(id, db))
+  set.push({
+    statement: `INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, '${mode}', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
+    values: [id, rating, nextReviewAt],
+  })
+  await executeSet(set)
+  return reviewAckOf(await reviewState(id))
 }
 
 export async function queueTranslations(entryIds: number[]): Promise<JsonRecord> {

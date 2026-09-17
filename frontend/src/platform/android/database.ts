@@ -1178,6 +1178,13 @@ export async function run(
   }
 }
 
+// 一组写语句合并成一次桥调用 + 一个原生事务（插件在 finally 里自动回滚）。
+// 只用于“多条写必须同时生效”的合并场景：集合内取不到 SELECT 结果，
+// 读值仍由调用方在事务外单独读取。
+export async function executeSet(set: { statement: string; values?: unknown[] }[]): Promise<void> {
+  await (await androidDatabase()).executeSet(set, true, 'no')
+}
+
 const runTransactionSerially = createSerialQueue()
 
 export async function transaction<T>(operation: (db: SQLiteDBConnection) => Promise<T>): Promise<T> {

@@ -10,8 +10,10 @@ import { loadVocabDisplayConfig } from '../services/vocabularyDisplayConfig'
 import { reconcileDueQueue, orderedDueKeys, completeDueWord, wordKey, type DueQueue } from '../vocabulary-due-queue'
 import { nextTick } from 'vue'
 import { platformRuntime } from '../platform/runtime'
+import { useAndroidLandscape } from '../composables/useAndroidLandscape'
 
 const route = useRoute()
+const landscape = useAndroidLandscape()
 const items = ref<any[]>([])
 const counts = ref<any>({ total:0, frequent:0, mastered:0, pending:0, review:0 })
 const selected = ref<any>(null)
@@ -29,11 +31,18 @@ const reviewMode = ref(false)
 // 进入复习时先渲染卡片外壳，再让到期队列在后台落地，避免卡片出现前的加载页。
 const reviewLoading = ref(false)
 let reviewLoadToken = 0
+// 每一轮复习都是一个独立会话：上一轮的详情缓存与在途读取都不得污染新会话。
+let reviewSessionToken = 0
 const reviewKind = ref<'scheduled' | 'reinforcement'>('scheduled')
 const reinforcementSize = ref(10)
 const reveal = ref(false)
 const reviewIndex = ref(0)
 const scheduledWords = ref<any[]>([])
+const reinforcementWords = ref<any[]>([])
+// 到期队列与巩固候选只带回清单列，卡片成为当前卡时再按需读取该词的完整详情。
+const reviewDetails = ref<Record<string, any>>({})
+const reviewDetailError = ref('')
+const reviewDetailPending = new Set<number>()
 let dueQueue: DueQueue = reconcileDueQueue(null, [])
 let dueQueueStorageKey = ''
 const reviewSaving = ref(false)
@@ -44,7 +53,13 @@ function persistDueQueue() {
 let dueRefreshPromise: Promise<void> | null = null
 let reviewDisposed = false
 function reviewRevision(word: any) {
-  return word?.review_revision || (word ? JSON.stringify([wordKey(word), word.last_reviewed_at, word.next_review_at, word.review_count, word.updated_at]) : '')
+  // 兜底值必须与 Android 本地接口 reviewRevision 的字段和顺序完全一致，
+  // 否则同一张卡在清单与详情下给出不同身份，乐观并发校验会静默失效。
+  // 摘要投影（浏览列表）不带这些字段，它不会成为复习卡：复习卡只来自
+  // projection=queue 的到期队列与巩固候选，评分前的队列刷新会补上真实版本。
+  if (!word) return ''
+  return word.review_revision
+    || JSON.stringify([word.normalized_term, word.last_reviewed_at, word.next_review_at, word.updated_at, word.review_count || 0])
 }
 function refreshDueQueue(): Promise<void> {
   if (dueRefreshPromise) return dueRefreshPromise
@@ -54,9 +69,9 @@ function refreshDueQueue(): Promise<void> {
 async function loadDueQueue() {
   const previous = reviewRevision(reviewWord.value)
   // Review needs the complete due set; paging applies only to the browsing list.
-  const result: any = await get(`/vocabulary?status=review${currentBankScope ? '&scope=current' : ''}&limit=all`)
+  const result: any = await get(`/vocabulary?status=review${currentBankScope ? '&scope=current' : ''}&limit=all&projection=queue`)
   if (reviewDisposed) return
-  counts.value = result.counts || counts.value
+  applyCounts(result.counts)
   dueQueueStorageKey = `vocab-due-queue:v1:${result.scope_key || (currentBankScope ? 'current' : 'all')}`
   let saved = null
   try { saved = JSON.parse(localStorage.getItem(dueQueueStorageKey) || 'null') } catch { /* Rebuild from durable reviews. */ }
@@ -66,30 +81,93 @@ async function loadDueQueue() {
   scheduledWords.value = orderedDueKeys(dueQueue).map(key => words.get(key)).filter(Boolean)
   if (previous !== reviewRevision(reviewWord.value)) reveal.value = false
 }
-const reviewItems = computed(() => {
-  if (reviewKind.value === 'scheduled') return scheduledWords.value
-  const ready = items.value.filter(item => item.translation_status === 'ready')
-  return reviewKind.value === 'reinforcement' ? ready.slice(0, reinforcementSize.value) : scheduledWords.value
-})
-// The browsing list pages (PAGE_SIZE rows per step); review flows fetch the
-// complete due set through limit=all so paging never truncates a queue.
-const PAGE_SIZE = 100
+const reviewItems = computed(() => reviewKind.value === 'reinforcement' ? reinforcementWords.value : scheduledWords.value)
+// 浏览列表按页读取：首屏只取够填满视口的行数，再由滚动哨兵继续取下一页；
+// 复习与巩固走清单投影，不受分页影响。
+const PAGE_SIZE = 31
 const hasMore = ref(false)
 const loadingMore = ref(false)
 const listSentinel = ref<HTMLElement | null>(null)
 let listObserver: IntersectionObserver | null = null
+// 首屏读到数据之前不得渲染终态：“正在读取”与“确实没有单词”必须可区分。
+// 否则一次慢响应或瞬时失败会被直接读成“0 个单词”，与数据是否完整无关。
+const countsLoaded = ref(false)
+const listLoaded = ref(false)
+const listLoading = ref(false)
+let listToken = 0
+// 计数只在这一个入口落地：读到之前界面显示占位符，不显示 0。
+function applyCounts(next: any) {
+  if (!next) return
+  counts.value = next
+  countsLoaded.value = true
+}
+function displayCount(value: unknown) {
+  return countsLoaded.value ? Number(value || 0) : '—'
+}
 function listUrl(limitClause: string) {
-  return `/vocabulary?status=${filter.value}&search=${encodeURIComponent(search.value)}${currentBankScope ? '&scope=current' : ''}&${limitClause}`
+  const projection = platformRuntime.isAndroid ? '&projection=summary' : ''
+  return `/vocabulary?status=${filter.value}&search=${encodeURIComponent(search.value)}${currentBankScope ? '&scope=current' : ''}&${limitClause}${projection}`
 }
 function applyLoadedPage(result: any) {
   const rows = result.items || []
   const more = rows.length > PAGE_SIZE
   items.value = more ? rows.slice(0, PAGE_SIZE) : rows
-  counts.value = result.counts || counts.value
+  applyCounts(result.counts)
   hasMore.value = more
 }
 const reviewWord = computed(() => reviewItems.value[reviewIndex.value])
+// Keep one displayed answer stable while background enrichment refreshes the list.
+const reviewSnapshot = ref<any>(null)
+// 清单 + 已读到的详情合成当前卡片；详情尚未返回时只显示抬头字段。
+function snapshotOf(word: any) {
+  if (!word) return null
+  const detail = reviewDetails.value[String(word.id)]
+  return JSON.parse(JSON.stringify(detail ? { ...word, ...detail } : word))
+}
+function refreshReviewSnapshot() {
+  reviewSnapshot.value = snapshotOf(reviewWord.value)
+}
+function reviewDetailOf(word: any) {
+  return word ? reviewDetails.value[String(word.id)] || null : null
+}
+function cacheReviewDetail(id: number, detail: any) {
+  reviewDetails.value = { ...reviewDetails.value, [String(id)]: detail }
+  refreshReviewSnapshot()
+}
+async function loadReviewDetail(word: any, force = false) {
+  const id = Number(word?.id)
+  if (!Number.isInteger(id) || id <= 0 || reviewDetailPending.has(id)) return
+  if (!force && reviewDetailOf(word)) return
+  const session = reviewSessionToken
+  reviewDetailPending.add(id)
+  try {
+    const detail: any = await get(`/vocabulary/${id}`)
+    if (reviewDisposed || session !== reviewSessionToken) return
+    reviewDetailError.value = ''
+    cacheReviewDetail(id, detail)
+  } catch (cause) {
+    // 详情读取失败只提示错误：队列与评分仍然可用，不做整队重读。
+    if (!reviewDisposed && session === reviewSessionToken) reviewDetailError.value = `单词详情读取失败：${String(cause)}`
+  } finally {
+    if (session === reviewSessionToken) reviewDetailPending.delete(id)
+  }
+}
+// 当前卡片优先，紧随其后预取下一张；翻卡不再付出整队读取的代价。
+async function ensureReviewDetails() {
+  if (!reviewMode.value) return
+  const list = reviewItems.value
+  const current = list[reviewIndex.value]
+  if (current) await loadReviewDetail(current)
+  const next = list[reviewIndex.value + 1]
+  if (next && !reviewDisposed && reviewMode.value) await loadReviewDetail(next)
+}
+watch(() => [reviewMode.value, reviewWord.value ? wordKey(reviewWord.value) : '', reviewWord.value?.last_reviewed_at], () => {
+  refreshReviewSnapshot()
+}, { immediate:true, flush:'sync' })
+watch(() => [reviewMode.value, reviewWord.value?.id || 0], () => { void ensureReviewDetails() })
 const displayConfig = ref(loadVocabDisplayConfig())
+const reviewDisplayConfig = computed(() => landscape.value
+  ? { ...displayConfig.value, phonetic: false, morphology: false, note: false } : displayConfig.value)
 const expandedAll = ref(true)
 const expansionToken = ref(0)
 const enrichment = ref<any>(null)
@@ -191,35 +269,49 @@ async function refreshTranslationStatuses() {
 }
 
 async function startPendingTranslations() {
+  await load()
+  await nextTick()
+  await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+  if (reviewDisposed) return
   try {
     const result: any = await post('/vocabulary/translation-runs', {
       entry_ids: [],
       trigger: 'vocabulary_open',
     })
-    await load()
     startTranslationRefresh()
   } catch (cause) {
     error.value = String(cause)
-    await load()
   }
 }
 
-async function load(preferredId?: number, options: { all?: boolean } = {}) {
+async function load(preferredId?: number) {
+  const token = ++listToken
+  listLoading.value = true
   try {
-    const result: any = await get(listUrl(options.all ? 'limit=all' : `limit=${PAGE_SIZE + 1}&offset=0`))
-    error.value = ''
-    if (options.all) {
-      items.value = result.items || []
-      counts.value = result.counts || counts.value
-      hasMore.value = false
-    } else {
-      applyLoadedPage(result)
+    let result: any
+    try {
+      result = await get(listUrl(`limit=${PAGE_SIZE + 1}&offset=0`))
+    } catch (cause) {
+      // 升级或导入后的首次进入常与后台整理争抢同一条原生连接；读到数据之前
+      // 的瞬时失败重试一次，避免界面停在“0 个单词”的终态。
+      if (listLoaded.value) throw cause
+      await new Promise(resolve => setTimeout(resolve, 250))
+      result = await get(listUrl(`limit=${PAGE_SIZE + 1}&offset=0`))
     }
+    // 搜索与筛选会连续触发读取，迟到的旧响应不得覆盖新结果。
+    if (token !== listToken) return
+    error.value = ''
+    applyLoadedPage(result)
+    listLoaded.value = true
     const requested = preferredId ?? Number(route.query.word)
     const target = items.value.find(item => item.id === requested)
     if (target) await select(target.id, false)
     else if (!selected.value && !isNarrowListContext() && items.value[0]) await select(items.value[0].id, false)
-  } catch (e) { error.value = String(e) }
+  } catch (e) {
+    if (token === listToken) error.value = String(e)
+  } finally {
+    if (token === listToken) listLoading.value = false
+  }
 }
 
 async function loadMore() {
@@ -230,7 +322,7 @@ async function loadMore() {
     const rows = result.items || []
     const more = rows.length > PAGE_SIZE
     items.value = [...items.value, ...(more ? rows.slice(0, PAGE_SIZE) : rows)]
-    counts.value = result.counts || counts.value
+    applyCounts(result.counts)
     hasMore.value = more
   } catch (cause) { error.value = String(cause) }
   finally { loadingMore.value = false }
@@ -300,9 +392,9 @@ async function rate(rating: string) {
   const targetMode = reviewKind.value
   reviewSaving.value = true
   try {
-    // Reconcile the durable queue before submitting a scheduled review so a
-    // card removed or changed by another device cannot receive a stale rating.
-    if (targetMode === 'scheduled') await refreshDueQueue()
+    // Revision-aware storage rejects stale cards atomically. Older backends
+    // still need the preflight refresh; Android must not reload every due word.
+    if (targetMode === 'scheduled' && !initialTarget.review_revision) await refreshDueQueue()
     const target = reviewWord.value
     if (!target || reviewDisposed || !reviewMode.value || targetMode !== reviewKind.value
       || wordKey(target) !== initialKey || reviewRevision(target) !== initialRevision) {
@@ -317,7 +409,18 @@ async function rate(rating: string) {
       notice.value = '复习列表已更新，请查看当前单词后重新评分'
       return
     }
-    await post(`/vocabulary/${target.id}/review`, { rating, mode: targetMode, expected_revision: target.review_revision })
+    try {
+      await post(`/vocabulary/${target.id}/review`, { rating, mode: targetMode, expected_revision: target.review_revision })
+    } catch (cause) {
+      const status = (cause as { status?: number })?.status
+      if (targetMode !== 'scheduled' || ![404, 409].includes(status || 0)) throw cause
+      if (reviewDisposed || !reviewMode.value || targetMode !== reviewKind.value
+        || initialRevision !== reviewRevision(reviewWord.value)) return
+      reveal.value = false
+      await refreshDueQueue()
+      notice.value = '复习列表已更新，请查看当前单词后重新评分'
+      return
+    }
     if (reviewDisposed || !reviewMode.value || revision !== reviewRevision(reviewWord.value) || targetMode !== reviewKind.value) return
     if (targetMode === 'scheduled') {
       dueQueue = completeDueWord(dueQueue, completedKey)
@@ -327,7 +430,7 @@ async function rate(rating: string) {
     }
     reveal.value = false
     if (targetMode === 'reinforcement') {
-      await load()
+      // 巩固评分只新增一条复习记录，词条与列表字段不变，不需要重读列表。
       reviewIndex.value += 1
     }
     if (!reviewItems.value.length || reviewIndex.value >= reviewItems.value.length) {
@@ -340,24 +443,33 @@ async function rate(rating: string) {
   finally { reviewSaving.value = false }
 }
 
-async function startReview() {
-  if (reviewSaving.value) return
-  reviewKind.value = 'scheduled'
+// 复习与巩固共用入口：先进入复习视图并渲染等高骨架卡，清单在后台落地后替换
+// 内容，点击反馈不再等待队列读取。
+async function beginReview(kind: 'scheduled' | 'reinforcement', loader: () => Promise<void>) {
+  reviewKind.value = kind
   reveal.value = false
   reviewIndex.value = 0
-  // 先进入复习视图并渲染等高骨架卡，到期队列在后台落地后再替换内容，
-  // 这样点击反馈不再等待 limit=all 的整表查询。
+  reviewDetailError.value = ''
+  // 新会话从空缓存开始：词条内容可能已被后台补全改写，沿用上一轮的快照会显示旧释义。
+  reviewSessionToken += 1
+  reviewDetails.value = {}
+  reviewDetailPending.clear()
   reviewMode.value = true
   reviewLoading.value = true
   const token = reviewLoadToken + 1
   reviewLoadToken = token
   try {
-    await refreshDueQueue()
+    await loader()
   } catch (cause) {
     error.value = String(cause)
   } finally {
     if (token === reviewLoadToken) reviewLoading.value = false
   }
+}
+
+async function startReview() {
+  if (reviewSaving.value) return
+  await beginReview('scheduled', refreshDueQueue)
 }
 
 async function closeReview() {
@@ -367,15 +479,25 @@ async function closeReview() {
   await load(selected.value?.id)
 }
 
+// 巩固候选只取本轮需要的清单行（不再是整本词库整行读取），候选顺序与浏览
+// 列表一致：近期遇到的、高频的词优先。
+async function loadReinforcement() {
+  reinforcementWords.value = []
+  const wanted = Math.max(1, reinforcementSize.value)
+  // 非 ready 的候选会被过滤，因此多取一些再截断，保证轮次条数稳定。
+  const probe = Math.min(60, wanted * 3)
+  const result: any = await get(`/vocabulary?status=all&limit=${probe}&projection=queue`)
+  if (reviewDisposed) return
+  applyCounts(result.counts)
+  reinforcementWords.value = (result.items || [])
+    .filter((item: any) => item.translation_status === 'ready').slice(0, wanted)
+}
+
 async function startReinforcement(size: number) {
   if (reviewSaving.value) return
   reinforcementSize.value = size
-  reviewKind.value = 'reinforcement'
-  reveal.value = false
-  reviewIndex.value = 0
   filter.value = 'all'
-  await load(undefined, { all: true })
-  reviewMode.value = true
+  await beginReview('reinforcement', loadReinforcement)
 }
 
 let searchTimer = 0
@@ -422,11 +544,11 @@ onMounted(async () => {
 onBeforeUnmount(stopTranslationRefresh)
 
 const statChips = computed(() => [
-  { key: 'all', label: '全部', count: counts.value.total || 0 },
-  { key: 'frequent', label: '高频词', count: counts.value.frequent || 0 },
-  { key: 'review', label: '每日一背', count: counts.value.review || 0 },
-  { key: 'mastered', label: '已掌握', count: counts.value.mastered || 0 },
-  { key: 'pending', label: '等待翻译', count: counts.value.pending || 0 },
+  { key: 'all', label: '全部', count: displayCount(counts.value.total) },
+  { key: 'frequent', label: '高频词', count: displayCount(counts.value.frequent) },
+  { key: 'review', label: '每日一背', count: displayCount(counts.value.review) },
+  { key: 'mastered', label: '已掌握', count: displayCount(counts.value.mastered) },
+  { key: 'pending', label: '等待翻译', count: displayCount(counts.value.pending) },
 ])
 
 const listFilters = [
@@ -441,6 +563,7 @@ const listFilters = [
 const activeFilterLabel = computed(() => listFilters.find(item => item[0] === filter.value)?.[1] || '全部单词')
 const filtersExpanded = ref(false)
 function filterCount(key: string) {
+  if (!countsLoaded.value) return '—'
   if (key === 'all') return counts.value.total || 0
   if (key === 'learning') return counts.value.learning ?? Math.max(0, (counts.value.total || 0) - (counts.value.mastered || 0))
   return counts.value[key] || 0
@@ -460,7 +583,7 @@ function filterCount(key: string) {
     <div class="page-head">
       <div><h1>我的单词本</h1><span v-if="currentBankScope" class="muted">当前题库</span></div>
       <div style="display:flex;gap:8px;align-items:center">
-        <button class="button" @click="startReview"><BookOpen :size="17" />每日一背 · 待背 {{ counts.review || 0 }} 词</button>
+        <button class="button" @click="startReview"><BookOpen :size="17" />每日一背 · 待背 {{ displayCount(counts.review) }} 词</button>
       </div>
     </div>
     <div v-if="error" class="warning">{{ error }}</div>
@@ -492,7 +615,7 @@ function filterCount(key: string) {
       <div v-if="reviewLoading" class="review-card vocabulary-review-card" data-review-fullscreen aria-busy="true">
         <header class="review-header">
           <strong>{{ reviewKind === 'scheduled' ? '每日一背' : '额外巩固' }} <span>{{ String(reviewIndex + 1).padStart(2, '0') }} / --</span></strong>
-          <button class="review-close" type="button" title="退出复习" aria-label="退出复习" :disabled="reviewSaving" @click="closeReview">×</button>
+          <button class="review-close" type="button" title="退出复习" aria-label="退出复习" :disabled="reviewSaving" @click="closeReview">{{ landscape ? '退出复习' : '×' }}</button>
         </header>
         <div class="review-content">
           <div class="review-term">…</div>
@@ -503,17 +626,19 @@ function filterCount(key: string) {
       <div v-else-if="reviewWord" class="review-card vocabulary-review-card" data-review-fullscreen>
         <header class="review-header">
           <strong>{{ reviewKind === 'scheduled' ? '每日一背' : '额外巩固' }} <span>{{ String(reviewIndex + 1).padStart(2, '0') }} / {{ String(reviewItems.length).padStart(2, '0') }}</span></strong>
-          <button class="review-close" type="button" title="退出复习" aria-label="退出复习" :disabled="reviewSaving" @click="closeReview">×</button>
+          <button class="review-close" type="button" title="退出复习" aria-label="退出复习" :disabled="reviewSaving" @click="closeReview">{{ landscape ? '退出复习' : '×' }}</button>
         </header>
         <div class="review-content">
-          <div class="review-term"><VocabularyTerm :term="reviewWord.term" :frequent="reviewWord.is_frequent" /></div>
-          <div class="review-phonetic">{{ reviewWord.phonetic }}</div>
-          <button v-if="!reveal" class="button secondary reveal-button" @click="reveal=true">显示释义和原句</button>
-          <div v-else class="review-answer">
-            <VocabularyMemoryContent :entry="reviewWord" :config="displayConfig" />
+          <div class="review-term"><VocabularyTerm :term="reviewSnapshot.term" :frequent="reviewSnapshot.is_frequent" /></div>
+          <div class="review-phonetic">{{ reviewSnapshot.phonetic }}</div>
+          <button v-if="landscape || !reveal" :class="{ 'answer-reserved': reveal }" :inert="reveal" :aria-hidden="reveal" class="button secondary reveal-button" @click="reveal=true">显示释义和原句</button>
+          <div v-if="landscape || reveal" class="review-answer" :class="{ 'answer-reserved': !reveal }" :inert="!reveal" :aria-hidden="!reveal">
+            <p v-if="!reviewDetailOf(reviewWord)" class="muted" aria-live="polite">正在读取释义与原句…</p>
+            <VocabularyMemoryContent v-else :entry="reviewSnapshot" :config="reviewDisplayConfig" />
+            <p v-if="reviewDetailError" class="error" role="alert">{{ reviewDetailError }}<button class="button ghost compact" type="button" @click="loadReviewDetail(reviewWord, true)">重试</button></p>
           </div>
         </div>
-        <footer v-if="reveal" class="review-actions" :aria-busy="reviewSaving">
+        <footer v-if="landscape || reveal" class="review-actions" :class="{ 'answer-reserved': !reveal }" :inert="!reveal" :aria-hidden="!reveal" :aria-busy="reviewSaving">
           <button class="button secondary" :disabled="reviewSaving" @click="rate('hard')">不认识</button>
           <button class="button secondary" :disabled="reviewSaving" @click="rate('know')">认识</button>
           <button class="button" :disabled="reviewSaving" @click="rate('fluent')">熟练</button>
@@ -562,7 +687,11 @@ function filterCount(key: string) {
               <div v-else-if="editing" class="vocab-edit"><label>音标<input v-model="editForm.phonetic"></label><label>词性<input v-model="editForm.part_of_speech"></label><label>常用释义<textarea rows="3" v-model="editForm.common_meaning"></textarea></label><label>我的笔记<textarea rows="4" v-model="editForm.note"></textarea></label><div><button class="button" @click="saveEdit">保存修改</button><button class="button ghost" @click="editing=false">取消</button></div></div>
             </section>
           </template>
-          <div v-if="!items.length" class="empty">这里还没有符合条件的单词。</div>
+          <div v-if="!items.length && !listLoaded" class="empty vocab-list-state" role="status" aria-live="polite" :aria-busy="listLoading ? 'true' : 'false'">
+            <template v-if="listLoading">正在读取单词…</template>
+            <template v-else>单词列表读取失败。<button class="button ghost compact" type="button" @click="load()">重试</button></template>
+          </div>
+          <div v-else-if="!items.length" class="empty">这里还没有符合条件的单词。</div>
           <div ref="listSentinel" aria-hidden="true"></div>
         </section>
       </div>
