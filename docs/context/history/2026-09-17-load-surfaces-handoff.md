@@ -7,7 +7,7 @@
 ## 1. 一句话现状
 
 内测树（本仓）四项加载路径治本修复已全部完成并通过门禁；内测 alpha.92/92 与公测 beta.6-test.16/120 均已出包并装到平板。
-本轮收尾已完成：逐项对照检查、收尾文档、内测树本地提交（`57c0c45`，27 个文件）、ClawBot 微信交接报告（`work/wechat-notify-handoff-0917.txt`，工具输出“已发送”）。
+本轮收尾已完成：逐项对照检查、收尾文档、内测树本地提交、ClawBot 微信交接报告（`work/wechat-notify-handoff-0917.txt`，工具输出“已发送”）。内测树本收尾共 3 个提交、最终 HEAD `173a0f3`（主体 `57c0c45` 27 个文件 + 收尾文档 `3738844` + 清点修正 `173a0f3`），未推送。
 剩下的是公测自测截图与 `gfxinfo` 补齐，以及两项需用户决定的事项（公测树是否本地提交、平板公测库是否恢复或重装）。没有推送、没有发布、没有通道更新。
 
 ## 2. 任务与授权边界
@@ -90,7 +90,7 @@
 1. **公测自测截图补齐**：公测 120 已装好且夹具已注入。**做这一步前先停诊断包 `com.wssfk.epm.latency0916fixed`（pid 7890，仍占前台，会打断截图）**。需补 `publictest-*` 系列的单词本列表 / 复习态 / 详情展开 / 翻页 / 错题本 / 模型配置截图与 `gfxinfo`，与基线 `.codex-local/self-test-0917/gfx-publictest-119-before.txt`（7 帧、janky 71%、90th 150ms）对照。已有的桥接测量脚本 `.codex-local/self-test-0917/measure-publictest.mjs` 产出 `screens-publictest-after.json`（4/4 ok，各场景见第 5 节）。
 2. **逐项对照检查（已完成）**：第 3 节四项修复与第 4 节门禁已逐条核对，无无关改动混入；`frontend/tests/run-all.mjs` 用 `readdirSync` 自动纳入新增测试，`pnpm run test:all` 已实际跑到 77 passed。
 3. **收尾文档（已完成）**：本页 + `NOW.md` + `RISKS.md`（新增两条中级风险：按屏裁剪的列投影会静默失效、公测树本轮同步成果尚未提交）均已更新。
-4. **本地提交（已完成）**：`57c0c45 perf(android): 收口加载路径治本优化与平板交付`，27 个文件（源码 13、测试 10、docs 5；其中 `wrong-analysis-history.ts` 与 6 个测试为新增）。暂存前用 `git diff --cached --name-only` 核对过范围，无 `.codex-local/**`、无 APK/DB/签名/日志；未推送、无 amend、未发 Release、未更新 8877 通道。含同线已完成改动：`vocabulary-context.ts`、`wrong-analysis-history.ts`、`question-bank.ts`（`listPapers` 读路径只读 + 列投影）、`question-bank-profiles.ts`（活跃题库缓存）、`vocabulary-enrichment-runner.ts`、`local-api.ts`。
+4. **本地提交（已完成）**：`57c0c45 perf(android): 收口加载路径治本优化与平板交付`，27 个文件（源码 13、测试 10、docs 5；其中 `wrong-analysis-history.ts` 与 6 个测试为新增）；其后追加两个收尾提交 `3738844`（收尾交接记录）与 `173a0f3`（去掉测试尾空行、澄清备份补丁所在仓），**当前 HEAD 为 `173a0f3`**。暂存前用 `git diff --cached --name-only` 核对过范围，无 `.codex-local/**`、无 APK/DB/签名/日志；未推送、无 amend、未发 Release、未更新 8877 通道。含同线已完成改动：`vocabulary-context.ts`、`wrong-analysis-history.ts`、`question-bank.ts`（`listPapers` 读路径只读 + 列投影）、`question-bank-profiles.ts`（活跃题库缓存）、`vocabulary-enrichment-runner.ts`、`local-api.ts`。
 5. **清理临时日志**：`$env:TEMP\gate-*.log`、`probe-q*.log`、`build-internal-0917.log`、`measure-internal-0917.log`、`public-build-0917.log`、`public-capsync-0917.log`、`public-build-apk-0917.log`、`diag-verify.log`；仓库根未跟踪的 `session-70b8c0da-b83c-4efe-bf00-f819bdf069f0.tmp` 确认无用后处理（删除只能用 `apply_patch` Delete File）。
 6. **可选的下一轮优化**（未做，不属本轮交付）：首页 `homeVocabulary`（3,436B）与 `papers`（3,355B）仍是 dashboard 6 次调用里的大头；`vocabulary_entries.contextual_occurrence_key`（32 字符 hex）在列表/复习流程从不读取（只有 `vocabulary-context.ts`、`ai.ts`、`vocabulary.ts:276,435` 写入或详情使用），是 summary 投影里可再裁的候选。
 
