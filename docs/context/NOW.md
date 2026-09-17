@@ -1,10 +1,18 @@
 # 当前工作
 
-> 最后更新：2026-09-17（内测 alpha.96：修掉被静默吞掉的旧库清理迁移，内测库 16,461,824 → 9,506,816 字节，用户数据逐表零变化；启动准备 187 → 97 次桥调用、preparedAt 3101 → 1875/2005/2031ms；内测冷启动 `am start -W` 858/849/882ms。提交 `03fd49a`（9 文件，+519 / −87，**未推送**）。门禁：`pnpm run build` EXIT=0、`node tests/run-all.mjs` 77 passed / 0 failed。英语一题库本就是最新 r3，本轮未替换。全部结论、证据与未验证项见[本轮记录](history/2026-09-17-internal-alpha96-migration.md)；第八轮内容保留在下方。
+> 最后更新：2026-09-18（第 17 轮：拆掉首屏阻塞链两段最大开销——列目录探查 410 → 138ms、启动逐键设置／迁移键查询合并为一次性读取；单词本 tap → 可见 1565 → 1249ms、每日一背 1940 → 1120ms，首屏只读查询由 t≈1500+ 提早到 t≈1151。提交 `a797e7b`（11 文件，+226 / −87，**未推送**）。门禁：`pnpm run build` EXIT=0、`node tests/run-all.mjs` 77 passed / 0 failed。内测 alpha.97 已同签名覆盖安装，`firstInstallTime` 未变 = 用户数据保留；英语一题库本就是最新 r3，本轮未替换。全部结论、证据与未验证项见[本轮记录](history/2026-09-18-load-blockchain-round17.md)；内测 alpha.96 与第八轮内容保留在下方。
 
-## 当前接手入口：内测 alpha.96 旧库清理解阻与启动准备收缩（已完成）
+## 当前接手入口：第 17 轮首屏阻塞链拆解（已完成）
 
-**先读[本轮记录](history/2026-09-17-internal-alpha96-migration.md)**：含授权与边界、缺陷 C/D 的源码落点、内测库迁移前后逐表计数与用户数据指纹、冷启动与启动准备数据、题库版本结论、未验证项与下一轮候选。
+**先读[本轮记录](history/2026-09-18-load-blockchain-round17.md)**：含授权与边界、单词本／每日一背卡顿的元凶定位（不是点击慢，而是「加载中」点击时连接引导与启动迁移链尚未跑完）、列目录四写法微基准、三处源码落点与关键契约、平板真机改前／改后对照、内测 alpha.97 装机信息、题库版本结论、未验证项与下一轮候选。
+
+要点：`frontend/src/platform/android/database.ts` 的 `COLUMN_CATALOGUE_SQL` 原为 76 张表 join（680 行 / 54KB，设备端均 191ms），收窄到启动真正探测的 18 张表（245 行 / 15KB，均 69ms）；**批量结果里没有的表必须回落逐表 `PRAGMA table_info`**（`papers`、`document_import_jobs` 走 `ensureColumn`，否则会对已存在列重复 `ALTER TABLE`）。新增 `frontend/src/platform/android/app-settings.ts`（一次 `SELECT key, value` + 进程内缓存 + 并发单飞），`app_migrations` 由 9 次单键查询改为一次 `SELECT migration_key`，`learning-history-rebind` 的 V1/V2/V3 共用 `AppliedMigrationProbe`。**关键契约**：`isMigrationApplied()` 在 `androidDatabase()` 引导链内部会自死锁，链内只能用 `migrationApplied(db, key)` + 探针。
+
+口径：空闲态（应用就绪后）单词本 255–331ms、每日一背 126–169ms，本来就不需要用户等待；要等 1.1–1.4 秒的只有「加载中点击」这一形态。**本轮只证明首屏阻塞链收缩，不宣称全部卡顿已消除。** 最大剩余结构项是把整条启动迁移链挪到首屏之后（候选含 `schema_version` 持久化门控直接跳过列目录），收益最大但风险最高，须单独一轮并配全绿门禁。另：内测包 release 非 debuggable、无 9229，桥调用计数只能在自测包上做，**不得写成内测包实测**；**不要动 `native-http.ts` 的全局超时**。
+
+## 上一轮：内测 alpha.96 旧库清理解阻与启动准备收缩（已完成）
+
+**先读[上一轮记录](history/2026-09-17-internal-alpha96-migration.md)**：含授权与边界、缺陷 C/D 的源码落点、内测库迁移前后逐表计数与用户数据指纹、冷启动与启动准备数据、题库版本结论、未验证项与下一轮候选。
 
 要点：`frontend/src/platform/android/database.ts` 的题库包去重/清理迁移因 `questionValues` 与 `questionScope` 参数错位（54 参数 / 81 绑定）每次启动都抛错并被 catch 吞掉，内测库长期保留 4 个题库包；改为 `[...paperValues]` 后迁移首次成功，`duplicate-profile-package-v1` 与 `legacy-question-bank-prune-v1` 落库，内测库 16,461,824 → 9,506,816 字节，旧英语一 1.0.0 与旧英语二 1.0.0 包被删除。同一 catch 新增 `describeError()`，启动与 VACUUM 失败不再只打 `[object Object]`。
 
@@ -14,7 +22,7 @@
 
 题库版本：内测英语一 `wssfk.postgraduate-english-one.2010-2026` / `1.1.0` / `2026-09-r3`，与设备 805/805 题、107/107 unit 全等，**本就是最新，本轮未替换**（旧题库的删除是上面那次清理迁移的结果）。**不得用 ESQ 里的 `labels/*.json` 覆盖设备标注**（730 条中 340 条不同）。
 
-注意：内测包是 release 非 debuggable、没有 9229 端口，桥调用计数与写路径测量只能在公测或自测包上做；记录第 8 节的三项候选（Dashboard 首屏 JOIN 合并、`app_settings` 逐键批量化、8877 更新检查延后）本轮未做，且**不要动 `native-http.ts` 的全局超时**。
+注意：内测包是 release 非 debuggable、没有 9229 端口，桥调用计数与写路径测量只能在公测或自测包上做；记录第 8 节的三项候选（Dashboard 首屏 JOIN 合并、`app_settings` 逐键批量化、8877 更新检查延后）本轮未做（其中 `app_settings` 逐键批量化已在第 17 轮完成），且**不要动 `native-http.ts` 的全局超时**。
 
 ## 第八轮：加载路径治本优化（已完成，作为本轮对照基线）
 
