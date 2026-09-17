@@ -4,15 +4,24 @@
 > [基线变更报告](2026-09-17-load-surfaces-changes.md)、[图差异基线报告](2026-09-17-load-surfaces-baseline-report.md)。
 > 源码、测试和现场状态为准；本页只保留当前有效结论与未完成项。
 
+## 0. 接手指引（新窗口先读这里）
+
+1. 状态一句话：四项加载路径治本修复已完成、已过门禁、已本地提交（主体 `57c0c45`）；内测 alpha.92/92 与公测 beta.6-test.16/120 已出包装到平板并完成自测；**未推送、未发布、未动 8877 更新通道**；公测树（`github-v2`，HEAD `ac66ad8`）**仍未提交**。
+2. 本仓当前有 50 条既有未提交内容（多阶段混合），公测树 76 条；**不得清理、回退或整仓覆盖**。
+3. 先读顺序：本页 → [公测自测记录](2026-09-17-publictest-self-test.md)（口径与不能下的结论）→ `docs/context/NOW.md` → 需要细节再读[基线变更报告](2026-09-17-load-surfaces-changes.md)与[图差异基线报告](2026-09-17-load-surfaces-baseline-report.md)。
+4. 复现门禁（代码未再变动，可直接复用本页结果）：`node frontend/tests/android-read-path-latency.mjs`、`node frontend/tests/model-config-read-path.mjs`、`pnpm run test:all`（须 77 passed / 0 failed）、`pnpm run build`、`git diff --check`。收尾前已复跑前两项，均 PASS。
+5. 继续优化的起点见第 8 节第 6 项；已排除路线见第 10 节，勿重复投入。
+6. 动手前先确认第 9 节两项用户决定，尤其平板公测库当前是测试夹具数据。
+
 ## 1. 一句话现状
 
 内测树（本仓）四项加载路径治本修复已全部完成并通过门禁；内测 alpha.92/92 与公测 beta.6-test.16/120 均已出包并装到平板。
 本轮收尾已完成：逐项对照检查、收尾文档、内测树本地提交、ClawBot 微信交接报告（`work/wechat-notify-handoff-0917.txt`，工具输出“已发送”）。内测树的本地提交以主体 `57c0c45`（27 个文件）为起点，其后还有若干只含收尾文档与测试尾空行的提交；最新提交请以 `git log --oneline -1` 为准（本页不追记尾部哈希，避免页面自身造成漂移），未推送。
-剩下的是公测自测截图与 `gfxinfo` 补齐，以及两项需用户决定的事项（公测树是否本地提交、平板公测库是否恢复或重装）。没有推送、没有发布、没有通道更新。
+剩下的是两项需用户决定的事项（公测树是否本地提交、平板公测库是否恢复或重装）；公测自测本身已完成，见[公测自测记录](2026-09-17-publictest-self-test.md)。没有推送、没有发布、没有通道更新。
 
 ## 2. 任务与授权边界
 
-- 目标（goal，threadId `01a0acba-53c9-77c2-a20e-2bf928adb23c`）：以单词本（含复习/巩固、关闭、翻页）为先导做治本修复，并把同类优化扩展到错题本、首页、模型配置等所有同族瓶颈的加载路径；每项改动遵循 engineering-code-generation 门禁（失败测试先行、最小实现、定向+完整测试、`pnpm run build`、`git diff --check`、基线变更报告）；完成后逐项对照检查、平板更新内测与公测并自测、必要的本地提交与 docs 更新。该 goal 仍为活动状态（未标记完成、也未暂停），剩余项见第 8、9 节；用户已于 2026-09-17 要求本轮收尾并由新窗口续接。
+- 目标（goal，原记录在 threadId `01a0acba-53c9-77c2-a20e-2bf928adb23c`）：以单词本（含复习/巩固、关闭、翻页）为先导做治本修复，并把同类优化扩展到错题本、首页、模型配置等所有同族瓶颈的加载路径；每项改动遵循 engineering-code-generation 门禁（失败测试先行、最小实现、定向+完整测试、`pnpm run build`、`git diff --check`、基线变更报告）；完成后逐项对照检查、平板更新内测与公测并自测、必要的本地提交与 docs 更新。接手时先用 `get_goal` 确认本任务是否绑定活动 goal：2026-09-17 收尾窗口查询结果为 `goal: null`，即该窗口未被 goal 跟踪，本页不再断言 goal 状态。用户已于 2026-09-17 要求本轮收尾并由新窗口续接。
 - 已授权：正常编辑、定向测试与构建、**本地提交**、更新 `docs/context/NOW.md`、新增 `docs/context/history/*`、ClawBot 微信通知、**公测仓按内测相同文件范围同步并出包**（用户原话：“授权按内测相同文件范围直接同步公测仓并出包”）。
 - 未授权：push、发布/通道更新（更新清单与 8877 通道）、历史重写、永久删除、整仓覆盖其它版本、Windows 树同步。
 - 仓库边界：内测权威树 `E:\EnglishPracticeMachine\Codex\english-multiple-choice-practice-machine-android`；公测树 `E:\EnglishPracticeMachine\Codex\english-multiple-choice-practice-machine-android-github-v2`（独立仓库，两树有大量既有差异，只允许逐文件范围同步）。
@@ -58,7 +67,7 @@
 - `vocabulary-list` 的载荷差**主要来自分页位置**，不是投影裁剪：before3 与公测那次都命中第 1 页（101 行、25,705B），after7 那次是滚动增量页（32 行、8,331B）。用夹具直接验证：page1 101 行 full=116,334B / summary=25,616B；page2 32 行 full=34,079B / summary=8,020B。summary 投影在两棵树都生效。
 - 到期队列（`projection=queue`）是**行集合相同**的对照：261,886 → 51,452B 与 859 → 204ms 可直接归因于投影裁剪 + 统计合并。
 - `screens-after7` 的 dashboard paint 在同一轮不同记录里出现过 234 与 222 两个值（不同聚合脚本口径），引用时以 `summarize.cjs` 输出为准。
-- 设备负载会显著影响绝对值：公测 120 同夹具测得 dashboard 273/301ms、due-queue 362/382ms，载荷与内测一致（7,964B / 50,451B），说明差异来自设备当时负载，不是代码差异。
+- 设备负载会显著影响绝对值：公测 120 同夹具测得 dashboard 273/301ms、due-queue 362/382ms，载荷与内测一致（7,964B / 50,451B），说明差异来自设备当时负载，不是代码差异。完整公测自测（5 场景 4 次中位数 + 9 张截图 + 4 个 `gfxinfo` 窗口）见[公测自测记录](2026-09-17-publictest-self-test.md)：载荷与桥调用次数两树一致，但 119 的 `gfxinfo` 基线是夹具注入前采到的空复习态、窗口仅 2~12 帧，不能与 120 的窗口直接相减。
 
 ## 6. 交付与装机
 
@@ -87,11 +96,11 @@
 
 ## 8. 收尾结果与剩余工作
 
-1. **公测自测截图补齐**：公测 120 已装好且夹具已注入。**做这一步前先停诊断包 `com.wssfk.epm.latency0916fixed`（pid 7890，仍占前台，会打断截图）**。需补 `publictest-*` 系列的单词本列表 / 复习态 / 详情展开 / 翻页 / 错题本 / 模型配置截图与 `gfxinfo`，与基线 `.codex-local/self-test-0917/gfx-publictest-119-before.txt`（7 帧、janky 71%、90th 150ms）对照。已有的桥接测量脚本 `.codex-local/self-test-0917/measure-publictest.mjs` 产出 `screens-publictest-after.json`（4/4 ok，各场景见第 5 节）。
+1. **公测自测（已完成）**：公测 120 在平板横屏、216 词夹具下跑完 5 个场景的桥接计量（`screens-publictest-after.json`，4 次中位数，5/5 ok）、9 张场景截图与 4 个 `gfxinfo` 窗口（冷启动 / 单词本列表首开 / 复习首开 / 模型配置首开），原始产物都在 `.codex-local/self-test-0917/`。脚本为 `gfx-publictest-120.mjs` 与补测用 `gfx-publictest-120-model-config.mjs`（原脚本的「下一张」按钮文案匹配会随机失败，故把模型配置拆出单独跑）。结论与口径限制见[公测自测记录](2026-09-17-publictest-self-test.md)。
 2. **逐项对照检查（已完成）**：第 3 节四项修复与第 4 节门禁已逐条核对，无无关改动混入；`frontend/tests/run-all.mjs` 用 `readdirSync` 自动纳入新增测试，`pnpm run test:all` 已实际跑到 77 passed。
 3. **收尾文档（已完成）**：本页 + `NOW.md` + `RISKS.md`（新增两条中级风险：按屏裁剪的列投影会静默失效、公测树本轮同步成果尚未提交）均已更新。
 4. **本地提交（已完成）**：`57c0c45 perf(android): 收口加载路径治本优化与平板交付`，27 个文件（源码 13、测试 10、docs 5；其中 `wrong-analysis-history.ts` 与 6 个测试为新增）；其后另有若干只改收尾文档与测试尾空行的提交，最新提交以 `git log --oneline -1` 为准。暂存前用 `git diff --cached --name-only` 核对过范围，无 `.codex-local/**`、无 APK/DB/签名/日志；未推送、无 amend、未发 Release、未更新 8877 通道。含同线已完成改动：`vocabulary-context.ts`、`wrong-analysis-history.ts`、`question-bank.ts`（`listPapers` 读路径只读 + 列投影）、`question-bank-profiles.ts`（活跃题库缓存）、`vocabulary-enrichment-runner.ts`、`local-api.ts`。
-5. **清理临时日志**：`$env:TEMP\gate-*.log`、`probe-q*.log`、`build-internal-0917.log`、`measure-internal-0917.log`、`public-build-0917.log`、`public-capsync-0917.log`、`public-build-apk-0917.log`、`diag-verify.log`；仓库根未跟踪的 `session-70b8c0da-b83c-4efe-bf00-f819bdf069f0.tmp` 确认无用后处理（删除只能用 `apply_patch` Delete File）。
+5. **临时日志未清理（环境策略所限）**：本轮门禁与探针日志仍在 `%TEMP%`（`gate-*.log`、`probe-q*.log`、`build-internal-0917.log`、`measure-internal-0917.log`、`public-build-0917.log`、`public-capsync-0917.log`、`public-build-apk-0917.log`、`diag-verify.log`）；本环境的命令策略拒绝 `Remove-Item`（即使只删单个 `%TEMP%` 文件），故未删除。它们不在仓库内、也不影响仓库，交给用户手动清理或忽略即可。仓库根那个 0 字节未跟踪残留 `session-70b8c0da-....tmp` 已用 `apply_patch` Delete File 处理。
 6. **可选的下一轮优化**（未做，不属本轮交付）：首页 `homeVocabulary`（3,436B）与 `papers`（3,355B）仍是 dashboard 6 次调用里的大头；`vocabulary_entries.contextual_occurrence_key`（32 字符 hex）在列表/复习流程从不读取（只有 `vocabulary-context.ts`、`ai.ts`、`vocabulary.ts:276,435` 写入或详情使用），是 summary 投影里可再裁的候选。
 
 ## 9. 待用户决定
