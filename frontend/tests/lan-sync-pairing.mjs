@@ -60,6 +60,18 @@ function fixture() {
     './lan-pairing': pairingContext.exports,
     './lan-recovery': recoveryContext.exports,
     './database': database,
+    // Settings reads and writes now go through the shared app_settings cache.
+    // Mirror it on the fixture map so passcode/host assertions stay meaningful.
+    './app-settings': {
+      appSettings: async () => settings,
+      readAppSetting: async key => settings.get(key) ?? '',
+      optionalAppSetting: async key => settings.get(key),
+      writeAppSetting: async (key, value) => {
+        if (failDb) throw new Error('database unavailable')
+        settings.set(key, value)
+      },
+      invalidateAppSettings: () => {},
+    },
     './errors': { LocalApiError },
     '../secure-store': { secureStore: {
       get: async key => { if (failStore) throw new Error('secure storage unavailable'); return secrets.get(key) },

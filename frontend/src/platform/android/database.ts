@@ -7,6 +7,10 @@ import { createSerialQueue } from './serial-queue'
 import { ensureSyncVersions } from './lan-sync-versions'
 import { orderingFixedSlotsForPaperUnit } from './ordering-fixed-slots'
 import {
+  LEARNING_HISTORY_REBIND_MIGRATION,
+  LEARNING_HISTORY_REBIND_V2_MIGRATION,
+  LEARNING_HISTORY_REBIND_V3_MIGRATION,
+  type AppliedMigrationProbe,
   repairLearningHistoryRebindDrift,
   runLearningHistoryRebindV1,
   runLearningHistoryRebindV2,
@@ -444,18 +448,85 @@ let connectionPromise: Promise<SQLiteDBConnection> | null = null
 // that rebuilds a table has to drop the affected entry (see invalidateCatalogues).
 let columnNameCache: Map<string, Set<string>> | null = null
 let tableNameCache: string[] | null = null
+// `PRAGMA table_info` costs one bridge round trip per table, and the column
+// migration chain asks about eighteen of them on every cold start (~430ms on the
+// tablet). The table-valued form reads the whole catalogue in a single query.
+// Builds without introspection pragmas keep the per-table path.
+//
+// The single query is restricted to the tables the boot chain actually probes.
+// The unfiltered join returns every column of all 76 tables (680 rows, ~54KB)
+// and measures ~190ms on the tablet; the filtered form returns 245 rows / ~15KB
+// in ~70ms. Any table outside this list still resolves through the per-table
+// form and is cached the same way.
+const BOOTSTRAP_CATALOGUE_TABLES = [
+  'ai_messages',
+  'ai_profiles',
+  'document_import_jobs',
+  'papers',
+  'practice_answer_events',
+  'practice_answers',
+  'practice_sessions',
+  'practice_unit_submissions',
+  'question_ai_labels',
+  'questions',
+  'vocabulary_entries',
+  'vocabulary_occurrences',
+  'vocabulary_reviews',
+  'wrong_analysis_states',
+  'wrong_current_questions',
+  'wrong_retry_round_questions',
+  'wrong_retry_rounds',
+  'wrong_stats',
+] as const
+let batchColumnCatalogueUnsupported = false
+// The migration chain and the content-remediation gate each check one
+// `app_migrations` key, so a launch asks about nine separate times. Reading the
+// whole table once answers all of them.
+let appliedMigrationKeyCache: Set<string> | null = null
+let appliedMigrationPending: Promise<Set<string>> | null = null
 
 function invalidateCatalogues() {
-  columnNameCache = new Map()
+  columnNameCache = null
   tableNameCache = null
+  appliedMigrationKeyCache = null
+  appliedMigrationPending = null
 }
+
+const COLUMN_CATALOGUE_SQL = `SELECT m.name AS table_name, p.name AS column_name
+  FROM sqlite_master m
+  JOIN pragma_table_info(m.name) p
+  WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%'
+    AND m.name IN (${BOOTSTRAP_CATALOGUE_TABLES.map(name => `'${name}'`).join(', ')})`
 
 async function tableColumnNames(
   db: SQLiteDBConnection,
   table: string,
 ): Promise<Set<string>> {
+  if (!columnNameCache && !batchColumnCatalogueUnsupported) {
+    try {
+      const result = await db.query(COLUMN_CATALOGUE_SQL)
+      const catalogue = new Map<string, Set<string>>()
+      for (const item of result.values || []) {
+        const name = String(item.table_name)
+        let columns = catalogue.get(name)
+        if (!columns) {
+          columns = new Set<string>()
+          catalogue.set(name, columns)
+        }
+        columns.add(String(item.column_name))
+      }
+      columnNameCache = catalogue
+    } catch (error) {
+      batchColumnCatalogueUnsupported = true
+      // Keep a cache so the per-table fallback below answers each table once.
+      columnNameCache = new Map()
+      console.info('[db] column catalogue unavailable, probing tables one at a time: ' + describeError(error))
+    }
+  }
   const cached = columnNameCache?.get(table)
   if (cached) return cached
+  // Tables outside the boot catalogue, and builds without table-valued pragmas,
+  // fall back to one probe per table.
   const result = await db.query(`PRAGMA table_info(${table})`)
   const names = new Set((result.values || []).map(item => String(item.name)))
   columnNameCache?.set(table, names)
@@ -520,12 +591,38 @@ async function tableRowCount(db: SQLiteDBConnection, tableName: string): Promise
 }
 
 async function migrationApplied(db: SQLiteDBConnection, key: string): Promise<boolean> {
-  const result = await db.query('SELECT 1 FROM app_migrations WHERE migration_key = ? LIMIT 1', [key])
-  return (result.values || []).length > 0
+  return (await appliedMigrationKeys(db)).has(key)
+}
+
+async function appliedMigrationKeys(db: SQLiteDBConnection): Promise<Set<string>> {
+  if (appliedMigrationKeyCache) return appliedMigrationKeyCache
+  // Concurrent callers share one read; the migration chain asks from several
+  // awaits at once while the content-remediation gate starts in parallel.
+  if (!appliedMigrationPending) {
+    appliedMigrationPending = db
+      .query('SELECT migration_key FROM app_migrations')
+      .then(result => {
+        const keys = new Set((result.values || []).map(item => String(item.migration_key)))
+        appliedMigrationKeyCache = keys
+        return keys
+      })
+      .finally(() => { appliedMigrationPending = null })
+  }
+  return appliedMigrationPending
 }
 
 async function markMigrationApplied(db: SQLiteDBConnection, key: string) {
   await db.run('INSERT OR IGNORE INTO app_migrations (migration_key) VALUES (?)', [key], false)
+  appliedMigrationKeyCache?.add(key)
+}
+
+/** Same answers as the private helpers, for modules that read through row/run. */
+export async function isMigrationApplied(key: string): Promise<boolean> {
+  return migrationApplied(await androidDatabase(), key)
+}
+
+export async function recordMigration(key: string): Promise<void> {
+  await markMigrationApplied(await androidDatabase(), key)
 }
 
 async function recoverInterruptedPaperTable(db: SQLiteDBConnection) {
@@ -1329,18 +1426,15 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
         await db.execute("ALTER TABLE vocabulary_reviews ADD COLUMN mode TEXT NOT NULL DEFAULT 'scheduled'")
         reviewNames.add('mode')
       }
-      const wrongPoolMigration = await db.query(
-        "SELECT migration_key FROM app_migrations WHERE migration_key = 'wrong-current-pool-v1' LIMIT 1",
-      )
-      if (!(wrongPoolMigration.values || []).length) {
+      if (!await migrationApplied(db, 'wrong-current-pool-v1')) {
         await db.execute(`
           INSERT OR IGNORE INTO wrong_current_questions (unit_id, question_id)
           SELECT q.unit_id, w.question_id
           FROM wrong_stats w
           JOIN questions q ON q.id = w.question_id
           WHERE w.wrong_count > 0;
-          INSERT INTO app_migrations (migration_key) VALUES ('wrong-current-pool-v1');
         `)
+        await markMigrationApplied(db, 'wrong-current-pool-v1')
       }
       const labelNames = await tableColumnNames(db, 'question_ai_labels')
       if (!labelNames.has('user_edited')) {
@@ -1356,10 +1450,7 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
         labelNames.add('updated_at')
         await db.execute("UPDATE question_ai_labels SET updated_at = CURRENT_TIMESTAMP WHERE updated_at = ''")
       }
-      const labelLockMigration = await db.query(
-        "SELECT 1 FROM app_migrations WHERE migration_key = 'question-label-auto-lock-v1' LIMIT 1",
-      )
-      if (!(labelLockMigration.values || []).length) {
+      if (!await migrationApplied(db, 'question-label-auto-lock-v1')) {
         await db.run(
           `UPDATE question_ai_labels
            SET locked = 1, updated_at = CURRENT_TIMESTAMP
@@ -1371,11 +1462,7 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
           [],
           false,
         )
-        await db.run(
-          "INSERT INTO app_migrations (migration_key) VALUES ('question-label-auto-lock-v1')",
-          [],
-          false,
-        )
+        await markMigrationApplied(db, 'question-label-auto-lock-v1')
       }
       for (const table of [
         'practice_sessions',
@@ -1474,9 +1561,19 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
         await db.run("UPDATE vocabulary_enrichment_jobs SET state='queued' WHERE state='inflight'", [], false)
       }
       await ensureSyncVersions(db)
-      await runLearningHistoryRebindV1(db)
-      await runLearningHistoryRebindV2(db)
-      await runLearningHistoryRebindV3(db)
+      // These gates run inside the connection bootstrap, so they cannot call the
+      // `isMigrationApplied` export: that awaits the very promise still pending
+      // here. They share the launch-wide key cache through the probe instead,
+      // and the cache is kept in step after a gate writes its key directly.
+      const appliedProbe: AppliedMigrationProbe = key => migrationApplied(db, key)
+      const rebindGates: [string, () => Promise<boolean>][] = [
+        [LEARNING_HISTORY_REBIND_MIGRATION, () => runLearningHistoryRebindV1(db, appliedProbe)],
+        [LEARNING_HISTORY_REBIND_V2_MIGRATION, () => runLearningHistoryRebindV2(db, appliedProbe)],
+        [LEARNING_HISTORY_REBIND_V3_MIGRATION, () => runLearningHistoryRebindV3(db, appliedProbe)],
+      ]
+      for (const [key, gate] of rebindGates) {
+        if (await gate()) appliedMigrationKeyCache?.add(key)
+      }
       await repairLearningHistoryRebindDrift(db)
       return db
     })()

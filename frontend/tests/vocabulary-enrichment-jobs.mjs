@@ -14,7 +14,11 @@ let calls=[];let fail=false;let onEnrich=null
 class LocalApiError extends Error {constructor(status,message){super(message);this.status=status}}
 const helper={exports:{}}
 vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/vocabulary-context.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,helper)
-const context={exports:{},require:name=>({'./database':database,'./errors':{LocalApiError},'./ai':{enrichVocabularyEntry:async id=>{calls.push(id);await Promise.resolve();if(onEnrich)await onEnrich(id);if(fail)throw new LocalApiError(502,'offline')}}})[name]}
+// The runner reads its pause/inventory flags through the shared app_settings
+// cache, so read the fixture table live; the test invalidates it with plain
+// DELETE statements between phases.
+const appSettings={appSettings:async()=>new Map(db.prepare('SELECT key,value FROM app_settings').all().map(r=>[r.key,r.value])),readAppSetting:async key=>db.prepare('SELECT value FROM app_settings WHERE key=?').get(key)?.value??'',optionalAppSetting:async key=>db.prepare('SELECT value FROM app_settings WHERE key=?').get(key)?.value,writeAppSetting:async(key,value)=>{db.prepare('INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key,value)},invalidateAppSettings:()=>{}}
+const context={exports:{},setTimeout,require:name=>({'./database':database,'./app-settings':appSettings,'./errors':{LocalApiError},'./ai':{enrichVocabularyEntry:async id=>{calls.push(id);await Promise.resolve();if(onEnrich)await onEnrich(id);if(fail)throw new LocalApiError(502,'offline')}}})[name]}
 const originalRequire=context.require
 context.require=name=>name==='../../vocabulary-context'?helper.exports:originalRequire(name)
 const runnerCode=ts.transpileModule(read('vocabulary-enrichment-runner'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
@@ -62,7 +66,7 @@ db.exec("DELETE FROM app_settings WHERE key='vocabulary-enrichment-v4'")
 for(let id=10;id<461;id++) db.prepare("INSERT INTO vocabulary_entries(id,term,normalized_term,translation_status) VALUES(?,?,?,'ready')").run(id,'fixture'+id,'fixture'+id)
 await api.queueMissingVocabularyEnrichment(200)
 await api.pauseVocabularyEnrichment()
-const restarted={exports:{},require:context.require};vm.runInNewContext(runnerCode,restarted)
+const restarted={exports:{},setTimeout,require:context.require};vm.runInNewContext(runnerCode,restarted)
 await restarted.exports.inventoryVocabularyEnrichment()
 assert.equal((await restarted.exports.vocabularyEnrichmentProgress()).queued,451)
 const beforePaused=calls.length

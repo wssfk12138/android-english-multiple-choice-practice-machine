@@ -10,7 +10,11 @@ for(const scenario of ['unchanged','new-digest','missing-revision','missing-head
     if(sql.includes('app_migrations'))return args[0].startsWith('content-remediation-bundle:')?(scenario==='new-digest'?undefined:{}):(scenario==='missing-revision'?undefined:{})
     return {total:scenario==='changed-unit'&&sql.includes('json_extract')?0:1}
   }
-  vm.runInNewContext(code,{exports,__CONTENT_REMEDIATION_HEADER__:scenario==='missing-header'?null:{revision:'r1',digest:'digest',units:[{unitKey:'one'}]},fetch:async()=>{fetches++;return {ok:false,status:404}},require:()=>({androidDatabase:async()=>{},row})})
+  const isMigrationApplied=async key=>key.startsWith('content-remediation-bundle:')
+    ? scenario!=='new-digest'
+    : scenario!=='missing-revision'
+  const recordMigration=async()=>{}
+  vm.runInNewContext(code,{exports,__CONTENT_REMEDIATION_HEADER__:scenario==='missing-header'?null:{revision:'r1',digest:'digest',units:[{unitKey:'one'}]},fetch:async()=>{fetches++;return {ok:false,status:404}},require:()=>({androidDatabase:async()=>{},row,isMigrationApplied,recordMigration})})
   const [a,b]=await Promise.all([exports.ensureContentRemediation(),exports.ensureContentRemediation()])
   assert.equal(a,false);assert.equal(b,false)
   assert.equal(fetches,scenario==='unchanged'?0:1,scenario)

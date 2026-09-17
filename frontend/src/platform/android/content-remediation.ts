@@ -1,4 +1,4 @@
-import { androidDatabase, row, rows, run, transaction } from './database'
+import { androidDatabase, isMigrationApplied, recordMigration, row, rows, run, transaction } from './database'
 import { captureSession } from './practice-snapshots'
 
 type RecordValue = Record<string, any>
@@ -195,14 +195,11 @@ export async function applyContentWithBackup(manifest: ContentManifest): Promise
 const remediationMarker = (revision: string) => `content-remediation:${revision}`
 
 async function remediationApplied(revision: string): Promise<boolean> {
-  return Boolean(await row<RecordValue>(
-    'SELECT migration_key FROM app_migrations WHERE migration_key=? LIMIT 1',
-    [remediationMarker(revision)],
-  ))
+  return isMigrationApplied(remediationMarker(revision))
 }
 
 async function markRemediationApplied(revision: string): Promise<void> {
-  await run('INSERT OR IGNORE INTO app_migrations (migration_key) VALUES (?)', [remediationMarker(revision)])
+  await recordMigration(remediationMarker(revision))
 }
 
 let bundledManifest: Promise<ContentManifest | null> | undefined
@@ -226,7 +223,7 @@ export function ensureContentRemediation(): Promise<boolean> {
     await androidDatabase()
     const header = typeof __CONTENT_REMEDIATION_HEADER__ !== 'undefined' ? __CONTENT_REMEDIATION_HEADER__ : null
     const marker = header ? `content-remediation-bundle:${header.digest}` : ''
-    if (header && await row<RecordValue>('SELECT migration_key FROM app_migrations WHERE migration_key=?', [marker]) && await remediationSettled(header)) return false
+    if (header && await isMigrationApplied(marker) && await remediationSettled(header)) return false
     const manifest = await loadBundledContentManifest()
     if (!manifest) return false
     // Applying one revision is a one-time repair. Once every packaged unit
@@ -237,7 +234,7 @@ export function ensureContentRemediation(): Promise<boolean> {
     // package install.
     let changed = false
     if (!await remediationSettled(manifest)) changed = Number((await applyContentWithBackup(manifest)).units) > 0
-    if (marker) await run('INSERT OR IGNORE INTO app_migrations (migration_key) VALUES (?)', [marker])
+    if (marker) await recordMigration(marker)
     return changed
   })()
   return startupPreparation

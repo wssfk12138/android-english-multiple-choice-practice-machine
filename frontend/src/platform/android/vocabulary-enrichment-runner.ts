@@ -1,5 +1,6 @@
 import { enrichVocabularyEntry } from './ai'
 import { row, rows, run } from './database'
+import { optionalAppSetting, writeAppSetting } from './app-settings'
 import { LocalApiError } from './errors'
 import { morphologyLabel, safeObject } from '../../vocabulary-context'
 
@@ -9,9 +10,9 @@ export let vocabularyEnrichmentError = ''
 export function reportVocabularyEnrichmentError(cause: unknown) { vocabularyEnrichmentError = String(cause).slice(0, 600) }
 const pauseKey = 'vocabulary-enrichment-paused'
 const migrationKey = 'vocabulary-enrichment-v4'
-async function setting(key: string) { return (await row<{value:string}>('SELECT value FROM app_settings WHERE key=?', [key]))?.value }
-export async function pauseVocabularyEnrichment() { await run('INSERT OR REPLACE INTO app_settings(key,value) VALUES (?,?)', [pauseKey, '1']) }
-export async function resumeVocabularyEnrichment() { await run('INSERT OR REPLACE INTO app_settings(key,value) VALUES (?,?)', [pauseKey, '0']) }
+async function setting(key: string) { return optionalAppSetting(key) }
+export async function pauseVocabularyEnrichment() { await writeAppSetting(pauseKey, '1') }
+export async function resumeVocabularyEnrichment() { await writeAppSetting(pauseKey, '0') }
 export async function queueMissingVocabularyEnrichment(limit = 200): Promise<number> {
   const result = await run(
     "INSERT INTO vocabulary_enrichment_jobs(entry_id) " +
@@ -47,7 +48,7 @@ export function inventoryVocabularyEnrichment(): Promise<void> {
       if (batch.length < 200) break
       await new Promise(resolve => setTimeout(resolve, 0))
     }
-    await run('INSERT OR REPLACE INTO app_settings(key,value) VALUES (?,?)', [migrationKey, 'done'])
+    await writeAppSetting(migrationKey, 'done')
   })().finally(() => { inventory = null })
   return inventory
 }

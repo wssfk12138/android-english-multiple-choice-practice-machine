@@ -4,6 +4,7 @@ import { CATEGORY_TABLES, DEFAULT_CATEGORIES, DEPENDENCY_TIMESTAMP, categoryAgre
 import type { LanTlsIdentity } from './lan-transport'
 import { validateTlsAddress, validateTlsIdentity, validateTlsPairing } from './lan-pairing'
 import { row, rows, run, transaction } from './database'
+import { invalidateAppSettings, readAppSetting, writeAppSetting } from './app-settings'
 import { syncSequence, syncVersion } from './lan-sync-versions'
 import { aggregateAttempts } from './attempt-stats'
 import { LocalApiError } from './errors'
@@ -168,6 +169,7 @@ async function updateLanSyncSettingsInternal(body: JsonRecord): Promise<JsonReco
         await db.run('INSERT INTO app_settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value], false)
       }
     })
+    invalidateAppSettings()
     if (categories) await setSyncSetting(await categoryScope() + 'selected', JSON.stringify(categories))
     return lanSyncStatus()
   }
@@ -182,11 +184,7 @@ async function updateLanSyncSettingsInternal(body: JsonRecord): Promise<JsonReco
   for (const key of ['lan_sync_host', 'lan_sync_passcode', 'lan_sync_auto']) {
     if (!(key in body)) continue
     if (key === 'lan_sync_passcode' && !String(body[key] ?? '').trim()) continue
-    await run(
-      `INSERT INTO app_settings(key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      [key, String(body[key] ?? '').trim()],
-    )
+    await writeAppSetting(key, String(body[key] ?? '').trim())
   }
   if (String(body.lan_sync_passcode ?? '').trim()) {
     await setSyncSetting('lan_sync_pairing_requested', '1')
@@ -205,19 +203,11 @@ async function selectedCategories(): Promise<LanCategory[]> {
 }
 
 async function syncSetting(key: string): Promise<string> {
-  const existing = await row<{ value: string }>(
-    'SELECT value FROM app_settings WHERE key = ?',
-    [key],
-  )
-  return existing?.value || ''
+  return readAppSetting(key)
 }
 
 async function setSyncSetting(key: string, value: string): Promise<void> {
-  await run(
-    `INSERT INTO app_settings(key, value) VALUES (?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [key, value],
-  )
+  await writeAppSetting(key, value)
 }
 
 async function ensureDeviceId(): Promise<string> {

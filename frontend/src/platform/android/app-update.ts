@@ -1,6 +1,7 @@
 import { App } from '@capacitor/app'
 import { registerPlugin } from '@capacitor/core'
 import { row, run } from './database'
+import { optionalAppSetting, writeAppSetting } from './app-settings'
 import { LocalApiError } from './errors'
 import { fetchQuestionBankCatalogFromSources, fetchUpdateManifest, validateQuestionBankRemoteUrl } from '../updates'
 import { createEsqImportFromNativePackage } from './question-bank'
@@ -74,13 +75,9 @@ export interface PendingInstallerCleanup {
 const NativeAppUpdater = registerPlugin<AppUpdaterPlugin>('AppUpdater')
 
 async function setting(key: string): Promise<string> {
-  const existing = await row<{ value: string }>(
-    'SELECT value FROM app_settings WHERE key = ?',
-    [key],
-  )
   return resolveUpdateSetting(
     BUILD_OVERRIDES[key],
-    existing?.value,
+    await optionalAppSetting(key),
     FALLBACK_DEFAULTS[key] || '',
   )
 }
@@ -88,11 +85,7 @@ async function setting(key: string): Promise<string> {
 export async function updateSettings(body: JsonRecord): Promise<JsonRecord> {
   for (const key of ['app_update_manifest_url', 'question_bank_catalog_url']) {
     if (!(key in body)) continue
-    await run(
-      `INSERT INTO app_settings(key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      [key, String(body[key] || '').trim()],
-    )
+    await writeAppSetting(key, String(body[key] || '').trim())
   }
   return readUpdateSettings()
 }
