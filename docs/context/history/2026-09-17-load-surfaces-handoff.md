@@ -7,11 +7,12 @@
 ## 1. 一句话现状
 
 内测树（本仓）四项加载路径治本修复已全部完成并通过门禁；内测 alpha.92/92 与公测 beta.6-test.16/120 均已出包并装到平板。
-剩下的是：公测自测截图补齐、逐项对照检查、收尾文档与本地提交，以及若干需用户决定的事项。没有推送、没有发布、没有通道更新。
+本轮收尾已完成：逐项对照检查、收尾文档、内测树本地提交（`57c0c45`，27 个文件）、ClawBot 微信交接报告（`work/wechat-notify-handoff-0917.txt`，工具输出“已发送”）。
+剩下的是公测自测截图与 `gfxinfo` 补齐，以及两项需用户决定的事项（公测树是否本地提交、平板公测库是否恢复或重装）。没有推送、没有发布、没有通道更新。
 
 ## 2. 任务与授权边界
 
-- 目标（goal，threadId `01a0acba-53c9-77c2-a20e-2bf928adb23c`）：以单词本（含复习/巩固、关闭、翻页）为先导做治本修复，并把同类优化扩展到错题本、首页、模型配置等所有同族瓶颈的加载路径；每项改动遵循 engineering-code-generation 门禁（失败测试先行、最小实现、定向+完整测试、`pnpm run build`、`git diff --check`、基线变更报告）；完成后逐项对照检查、平板更新内测与公测并自测、必要的本地提交与 docs 更新。该 goal 在本页交付后暂停，由新任务续接。
+- 目标（goal，threadId `01a0acba-53c9-77c2-a20e-2bf928adb23c`）：以单词本（含复习/巩固、关闭、翻页）为先导做治本修复，并把同类优化扩展到错题本、首页、模型配置等所有同族瓶颈的加载路径；每项改动遵循 engineering-code-generation 门禁（失败测试先行、最小实现、定向+完整测试、`pnpm run build`、`git diff --check`、基线变更报告）；完成后逐项对照检查、平板更新内测与公测并自测、必要的本地提交与 docs 更新。该 goal 仍为活动状态（未标记完成、也未暂停），剩余项见第 8、9 节；用户已于 2026-09-17 要求本轮收尾并由新窗口续接。
 - 已授权：正常编辑、定向测试与构建、**本地提交**、更新 `docs/context/NOW.md`、新增 `docs/context/history/*`、ClawBot 微信通知、**公测仓按内测相同文件范围同步并出包**（用户原话：“授权按内测相同文件范围直接同步公测仓并出包”）。
 - 未授权：push、发布/通道更新（更新清单与 8877 通道）、历史重写、永久删除、整仓覆盖其它版本、Windows 树同步。
 - 仓库边界：内测权威树 `E:\EnglishPracticeMachine\Codex\english-multiple-choice-practice-machine-android`；公测树 `E:\EnglishPracticeMachine\Codex\english-multiple-choice-practice-machine-android-github-v2`（独立仓库，两树有大量既有差异，只允许逐文件范围同步）。
@@ -84,19 +85,19 @@
 - 公测出包链路：`corepack.cmd pnpm run build` → `npx cap sync android` → `.\gradlew.bat assemblePublicTest -PappVersionCode=120 -PappVersionName=0.1.0-beta.6-test.16`（JAVA_HOME=Microsoft JDK 21，ANDROID_SDK_ROOT=E:\EnglishPracticeMachine\.toolchains\android-sdk）。
 - 公测树**尚未提交**（用户授权只覆盖“同步并出包”）。
 
-## 8. 剩余工作（按序）
+## 8. 收尾结果与剩余工作
 
-1. **公测自测截图补齐**：公测 120 已装好且夹具已注入。需补 `publictest-*` 系列的单词本列表 / 复习态 / 详情展开 / 翻页 / 错题本 / 模型配置截图与 `gfxinfo`，与基线 `.codex-local/self-test-0917/gfx-publictest-119-before.txt`（7 帧、janky 71%、90th 150ms）对照。已有的桥接测量脚本 `.codex-local/self-test-0917/measure-publictest.mjs` 产出 `screens-publictest-after.json`（4/4 ok，各场景见第 5 节）。
-2. **逐项对照检查**：按 goal objective 核对第 3 节的四项修复与第 4 节门禁，确认没有无关改动混入；`frontend/tests/run-all.mjs` 的 `readdir` 自动纳入新增测试，需确认新增测试确实在 `test:all` 里跑过。
-3. **收尾文档**：本页 + NOW.md 已完成；`RISKS.md` 需补队列/清单投影裁剪的维护风险。
-4. **本地提交（内测树，仅本任务文件）**：`frontend/src/platform/android/{study-todos.ts,practice.ts,model-key-store.ts,ai.ts,vocabulary.ts}`、`frontend/src/vocabulary-context.ts`、`frontend/tests/{android-read-path-latency.mjs,model-config-read-path.mjs,startup-todo-dedup.mjs,maintenance-routing.mjs,document-draft-persistence.mjs}`、`docs/context/history/2026-09-17-load-surfaces-{changes,baseline-report,handoff}.md`、`docs/context/NOW.md`、`docs/context/RISKS.md`。不推送、不发 Release、不更新 8877 通道。
+1. **公测自测截图补齐**：公测 120 已装好且夹具已注入。**做这一步前先停诊断包 `com.wssfk.epm.latency0916fixed`（pid 7890，仍占前台，会打断截图）**。需补 `publictest-*` 系列的单词本列表 / 复习态 / 详情展开 / 翻页 / 错题本 / 模型配置截图与 `gfxinfo`，与基线 `.codex-local/self-test-0917/gfx-publictest-119-before.txt`（7 帧、janky 71%、90th 150ms）对照。已有的桥接测量脚本 `.codex-local/self-test-0917/measure-publictest.mjs` 产出 `screens-publictest-after.json`（4/4 ok，各场景见第 5 节）。
+2. **逐项对照检查（已完成）**：第 3 节四项修复与第 4 节门禁已逐条核对，无无关改动混入；`frontend/tests/run-all.mjs` 用 `readdirSync` 自动纳入新增测试，`pnpm run test:all` 已实际跑到 77 passed。
+3. **收尾文档（已完成）**：本页 + `NOW.md` + `RISKS.md`（新增两条中级风险：按屏裁剪的列投影会静默失效、公测树本轮同步成果尚未提交）均已更新。
+4. **本地提交（已完成）**：`57c0c45 perf(android): 收口加载路径治本优化与平板交付`，27 个文件（源码 13、测试 10、docs 5；其中 `wrong-analysis-history.ts` 与 6 个测试为新增）。暂存前用 `git diff --cached --name-only` 核对过范围，无 `.codex-local/**`、无 APK/DB/签名/日志；未推送、无 amend、未发 Release、未更新 8877 通道。含同线已完成改动：`vocabulary-context.ts`、`wrong-analysis-history.ts`、`question-bank.ts`（`listPapers` 读路径只读 + 列投影）、`question-bank-profiles.ts`（活跃题库缓存）、`vocabulary-enrichment-runner.ts`、`local-api.ts`。
 5. **清理临时日志**：`$env:TEMP\gate-*.log`、`probe-q*.log`、`build-internal-0917.log`、`measure-internal-0917.log`、`public-build-0917.log`、`public-capsync-0917.log`、`public-build-apk-0917.log`、`diag-verify.log`；仓库根未跟踪的 `session-70b8c0da-b83c-4efe-bf00-f819bdf069f0.tmp` 确认无用后处理（删除只能用 `apply_patch` Delete File）。
 6. **可选的下一轮优化**（未做，不属本轮交付）：首页 `homeVocabulary`（3,436B）与 `papers`（3,355B）仍是 dashboard 6 次调用里的大头；`vocabulary_entries.contextual_occurrence_key`（32 字符 hex）在列表/复习流程从不读取（只有 `vocabulary-context.ts`、`ai.ts`、`vocabulary.ts:276,435` 写入或详情使用），是 summary 投影里可再裁的候选。
 
 ## 9. 待用户决定
 
 1. 平板公测 120 当前装的是注入后的**测试夹具数据**（不是用户真实公测库；旧库已备份且无学习进度、题库可自动重建）。是否恢复旧库、或重装一次干净包，需要用户决定。
-2. 公测树是否本地提交（本轮只授权同步与出包）。
+2. 公测树（`github-v2`，HEAD `ac66ad8`）是否本地提交（本轮只授权“同步并出包”）；原工作树差异已备份到 `.codex-local/publictree-worktree-backup-0917.patch`（275,833B）。
 
 ## 10. 已排除路线（勿重复投入）
 
