@@ -103,4 +103,3 @@ assert.equal((await store.namedKeySummary(1)).keys.length, 1)
 assert.equal(await store.selectedKey(1), 'synthetic-secret-1', '配置清单之外的密钥读取语义不得变化')
 
 console.log('PASS model-config read path: profile list does not re-validate each profile, single-profile guard kept')
-

@@ -78,7 +78,7 @@
 
 ## 7. 公测树同步范围（已完成，勿重做）
 
-- 公测树 HEAD `ac66ad8`；备份原工作树差异到 `.codex-local/publictree-worktree-backup-0917.patch`（275,833B）。
+- 公测树 HEAD `ac66ad8`；备份原工作树差异到**公测树仓根下**的 `.codex-local/publictree-worktree-backup-0917.patch`（275,833B；路径相对 `english-multiple-choice-practice-machine-android-github-v2`，本仓同名目录里没有这个文件）。
 - 整文件同步并逐一核对 SHA-256 相同：`frontend/src/vocabulary-context.ts`；`frontend/src/platform/android/{vocabulary.ts,study-todos.ts,practice.ts,model-key-store.ts,question-bank-profiles.ts,question-bank.ts}`；新增测试 `frontend/tests/{android-read-path-latency.mjs,model-config-read-path.mjs,startup-todo-dedup.mjs,maintenance-routing.mjs}`。
 - 增量同步：`ai.ts` 的 `listProfiles()` 批量 models 分桶 + `namedKeySummary(profile.id, true)`；`VocabularyView.vue` 到期队列请求加 `&projection=queue`；`local-api.ts` 恢复 `sweepEmptyPaperSessions` 导入与调用；`tests/document-draft-persistence.mjs` 测试桩补齐。
 - 仍存在差异的文件属于两树既有有意差异（内测独有 7 个文件、公测独有 2 个文件、49 个既有差异文件），**不得整仓覆盖**。三个主要仍差异文件：`ai.ts`（954/931 行）、`local-api.ts`（380/389）、`VocabularyView.vue`（811/707）。
@@ -97,7 +97,7 @@
 ## 9. 待用户决定
 
 1. 平板公测 120 当前装的是注入后的**测试夹具数据**（不是用户真实公测库；旧库已备份且无学习进度、题库可自动重建）。是否恢复旧库、或重装一次干净包，需要用户决定。
-2. 公测树（`github-v2`，HEAD `ac66ad8`）是否本地提交（本轮只授权“同步并出包”）；原工作树差异已备份到 `.codex-local/publictree-worktree-backup-0917.patch`（275,833B）。
+2. 公测树（`github-v2`，HEAD `ac66ad8`）是否本地提交（本轮只授权“同步并出包”）；原工作树差异已备份到公测树仓根下的 `.codex-local/publictree-worktree-backup-0917.patch`（275,833B）。
 
 ## 10. 已排除路线（勿重复投入）
 
