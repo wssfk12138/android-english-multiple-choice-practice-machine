@@ -17,14 +17,70 @@ export function syncVersion(payload: Record<string, unknown>): [number, string] 
   return [Number(revision), origin]
 }
 
-export async function ensureSyncVersions(db: VersionDb, tables: readonly string[] = [
+export const SYNC_VERSION_TABLES = [
   'practice_sessions', 'practice_answers', 'practice_answer_events', 'practice_unit_submissions',
   'wrong_stats', 'wrong_retry_rounds', 'wrong_retry_round_questions', 'wrong_current_questions',
   'vocabulary_entries', 'vocabulary_occurrences', 'vocabulary_reviews', 'ai_profiles', 'sync_tombstones',
-]): Promise<void> {
+] as const
+
+async function businessColumns(db: VersionDb, table: string): Promise<string[]> {
+  const columns = (await db.query(`PRAGMA table_info(${table})`)).values || []
+  return columns
+    .map(column => String(column.name))
+    .filter(name => !name.startsWith('_sync_'))
+    .sort()
+}
+
+/**
+ * Rows that predate the captured-change triggers still sit at `_sync_seq=0` and
+ * need one touch to be picked up by incremental sync. The touch must be an
+ * update of a business column, otherwise the `AFTER UPDATE OF` trigger stays
+ * quiet.
+ */
+async function touchPendingRows(
+  db: VersionDb,
+  table: string,
+  execute: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  const business = await businessColumns(db, table)
+  if (!business.length) return
+  await execute(`UPDATE ${table} SET ${business[0]}=${business[0]} WHERE _sync_seq=0`)
+}
+
+export async function ensureSyncVersions(
+  db: VersionDb,
+  tables: readonly string[] = SYNC_VERSION_TABLES,
+): Promise<void> {
   const execute = (sql: string) => db.run(sql, [], false)
   await execute('CREATE TABLE IF NOT EXISTS sync_change_clock (id INTEGER PRIMARY KEY CHECK(id=1), seq INTEGER NOT NULL)')
   await execute('INSERT OR IGNORE INTO sync_change_clock VALUES (1, 0)')
+
+  // Steady-state launches already carry every trigger and cursor index. Probing
+  // the thirteen tables one bridge call at a time cost about a second on
+  // Android, so a complete catalogue short-circuits to the combined backfill
+  // probe below. A table whose trigger exists must also carry the `_sync_*`
+  // columns, because SQLite validates them when the trigger is created.
+  const catalogue = await db.query(
+    "SELECT name FROM sqlite_master WHERE type IN ('trigger', 'index') AND name LIKE 'lan_seq_%'",
+  )
+  const captured = new Set((catalogue.values || []).map(item => String(item.name)))
+  const complete = tables.every(table =>
+    captured.has(`lan_seq_${table}`)
+    && captured.has(`lan_seq_${table}_insert`)
+    && captured.has(`lan_seq_${table}_update`),
+  )
+  if (complete) {
+    const pending = await db.query(tables
+      .map(table => `SELECT '${table}' AS table_name WHERE EXISTS (SELECT 1 FROM ${table} WHERE _sync_seq=0)`)
+      .join(' UNION ALL '))
+    for (const entry of pending.values || []) {
+      const table = String(entry.table_name)
+      if (!tables.includes(table)) continue
+      await touchPendingRows(db, table, execute)
+    }
+    return
+  }
+
   for (const table of tables) {
     const columns = (await db.query(`PRAGMA table_info(${table})`)).values || []
     if (!columns.length) continue
@@ -50,8 +106,6 @@ export async function ensureSyncVersions(db: VersionDb, tables: readonly string[
     // touch to be picked up by incremental sync. Probe first so launches with
     // nothing pending do not rewrite every table.
     const pendingSequence = await db.query(`SELECT 1 FROM ${table} WHERE _sync_seq=0 LIMIT 1`)
-    if ((pendingSequence.values || []).length) {
-      await execute(`UPDATE ${table} SET ${business[0]}=${business[0]} WHERE _sync_seq=0`)
-    }
+    if ((pendingSequence.values || []).length) await touchPendingRows(db, table, execute)
   }
 }

@@ -1,23 +1,17 @@
 <script setup lang="ts">
 import { ArrowRight, BookOpen, ListChecks, Play, RotateCcw } from 'lucide-vue-next'
-import { onMounted, ref } from 'vue'
-import { get } from '../api'
 
 type StudyTodos = { profile_id: number; resume_session: { id: number; mode: string; title: string } | null; review_count: number; frequent_count: number }
-const tasks = ref<StudyTodos | null>(null)
-const failed = ref(false)
-async function load() {
-  failed.value = false
-  try { tasks.value = await get<StudyTodos>('/study-todos') }
-  catch { failed.value = true }
-}
-onMounted(load)
+// 首页已经用 /startup 的同一批聚合算出了这三张卡片，组件只负责渲染：自己再发
+// 一次 /study-todos 会让续练、待复习词汇、高频错题聚合在同一块屏幕上跑两遍。
+withDefaults(defineProps<{ tasks?: StudyTodos | null; failed?: boolean }>(), { tasks: null, failed: false })
+defineEmits<{ retry: [] }>()
 </script>
 
 <template>
   <section class="study-todos" aria-labelledby="study-todos-title">
     <div class="todos-heading"><h1 id="study-todos-title">学习待办</h1></div>
-    <div v-if="failed" class="todos-status" role="status">学习待办暂时无法加载<button class="button ghost compact" type="button" @click="load"><RotateCcw :size="15" />重试</button></div>
+    <div v-if="failed" class="todos-status" role="status">学习待办暂时无法加载<button class="button ghost compact" type="button" @click="$emit('retry')"><RotateCcw :size="15" />重试</button></div>
     <div v-else-if="!tasks" class="todos-grid todos-skeleton" role="status" aria-busy="true" aria-label="学习待办加载中">
       <div v-for="index in 2" :key="index" class="todo-item skeleton-item" aria-hidden="true"><span class="skeleton-block"></span><span class="todo-copy"><span class="skeleton-line wide"></span><span class="skeleton-line"></span></span></div>
     </div>

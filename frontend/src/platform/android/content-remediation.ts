@@ -3,6 +3,7 @@ import { captureSession } from './practice-snapshots'
 
 type RecordValue = Record<string, any>
 export type ContentManifest = {version: number; revision: string; units: RecordValue[]}
+declare const __CONTENT_REMEDIATION_HEADER__: { revision:string; units:RecordValue[]; digest:string } | null
 const unitFields = ['unit_type', 'subtype', 'title', 'sequence', 'passage']
 const questionFields = ['number', 'stem', 'question_type', 'answer', 'score', 'sequence']
 const canonical = (value: any): string => value && typeof value === 'object'
@@ -219,25 +220,30 @@ export function loadBundledContentManifest(): Promise<ContentManifest | null> {
   return bundledManifest
 }
 
-let startupPreparation: Promise<void> | undefined
-export function ensureContentRemediation(): Promise<void> {
+let startupPreparation: Promise<boolean> | undefined
+export function ensureContentRemediation(): Promise<boolean> {
   startupPreparation ||= (async () => {
     await androidDatabase()
+    const header = typeof __CONTENT_REMEDIATION_HEADER__ !== 'undefined' ? __CONTENT_REMEDIATION_HEADER__ : null
+    const marker = header ? `content-remediation-bundle:${header.digest}` : ''
+    if (header && await row<RecordValue>('SELECT migration_key FROM app_migrations WHERE migration_key=?', [marker]) && await remediationSettled(header)) return false
     const manifest = await loadBundledContentManifest()
-    if (!manifest) return
+    if (!manifest) return false
     // Applying one revision is a one-time repair. Once every packaged unit
     // carries this revision, later launches skip the per-unit preflight (and
     // its question/option queries and digests) and only pay for reading the
     // manifest. Import paths are guarded separately by validateRemediatedImport,
     // and the revision flag is written only by a verified pass or a validated
     // package install.
-    if (await remediationSettled(manifest)) return
-    await applyContentWithBackup(manifest)
+    let changed = false
+    if (!await remediationSettled(manifest)) changed = Number((await applyContentWithBackup(manifest)).units) > 0
+    if (marker) await run('INSERT OR IGNORE INTO app_migrations (migration_key) VALUES (?)', [marker])
+    return changed
   })()
   return startupPreparation
 }
 
-async function remediationSettled(manifest: ContentManifest): Promise<boolean> {
+async function remediationSettled(manifest: Pick<ContentManifest, 'revision' | 'units'>): Promise<boolean> {
   if (!(await remediationApplied(manifest.revision))) return false
   const keys = manifest.units.map(change => change.unitKey)
   let present = 0

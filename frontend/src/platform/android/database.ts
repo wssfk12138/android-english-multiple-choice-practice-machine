@@ -18,6 +18,8 @@ const DB_VERSION = 1
 
 /** One-time startup repairs tracked in `app_migrations` so repeat launches skip them. */
 const ORDERING_FIXED_SLOTS_MIGRATION = 'ordering-fixed-slots-v1'
+const DUPLICATE_PROFILE_PACKAGE_MIGRATION = 'duplicate-profile-package-v1'
+const LEGACY_QUESTION_BANK_PRUNE_MIGRATION = 'legacy-question-bank-prune-v1'
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -436,23 +438,69 @@ INSERT OR IGNORE INTO schema_version(version) VALUES (1);
 const manager = new SQLiteConnection(CapacitorSQLite)
 let connectionPromise: Promise<SQLiteDBConnection> | null = null
 
+// Catalogue reads are pure and repeatable inside one launch, and Android pays
+// roughly 20ms of bridge overhead per PRAGMA. The migration chain used to probe
+// the same table up to five times, so cache the answers per connection. Anything
+// that rebuilds a table has to drop the affected entry (see invalidateCatalogues).
+let columnNameCache: Map<string, Set<string>> | null = null
+let tableNameCache: string[] | null = null
+
+function invalidateCatalogues() {
+  columnNameCache = new Map()
+  tableNameCache = null
+}
+
+async function tableColumnNames(
+  db: SQLiteDBConnection,
+  table: string,
+): Promise<Set<string>> {
+  const cached = columnNameCache?.get(table)
+  if (cached) return cached
+  const result = await db.query(`PRAGMA table_info(${table})`)
+  const names = new Set((result.values || []).map(item => String(item.name)))
+  columnNameCache?.set(table, names)
+  return names
+}
+
 async function ensureColumn(
   db: SQLiteDBConnection,
   table: string,
   column: string,
   declaration: string,
 ) {
-  const result = await db.query(`PRAGMA table_info(${table})`)
-  if (!(result.values || []).some(item => item.name === column)) {
+  const names = await tableColumnNames(db, table)
+  if (!names.has(column)) {
     await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`)
+    names.add(column)
   }
 }
 
+/**
+ * Capacitor plugin rejections arrive as plain objects, so String(error) would
+ * only print "[object Object]" and hide the real reason.
+ */
+function describeError(error: unknown): string {
+  if (error instanceof Error) return error.name + ': ' + error.message
+  if (error && typeof error === 'object') {
+    const candidate = error as { message?: unknown; error?: unknown }
+    const message = candidate.message ?? candidate.error
+    if (typeof message === 'string' && message) return message
+    try {
+      return JSON.stringify(error)
+    } catch {
+      return String(error)
+    }
+  }
+  return String(error)
+}
+
 async function tableNames(db: SQLiteDBConnection): Promise<string[]> {
+  if (tableNameCache) return tableNameCache
   const result = await db.query(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
   )
-  return (result.values || []).map(item => String(item.name))
+  tableNameCache = (result.values || []).map(item => String(item.name))
+  return tableNameCache
 }
 
 async function tableReferences(db: SQLiteDBConnection, tableName: string): Promise<string[]> {
@@ -503,6 +551,7 @@ async function recoverInterruptedPaperTable(db: SQLiteDBConnection) {
     } finally {
       await db.execute('PRAGMA foreign_keys = ON', false)
     }
+    invalidateCatalogues()
     return
   }
 
@@ -512,6 +561,7 @@ async function recoverInterruptedPaperTable(db: SQLiteDBConnection) {
   for (const candidate of recoveryCandidates) {
     if (names.has(candidate)) {
       await db.execute(`ALTER TABLE ${candidate} RENAME TO papers`)
+      invalidateCatalogues()
       return
     }
   }
@@ -520,6 +570,7 @@ async function recoverInterruptedPaperTable(db: SQLiteDBConnection) {
 async function restorePaperMigrationSnapshots(db: SQLiteDBConnection) {
   const snapshotPrefix = 'papers_rebuild_snapshot_'
   const names = new Set(await tableNames(db))
+  let dropped = false
   for (const snapshot of [...names].filter(name => name.startsWith(snapshotPrefix))) {
     const target = snapshot.slice(snapshotPrefix.length)
     if (!names.has(target)) continue
@@ -537,19 +588,24 @@ async function restorePaperMigrationSnapshots(db: SQLiteDBConnection) {
       )
     }
     await db.execute(`DROP TABLE "${snapshot.replaceAll('"', '""')}"`)
+    dropped = true
   }
+  if (dropped) invalidateCatalogues()
 }
 
 async function cleanupInterruptedPaperMigration(db: SQLiteDBConnection) {
   const names = new Set(await tableNames(db))
   if (!names.has('papers')) return
+  let dropped = false
   for (const temporary of ['papers_rebuild', 'papers_rebuild_tmp_papers']) {
     if (!names.has(temporary)) continue
     const refs = await tableReferences(db, temporary)
     if (!refs.length) {
       await db.execute(`DROP TABLE IF EXISTS "${temporary}"`)
+      dropped = true
     }
   }
+  if (dropped) invalidateCatalogues()
 }
 
 async function migrateQuestionBankProfiles(db: SQLiteDBConnection) {
@@ -785,6 +841,7 @@ async function migrateQuestionBankProfiles(db: SQLiteDBConnection) {
       await db.execute('PRAGMA legacy_alter_table = OFF', false)
       await db.execute('PRAGMA foreign_keys = ON', false)
     }
+    invalidateCatalogues()
     const violations = await db.query('PRAGMA foreign_key_check')
     if (violations.values?.length) {
       throw new Error(
@@ -832,6 +889,7 @@ async function repairStalePaperForeignKey(db: SQLiteDBConnection) {
       ALTER TABLE units_fk_repair RENAME TO units;
       CREATE INDEX IF NOT EXISTS idx_units_paper ON units(paper_id);
     `)
+    invalidateCatalogues()
   } finally {
     await db.execute('PRAGMA foreign_keys = ON', false)
   }
@@ -842,6 +900,233 @@ async function repairStalePaperForeignKey(db: SQLiteDBConnection) {
   )
   if (!paperReference) {
     throw new Error('数据库迁移失败：units 外键未恢复到 papers')
+  }
+}
+
+/**
+ * Older builds could publish one question-bank package while a second profile was
+ * selected, so the same papers kept a second copy of their units, questions,
+ * options and generated labels. No practice record pointed at that copy, but every
+ * list and queue read walked both copies on start-up.
+ *
+ * A copy is removed only when nothing references it. A copy that carries user work
+ * (answers, wrong items, retry rounds, vocabulary, a session's unit list, a trash
+ * entry or a user-edited label) stays untouched and is reported instead.
+ */
+async function packageCopyReferences(
+  db: SQLiteDBConnection,
+  profileId: number,
+  packageId: string,
+  contentVersion: string,
+): Promise<string[]> {
+  const paperScope = 'SELECT id FROM papers WHERE profile_id = ? AND package_id = ? AND content_version = ? AND deleted_at IS NULL'
+  const unitScope = `SELECT id FROM units WHERE paper_id IN (${paperScope})`
+  const questionScope = `SELECT id FROM questions WHERE unit_id IN (${unitScope})`
+  const paperValues = [profileId, packageId, contentVersion]
+  const unitValues = [...paperValues]
+  // Every scope embeds the one before it, so a question scope binds the same
+  // three values as the paper scope.
+  const questionValues = [...paperValues]
+  // One combined probe replaces a dozen bridges; every branch is a bare
+  // existence check so SQLite accepts the compound SELECT.
+  const probes: Array<{ name: string; scope: string; values: unknown[] }> = [
+    {
+      name: 'practice_sessions',
+      values: [...paperValues, ...unitValues],
+      scope: `paper_id IN (${paperScope})
+       OR id IN (SELECT s.id FROM practice_sessions s,
+                          json_each(CASE WHEN json_valid(s.unit_ids) THEN s.unit_ids ELSE '[]' END) v
+                 WHERE CAST(v.value AS INTEGER) IN (${unitScope}))`,
+    },
+    { name: 'practice_unit_submissions', values: unitValues, scope: `unit_id IN (${unitScope})` },
+    { name: 'wrong_retry_rounds', values: unitValues, scope: `unit_id IN (${unitScope})` },
+    { name: 'wrong_analysis_states', values: unitValues, scope: `unit_id IN (${unitScope})` },
+    {
+      name: 'wrong_current_questions',
+      values: [...unitValues, ...questionValues],
+      scope: `unit_id IN (${unitScope}) OR question_id IN (${questionScope})`,
+    },
+    {
+      name: 'vocabulary_occurrences',
+      values: [...unitValues, ...questionValues],
+      scope: `unit_id IN (${unitScope}) OR question_id IN (${questionScope})`,
+    },
+    { name: 'practice_answers', values: questionValues, scope: `question_id IN (${questionScope})` },
+    { name: 'practice_answer_events', values: questionValues, scope: `question_id IN (${questionScope})` },
+    { name: 'wrong_retry_round_questions', values: questionValues, scope: `question_id IN (${questionScope})` },
+    { name: 'wrong_stats', values: questionValues, scope: `question_id IN (${questionScope})` },
+    { name: 'question_ai_labels', values: questionValues, scope: `user_edited = 1 AND question_id IN (${questionScope})` },
+    {
+      name: 'question_label_run_items',
+      values: questionValues,
+      scope: `question_id IN (${questionScope})
+        AND run_id IN (SELECT run_id FROM question_label_runs WHERE status = 'running')`,
+    },
+    {
+      name: 'trash_entries',
+      values: [...paperValues, ...unitValues, ...questionValues],
+      scope: `restored_at IS NULL AND ((resource_type = 'paper' AND resource_id IN (${paperScope}))
+        OR (resource_type = 'unit' AND resource_id IN (${unitScope}))
+        OR (resource_type = 'question' AND resource_id IN (${questionScope})))`,
+    },
+  ]
+  const statement = probes
+    .map(probe => `SELECT '${probe.name}' AS reference WHERE EXISTS (SELECT 1 FROM ${probe.name} WHERE ${probe.scope})`)
+    .join(' UNION ALL ')
+  const found = await db.query(statement, probes.flatMap(probe => probe.values))
+  return [...new Set((found.values || []).map(entry => String(entry.reference)))]
+}
+
+/**
+ * Deletes one full copy of a package inside a single profile. Children go first
+ * and the whole copy is one transaction, so the result does not depend on the
+ * connection's foreign key setting. Session snapshots and content revisions
+ * address units by package-level external key, so they keep resolving to the
+ * surviving copy.
+ */
+async function deleteProfilePackageCopy(
+  db: SQLiteDBConnection,
+  profileId: number,
+  packageId: string,
+  contentVersion: string,
+): Promise<number> {
+  const paperScope = 'SELECT id FROM papers WHERE profile_id = ? AND package_id = ? AND content_version = ? AND deleted_at IS NULL'
+  const unitScope = `SELECT id FROM units WHERE paper_id IN (${paperScope})`
+  const questionScope = `SELECT id FROM questions WHERE unit_id IN (${unitScope})`
+  const paperValues = [profileId, packageId, contentVersion]
+  const unitValues = [...paperValues]
+  // The question scope embeds the unit and paper scopes, so it binds the same
+  // three values.
+  const questionValues = [...paperValues]
+  if ((await db.isTransactionActive()).result) {
+    throw new Error('数据库存在未完成事务，已中止重复题库清理')
+  }
+  const existingTables = new Set(await tableNames(db))
+  let started = false
+  try {
+    await db.beginTransaction()
+    started = true
+    await db.run(`DELETE FROM options WHERE question_id IN (${questionScope})`, questionValues, false)
+    await db.run(`DELETE FROM question_ai_labels WHERE question_id IN (${questionScope})`, questionValues, false)
+    await db.run(`DELETE FROM question_label_run_items WHERE question_id IN (${questionScope})`, questionValues, false)
+    await db.run(`DELETE FROM questions WHERE id IN (${questionScope})`, questionValues, false)
+    // Created lazily by the first content remediation, so it may not exist yet.
+    if (existingTables.has('content_remediation_receipts')) {
+      await db.run(`DELETE FROM content_remediation_receipts WHERE unit_id IN (${unitScope})`, unitValues, false)
+    }
+    await db.run(`DELETE FROM units WHERE paper_id IN (${paperScope})`, paperValues, false)
+    const removed = await db.run(`DELETE FROM papers WHERE id IN (${paperScope})`, paperValues, false)
+    await db.commitTransaction()
+    started = false
+    return Number(removed.changes?.changes || 0)
+  } catch (error) {
+    if (started) {
+      try {
+        if ((await db.isTransactionActive()).result) await db.rollbackTransaction()
+      } catch {
+        // Preserve the original deletion error.
+      }
+    }
+    throw error
+  }
+}
+
+async function removeDuplicateProfilePackages(db: SQLiteDBConnection) {
+  if (await migrationApplied(db, DUPLICATE_PROFILE_PACKAGE_MIGRATION)) return
+  const shared = await db.query(`
+    SELECT package_id, content_version
+    FROM papers
+    WHERE deleted_at IS NULL AND package_id <> ''
+    GROUP BY package_id, content_version
+    HAVING COUNT(DISTINCT profile_id) > 1
+  `)
+  for (const item of shared.values || []) {
+    const packageId = String(item.package_id || '')
+    const contentVersion = String(item.content_version || '')
+    const copies = (await db.query(`
+      SELECT DISTINCT profile_id FROM papers
+      WHERE deleted_at IS NULL AND package_id = ? AND content_version = ?
+      ORDER BY profile_id
+    `, [packageId, contentVersion])).values || []
+    const profileIds = copies.map(entry => Number(entry.profile_id))
+    if (profileIds.length < 2) continue
+    const referenced: number[] = []
+    for (const profileId of profileIds) {
+      const references = await packageCopyReferences(db, profileId, packageId, contentVersion)
+      if (!references.length) continue
+      referenced.push(profileId)
+      console.info('[db] question-bank copy kept in use', { profileId, packageId, contentVersion, references })
+    }
+    // With no user work the home profile (lowest id) keeps the package.
+    const keep = new Set(referenced.length ? referenced : [profileIds[0]])
+    for (const profileId of profileIds) {
+      if (keep.has(profileId)) continue
+      const papers = await deleteProfilePackageCopy(db, profileId, packageId, contentVersion)
+      console.info('[db] duplicate question-bank copy removed', { profileId, packageId, contentVersion, papers })
+    }
+  }
+  await markMigrationApplied(db, DUPLICATE_PROFILE_PACKAGE_MIGRATION)
+}
+
+/**
+ * Drops what an older bank left behind: content versions no paper uses, published
+ * import records whose version no longer backs any paper in their profile (drafts
+ * stay, so a pending import can still be published) and the stored upload, which
+ * has no reader. Runs after the duplicate copy is gone, then reclaims the freed
+ * pages once.
+ */
+async function pruneLegacyQuestionBankRecords(db: SQLiteDBConnection) {
+  if (await migrationApplied(db, LEGACY_QUESTION_BANK_PRUNE_MIGRATION)) return
+  let changed = false
+  const orphanPackages = await db.query(`
+    SELECT id, package_id, content_version FROM question_bank_packages
+    WHERE NOT EXISTS (SELECT 1 FROM papers
+      WHERE papers.package_id = question_bank_packages.package_id
+        AND papers.content_version = question_bank_packages.content_version)
+  `)
+  for (const item of orphanPackages.values || []) {
+    await db.run('DELETE FROM question_bank_packages WHERE id = ?', [Number(item.id)], false)
+    changed = true
+    console.info('[db] unreferenced question-bank package removed', {
+      packageId: item.package_id,
+      contentVersion: item.content_version,
+    })
+  }
+  const jobs = await db.query(`
+    SELECT id, profile_id, package_data FROM esq_import_jobs
+    WHERE deleted_at IS NULL AND status = 'published'
+  `)
+  for (const job of jobs.values || []) {
+    let manifest: Record<string, unknown> = {}
+    try {
+      const parsed = JSON.parse(String(job.package_data || '{}')) as { manifest?: Record<string, unknown> }
+      manifest = parsed.manifest || {}
+    } catch {
+      continue
+    }
+    const packageId = String(manifest.packageId || '')
+    const contentVersion = String(manifest.contentVersion || '')
+    if (!packageId) continue
+    const owner = await db.query(`
+      SELECT 1 FROM papers
+      WHERE profile_id = ? AND package_id = ? AND content_version = ? LIMIT 1
+    `, [Number(job.profile_id), packageId, contentVersion])
+    if ((owner.values || []).length) continue
+    await db.run('DELETE FROM esq_import_jobs WHERE id = ?', [Number(job.id)], false)
+    changed = true
+    console.info('[db] superseded question-bank import record removed', {
+      jobId: Number(job.id),
+      profileId: Number(job.profile_id),
+    })
+  }
+  const cleared = await db.run("UPDATE esq_import_jobs SET raw_file_base64 = '' WHERE raw_file_base64 <> ''", [], false)
+  if (Number(cleared.changes?.changes || 0)) changed = true
+  await markMigrationApplied(db, LEGACY_QUESTION_BANK_PRUNE_MIGRATION)
+  if (!changed) return
+  try {
+    await db.execute('VACUUM', false)
+  } catch (error) {
+    console.info('[db] vacuum skipped: ' + describeError(error))
   }
 }
 
@@ -940,6 +1225,7 @@ async function runOrderingFixedSlotsBackfill(db: SQLiteDBConnection) {
 export async function androidDatabase(): Promise<SQLiteDBConnection> {
   if (!connectionPromise) {
     connectionPromise = (async () => {
+      invalidateCatalogues()
       const consistent = await manager.checkConnectionsConsistency()
       const existing = await manager.isConnection(DB_NAME, false)
       let db: SQLiteDBConnection
@@ -965,50 +1251,84 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
         CREATE INDEX IF NOT EXISTS idx_question_label_runs_profile_status
           ON question_label_runs(question_bank_profile_id, status, updated_at DESC);
       `)
+      // Several builds stored one package twice, in two profiles, so every
+      // start-up read walked a copy that held no user work. Drop the copy
+      // before the backfills below, then drop the versions nothing uses.
+      // Runs before repairLearningHistoryRebindDrift, or the copy's leftover
+      // labels would look like history to move onto the surviving papers.
+      try {
+        await removeDuplicateProfilePackages(db)
+        await pruneLegacyQuestionBankRecords(db)
+      } catch (error) {
+        console.info('[db] question-bank cleanup skipped: ' + describeError(error))
+      }
       await backfillEnglishOneOrderingFixedSlots(db)
-      const questionColumns = await db.query('PRAGMA table_info(questions)')
-      if (!(questionColumns.values || []).some(column => column.name === 'content_hash')) {
+      const questionColumns = await tableColumnNames(db, 'questions')
+      if (!questionColumns.has('content_hash')) {
         await db.execute("ALTER TABLE questions ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''")
+        questionColumns.add('content_hash')
       }
-      const stateColumns = await db.query('PRAGMA table_info(wrong_analysis_states)')
-      if ((stateColumns.values || []).length && !(stateColumns.values || []).some(column => column.name === 'analyzed_session_id')) {
+      const stateColumns = await tableColumnNames(db, 'wrong_analysis_states')
+      if (stateColumns.size && !stateColumns.has('analyzed_session_id')) {
         await db.execute('ALTER TABLE wrong_analysis_states ADD COLUMN analyzed_session_id INTEGER NOT NULL DEFAULT 0')
+        stateColumns.add('analyzed_session_id')
       }
-      const aiMessageColumns = await db.query('PRAGMA table_info(ai_messages)')
-      if ((aiMessageColumns.values || []).length && !(aiMessageColumns.values || []).some(column => column.name === 'attachments')) {
+      const aiMessageColumns = await tableColumnNames(db, 'ai_messages')
+      if (aiMessageColumns.size && !aiMessageColumns.has('attachments')) {
         await db.execute('ALTER TABLE ai_messages ADD COLUMN attachments TEXT')
+        aiMessageColumns.add('attachments')
       }
-      const vocabColumns = await db.query('PRAGMA table_info(vocabulary_entries)')
-      const sessionColumns = await db.query('PRAGMA table_info(practice_sessions)')
-      if (!(sessionColumns.values || []).some(column => column.name === 'candidate_policy_version')) {
+      const vocabColumns = await tableColumnNames(db, 'vocabulary_entries')
+      const sessionColumns = await tableColumnNames(db, 'practice_sessions')
+      if (!sessionColumns.has('candidate_policy_version')) {
         await db.execute('ALTER TABLE practice_sessions ADD COLUMN candidate_policy_version INTEGER NOT NULL DEFAULT 0')
+        sessionColumns.add('candidate_policy_version')
       }
-      if (!(sessionColumns.values || []).some(column => column.name === 'content_snapshot')) {
+      if (!sessionColumns.has('content_snapshot')) {
         await db.execute("ALTER TABLE practice_sessions ADD COLUMN content_snapshot TEXT NOT NULL DEFAULT '{}'")
+        sessionColumns.add('content_snapshot')
       }
-      if (!(sessionColumns.values || []).some(column => column.name === 'snapshot_accepted_revision')) {
+      if (!sessionColumns.has('snapshot_accepted_revision')) {
         await db.execute("ALTER TABLE practice_sessions ADD COLUMN snapshot_accepted_revision TEXT NOT NULL DEFAULT ''")
+        sessionColumns.add('snapshot_accepted_revision')
       }
-      if (!(sessionColumns.values || []).some(column => column.name === 'content_revisions')) {
+      if (!sessionColumns.has('content_revisions')) {
         await db.execute("ALTER TABLE practice_sessions ADD COLUMN content_revisions TEXT NOT NULL DEFAULT '{}'")
+        sessionColumns.add('content_revisions')
       }
-      const occurrenceColumns = await db.query('PRAGMA table_info(vocabulary_occurrences)')
-      const occurrenceNames = new Set((occurrenceColumns.values || []).map(column => column.name))
-      if (!occurrenceNames.has('source_kind')) await db.execute("ALTER TABLE vocabulary_occurrences ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'unknown'")
-      if (!occurrenceNames.has('selection_start')) await db.execute('ALTER TABLE vocabulary_occurrences ADD COLUMN selection_start INTEGER NOT NULL DEFAULT -1')
-      const vocabNames = new Set((vocabColumns.values || []).map(column => column.name))
+      const occurrenceNames = await tableColumnNames(db, 'vocabulary_occurrences')
+      if (!occurrenceNames.has('source_kind')) {
+        await db.execute("ALTER TABLE vocabulary_occurrences ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'unknown'")
+        occurrenceNames.add('source_kind')
+      }
+      if (!occurrenceNames.has('selection_start')) {
+        await db.execute('ALTER TABLE vocabulary_occurrences ADD COLUMN selection_start INTEGER NOT NULL DEFAULT -1')
+        occurrenceNames.add('selection_start')
+      }
+      const vocabNames = vocabColumns
       for (const [name, fallback] of [['morphology', '{}'], ['generated_example', '{}'], ['contextual_occurrence_key', '']]) {
-        if (!vocabNames.has(name)) await db.execute(`ALTER TABLE vocabulary_entries ADD COLUMN ${name} TEXT NOT NULL DEFAULT '${fallback}'`)
+        if (!vocabNames.has(name)) {
+          await db.execute(`ALTER TABLE vocabulary_entries ADD COLUMN ${name} TEXT NOT NULL DEFAULT '${fallback}'`)
+          vocabNames.add(name)
+        }
       }
-      if (!vocabNames.has('synonyms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN synonyms TEXT NOT NULL DEFAULT '[]'")
-      if (!vocabNames.has('antonyms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN antonyms TEXT NOT NULL DEFAULT '[]'")
-      if (!vocabNames.has('similar_forms')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN similar_forms TEXT NOT NULL DEFAULT '[]'")
-      if (!vocabNames.has('review_stage')) await db.execute('ALTER TABLE vocabulary_entries ADD COLUMN review_stage INTEGER NOT NULL DEFAULT 0')
-      if (!vocabNames.has('last_result')) await db.execute("ALTER TABLE vocabulary_entries ADD COLUMN last_result TEXT NOT NULL DEFAULT ''")
-      if (!vocabNames.has('lapse_count')) await db.execute('ALTER TABLE vocabulary_entries ADD COLUMN lapse_count INTEGER NOT NULL DEFAULT 0')
-      const reviewColumns = await db.query('PRAGMA table_info(vocabulary_reviews)')
-      const reviewNames = new Set((reviewColumns.values || []).map(column => column.name))
-      if (!reviewNames.has('mode')) await db.execute("ALTER TABLE vocabulary_reviews ADD COLUMN mode TEXT NOT NULL DEFAULT 'scheduled'")
+      for (const [name, declaration] of [
+        ['synonyms', "TEXT NOT NULL DEFAULT '[]'"],
+        ['antonyms', "TEXT NOT NULL DEFAULT '[]'"],
+        ['similar_forms', "TEXT NOT NULL DEFAULT '[]'"],
+        ['review_stage', 'INTEGER NOT NULL DEFAULT 0'],
+        ['last_result', "TEXT NOT NULL DEFAULT ''"],
+        ['lapse_count', 'INTEGER NOT NULL DEFAULT 0'],
+      ] as const) {
+        if (vocabNames.has(name)) continue
+        await db.execute(`ALTER TABLE vocabulary_entries ADD COLUMN ${name} ${declaration}`)
+        vocabNames.add(name)
+      }
+      const reviewNames = await tableColumnNames(db, 'vocabulary_reviews')
+      if (!reviewNames.has('mode')) {
+        await db.execute("ALTER TABLE vocabulary_reviews ADD COLUMN mode TEXT NOT NULL DEFAULT 'scheduled'")
+        reviewNames.add('mode')
+      }
       const wrongPoolMigration = await db.query(
         "SELECT migration_key FROM app_migrations WHERE migration_key = 'wrong-current-pool-v1' LIMIT 1",
       )
@@ -1022,12 +1342,18 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
           INSERT INTO app_migrations (migration_key) VALUES ('wrong-current-pool-v1');
         `)
       }
-      const labelColumns = await db.query('PRAGMA table_info(question_ai_labels)')
-      const labelNames = new Set((labelColumns.values || []).map(column => column.name))
-      if (!labelNames.has('user_edited')) await db.execute("ALTER TABLE question_ai_labels ADD COLUMN user_edited INTEGER NOT NULL DEFAULT 0")
-      if (!labelNames.has('label_version')) await db.execute("ALTER TABLE question_ai_labels ADD COLUMN label_version INTEGER NOT NULL DEFAULT 1")
+      const labelNames = await tableColumnNames(db, 'question_ai_labels')
+      if (!labelNames.has('user_edited')) {
+        await db.execute("ALTER TABLE question_ai_labels ADD COLUMN user_edited INTEGER NOT NULL DEFAULT 0")
+        labelNames.add('user_edited')
+      }
+      if (!labelNames.has('label_version')) {
+        await db.execute("ALTER TABLE question_ai_labels ADD COLUMN label_version INTEGER NOT NULL DEFAULT 1")
+        labelNames.add('label_version')
+      }
       if (!labelNames.has('updated_at')) {
         await db.execute("ALTER TABLE question_ai_labels ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+        labelNames.add('updated_at')
         await db.execute("UPDATE question_ai_labels SET updated_at = CURRENT_TIMESTAMP WHERE updated_at = ''")
       }
       const labelLockMigration = await db.query(
@@ -1062,30 +1388,32 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
         'vocabulary_occurrences',
         'vocabulary_reviews',
       ]) {
-        const syncColumns = await db.query(`PRAGMA table_info(${table})`)
-        const names = new Set((syncColumns.values || []).map(column => column.name))
+        const names = await tableColumnNames(db, table)
         if (!names.has('sync_id')) {
           await db.execute(`ALTER TABLE ${table} ADD COLUMN sync_id TEXT`)
+          names.add('sync_id')
         }
         if (!names.has('updated_at')) {
           await db.execute(`ALTER TABLE ${table} ADD COLUMN updated_at TEXT`)
+          names.add('updated_at')
         }
       }
       for (const table of ['wrong_stats']) {
-        const syncColumns = await db.query(`PRAGMA table_info(${table})`)
-        const names = new Set((syncColumns.values || []).map(column => column.name))
+        const names = await tableColumnNames(db, table)
         if (!names.has('attempt_ledger')) {
           await db.execute('ALTER TABLE wrong_stats ADD COLUMN attempt_ledger TEXT')
+          names.add('attempt_ledger')
         }
         if (!names.has('updated_at')) {
           await db.execute(`ALTER TABLE ${table} ADD COLUMN updated_at TEXT`)
+          names.add('updated_at')
         }
       }
       // LAN sync stable keys: backfill sync_id / updated_at for rows that
       // predate the sync columns, so incremental comparisons and deletes work.
       // App code writes both columns on insert, so the probe usually finds
       // nothing and the launch stays read-only.
-      for (const table of [
+      const syncIdentityTables = [
         'practice_sessions',
         'practice_answers',
         'practice_answer_events',
@@ -1095,13 +1423,22 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
         'wrong_current_questions',
         'vocabulary_occurrences',
         'vocabulary_reviews',
-      ]) {
-        const pending = await db.query(
-          `SELECT 1 FROM ${table}
-           WHERE sync_id IS NULL OR sync_id = '' OR updated_at IS NULL OR updated_at = ''
-           LIMIT 1`,
-        )
-        if (!(pending.values || []).length) continue
+      ]
+      // A single combined probe replaces ten per-table round trips; each branch
+      // is served by the sync_id index and normally returns no rows. Branches
+      // must stay bare existence checks: SQLite rejects a LIMIT inside a
+      // compound SELECT branch.
+      const syncPending = await db.query([
+        ...syncIdentityTables.map(
+          table => `SELECT '${table}' AS table_name WHERE EXISTS (SELECT 1 FROM ${table}
+           WHERE sync_id IS NULL OR sync_id = '' OR updated_at IS NULL OR updated_at = '')`,
+        ),
+        `SELECT 'wrong_stats' AS table_name WHERE EXISTS (SELECT 1 FROM wrong_stats
+         WHERE updated_at IS NULL OR updated_at = '')`,
+      ].join(' UNION ALL '))
+      const pendingTables = new Set((syncPending.values || []).map(row => String(row.table_name)))
+      for (const table of syncIdentityTables) {
+        if (!pendingTables.has(table)) continue
         await db.run(
           `UPDATE ${table} SET sync_id = lower(hex(randomblob(16))) WHERE sync_id IS NULL OR sync_id = ''`,
           [],
@@ -1113,10 +1450,7 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
           false,
         )
       }
-      const pendingWrongStats = await db.query(
-        "SELECT 1 FROM wrong_stats WHERE updated_at IS NULL OR updated_at = '' LIMIT 1",
-      )
-      if ((pendingWrongStats.values || []).length) {
+      if (pendingTables.has('wrong_stats')) {
         await db.run(
           `UPDATE wrong_stats SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL OR updated_at = ''`,
           [],

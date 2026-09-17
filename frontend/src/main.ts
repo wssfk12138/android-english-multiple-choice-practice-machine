@@ -11,19 +11,24 @@ const androidUiPreview = import.meta.env.DEV
 document.documentElement.dataset.platform = androidUiPreview ? 'android' : platformRuntime.kind
 document.documentElement.classList.toggle('native-app', platformRuntime.isNative)
 
+let startupChanged = false
 async function runAndroidStartupPreparation() {
   await platformRuntime.ready()
   if (platformRuntime.isAndroid) {
     const { ensureContentRemediation } = await import('./platform/android/content-remediation')
-    await ensureContentRemediation()
+    startupChanged = await ensureContentRemediation()
     const { purgeExpiredTrash } = await import('./platform/android/question-bank-profiles')
     await purgeExpiredTrash()
     if (import.meta.env.VITE_BUNDLED_QUESTION_BANKS === '1') {
       const { installBundledQuestionBanks } = await import('./platform/android/question-bank')
-      await installBundledQuestionBanks()
+      const result = await installBundledQuestionBanks()
+      if (Array.isArray(result.results) && result.results.some(item => item.installed === true)) {
+        startupChanged = true
+      }
     } else if (import.meta.env.VITE_BUNDLED_QUESTION_BANK === '1') {
       const { installBundledQuestionBank } = await import('./platform/android/question-bank')
-      await installBundledQuestionBank()
+      const result = await installBundledQuestionBank()
+      if (result.installed === true) startupChanged = true
     }
   }
 }
@@ -35,6 +40,7 @@ async function runAndroidStartupPreparation() {
 createApp(App).use(router).mount('#app')
 
 void runAndroidStartupPreparation().catch(error => {
+  startupChanged = true
   console.warn('Android startup preparation failed:', String(error))
   if (platformRuntime.isAndroid) {
     void import('./platform/android/diagnostics').then(({ recordDiagnosticError }) =>
@@ -43,5 +49,5 @@ void runAndroidStartupPreparation().catch(error => {
   }
 }).finally(() => {
   ;(window as any).__LINJIAN_ANDROID_STARTUP_PREPARED__ = true
-  window.dispatchEvent(new CustomEvent('android-startup-prepared'))
+  window.dispatchEvent(new CustomEvent('android-startup-prepared', { detail: { changed: startupChanged } }))
 })

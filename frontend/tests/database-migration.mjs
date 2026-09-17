@@ -134,7 +134,7 @@ assert.ok(
 const main = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8')
 const mountApp = main.indexOf("createApp(App).use(router).mount('#app')")
 const startPreparation = main.indexOf('void runAndroidStartupPreparation()')
-const startupReadyEvent = main.indexOf("window.dispatchEvent(new CustomEvent('android-startup-prepared'))", startPreparation)
+const startupReadyEvent = main.indexOf("window.dispatchEvent(new CustomEvent('android-startup-prepared',", startPreparation)
 assert.ok(
   mountApp >= 0 && startPreparation > mountApp && startupReadyEvent > startPreparation,
   'the Vue shell must mount before Android database and bundled-bank preparation starts',

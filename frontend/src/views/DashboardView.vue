@@ -1,17 +1,18 @@
 <script setup lang="ts">
-import { Files, ListChecks, ArrowRight, BookOpen, ChevronRight, Sparkles, Star } from 'lucide-vue-next'
+import { Files, ListChecks, ArrowRight, BookOpen, ChevronRight, Sparkles, Star, TextCursorInput, ListOrdered, Headphones } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { get, post } from '../api'
 import QuestionBankSwitcher from '../components/QuestionBankSwitcher.vue'
 import StudyTodos from '../components/StudyTodos.vue'
 import '../dashboard-glass.css'
+import { useAndroidLandscape } from '../composables/useAndroidLandscape'
 
 const router = useRouter()
+const landscape = useAndroidLandscape()
 const data = ref<any>(null)
 const papers = ref<any[]>([])
 const error = ref('')
-const tasksRevision = ref(0)
 const vocabulary = ref<any[]>([])
 const tickerPaused = ref(false)
 const vocabularyPage = ref(0)
@@ -32,6 +33,18 @@ const publishedPapers = computed(() => papers.value.filter(
   paper => paper.status === 'published' && Number(paper.question_count || 0) > 0,
 ))
 const resumeSession = computed(() => data.value?.resume_session || null)
+// 学习待办的三张卡片直接取 /startup 的同一批聚合结果：同一个屏幕不再为这一个
+// 卡片区重复发一次 /study-todos，也不会把续练与高频题聚合跑第二遍。
+const studyTodos = computed(() => {
+  if (!data.value) return null
+  const session = data.value.resume_session
+  return {
+    profile_id: Number(data.value.profile_id || 0),
+    resume_session: session ? { id: Number(session.id), mode: String(session.mode || ''), title: session.title } : null,
+    review_count: Number(data.value.review_count || 0),
+    frequent_count: Number(data.value.frequent_count || 0),
+  }
+})
 const practiceTypeCount = (type: string) => Number(
   type === 'listening'
     ? data.value?.paper_type_counts?.listening || 0
@@ -66,8 +79,8 @@ function wait(milliseconds: number) {
   return new Promise(resolve => window.setTimeout(resolve, milliseconds))
 }
 
-function reloadAfterAndroidStartup() {
-  void loadHome()
+function reloadAfterAndroidStartup(event: Event) {
+  if ((event as CustomEvent).detail?.changed !== false) void loadHome()
 }
 
 // 挂载时的首次加载和 Android 启动准备完成事件会同时触发首页刷新。用一个在途
@@ -92,7 +105,6 @@ function loadHome(): Promise<void> {
 }
 
 async function refreshHome() {
-  tasksRevision.value += 1
   error.value = ''
   const embedded = (window as any).__LINJIAN_STARTUP__
   if (embedded) delete (window as any).__LINJIAN_STARTUP__
@@ -167,7 +179,7 @@ function resumePractice() {
   <div class="page dashboard-page">
     <div class="desktop-dashboard glass-dashboard">
       <div class="dashboard-bank-row"><QuestionBankSwitcher :show-library-link="true" @changed="loadHome" /></div>
-      <StudyTodos :key="tasksRevision" />
+      <StudyTodos :tasks="studyTodos" :failed="!!error" @retry="loadHome" />
       <div v-if="error" class="warning">{{ error }}</div>
       <section v-if="vocabulary.length" class="vocabulary-ticker card" @mouseenter="tickerPaused=true" @mouseleave="tickerPaused=false">
         <div class="ticker-heading"><div><h3>词汇回顾</h3></div><RouterLink to="/vocabulary">查看单词本 →</RouterLink></div>
@@ -180,10 +192,10 @@ function resumePractice() {
       </section>
       <div v-if="hasAnyPractice" class="section-title"><h2>题型练习</h2></div>
       <div v-if="hasAnyPractice" class="grid practice-actions" :class="practiceGridClass">
-        <button v-if="hasPracticeType('cloze')" class="card action-card" type="button" @click="randomPractice('cloze')"><span class="feature-icon orange"><img src="/assets/icons/cloze.png" alt="" /></span><span class="action-copy"><h3>完形填空</h3></span><ArrowRight class="action-arrow" :size="19" /></button>
-        <button v-if="hasPracticeType('reading')" class="card action-card" type="button" @click="randomPractice('reading')"><span class="feature-icon sage"><img src="/assets/icons/reading.png" alt="" /></span><span class="action-copy"><h3>阅读理解</h3></span><ArrowRight class="action-arrow" :size="19" /></button>
-        <button v-if="hasPracticeType('part_b')" class="card action-card" type="button" @click="randomPractice('part_b')"><span class="feature-icon blue"><img src="/assets/icons/part-b.png" alt="" /></span><span class="action-copy"><h3>阅读 Part B</h3></span><ArrowRight class="action-arrow" :size="19" /></button>
-        <button v-if="hasListening" class="card action-card listening-action" type="button" @click="randomPractice('listening')"><span class="feature-icon purple"><img src="/assets/icons/listening.png" alt="" /></span><span class="action-copy"><h3>听力练习</h3></span><ArrowRight class="action-arrow" :size="19" /></button>
+        <button v-if="hasPracticeType('cloze')" class="card action-card" type="button" @click="randomPractice('cloze')"><span class="feature-icon orange"><TextCursorInput v-if="landscape" :size="27" :stroke-width="1.7" /><img v-else src="/assets/icons/cloze.png" alt="" /></span><span class="action-copy"><h3>完形填空</h3></span><ArrowRight class="action-arrow" :size="19" /></button>
+        <button v-if="hasPracticeType('reading')" class="card action-card" type="button" @click="randomPractice('reading')"><span class="feature-icon sage"><BookOpen v-if="landscape" :size="27" :stroke-width="1.7" /><img v-else src="/assets/icons/reading.png" alt="" /></span><span class="action-copy"><h3>阅读理解</h3></span><ArrowRight class="action-arrow" :size="19" /></button>
+        <button v-if="hasPracticeType('part_b')" class="card action-card" type="button" @click="randomPractice('part_b')"><span class="feature-icon blue"><ListOrdered v-if="landscape" :size="27" :stroke-width="1.7" /><img v-else src="/assets/icons/part-b.png" alt="" /></span><span class="action-copy"><h3>阅读 Part B</h3></span><ArrowRight class="action-arrow" :size="19" /></button>
+        <button v-if="hasListening" class="card action-card listening-action" type="button" @click="randomPractice('listening')"><span class="feature-icon purple"><Headphones v-if="landscape" :size="27" :stroke-width="1.7" /><img v-else src="/assets/icons/listening.png" alt="" /></span><span class="action-copy"><h3>听力练习</h3></span><ArrowRight class="action-arrow" :size="19" /></button>
       </div>
       <section v-if="data" class="dashboard-bank-summary" aria-label="题库概览">
         <h2>题库概览</h2>
@@ -242,5 +254,9 @@ function resumePractice() {
 
 
 <style scoped>
+html:root[data-platform="android"][data-orientation="landscape"] body #app .glass-dashboard .practice-actions .feature-icon { display:grid; place-items:center; border-radius:14px; background:var(--primary-soft); color:var(--primary); }
+html:root[data-platform="android"][data-orientation="landscape"] body #app .glass-dashboard .practice-actions .feature-icon.orange { background:var(--apricot); color:var(--ink); }
+html:root[data-platform="android"][data-orientation="landscape"] body #app .glass-dashboard .practice-actions .feature-icon.purple { background:var(--lavender); color:var(--ink); }
+html:root[data-platform="android"][data-orientation="landscape"] body #app .glass-dashboard .practice-actions .feature-icon.sage { background:color-mix(in srgb, var(--success) 14%, transparent); color:var(--success); }
 .dashboard-bank-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.dashboard-bank-row :deep(.bank-switcher){flex:1;min-width:0;margin:0}.dashboard-bank-row>.button{flex-shrink:0}.dashboard-bank-summary{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px 20px;padding:14px 0;border-top:1px solid var(--line);color:var(--muted)}.dashboard-bank-summary h2{margin:0;font-size:.95rem;color:var(--ink)}.dashboard-bank-summary span{font-size:.88rem}.section-title h2{font-size:1.1rem;letter-spacing:0}
 </style>
