@@ -53,33 +53,173 @@ function persistDueQueue() {
 let dueRefreshPromise: Promise<void> | null = null
 let reviewDisposed = false
 function reviewRevision(word: any) {
-  // 兜底值必须与 Android 本地接口 reviewRevision 的字段和顺序完全一致，
-  // 否则同一张卡在清单与详情下给出不同身份，乐观并发校验会静默失效。
-  // 摘要投影（浏览列表）不带这些字段，它不会成为复习卡：复习卡只来自
-  // projection=queue 的到期队列与巩固候选，评分前的队列刷新会补上真实版本。
+  // 原生下发的 review_revision 才是乐观并发身份，兜底值只用于本地比较
+  // “当前卡相对刷新前是否已变”。兜底值因此必须同时带上卡片身份（wordKey）：
+  // 只比到期字段时，刷新后换了一张卡也会被当成同一张，揭示状态会留在新卡上。
+  // 到期字段与 Android 的 reviewRevision 保持一致，updated_at 不进身份：
+  // 到期队列为省桥载荷不回传它，带上它会让清单与评分前的状态读取算出两个值，
+  // 评分被静默判成过期。摘要投影（浏览列表）不带这些字段，它不会成为复习卡：
+  // 复习卡只来自 projection=queue 的到期队列与巩固候选，评分前会刷到真实版本。
   if (!word) return ''
   return word.review_revision
-    || JSON.stringify([word.normalized_term, word.last_reviewed_at, word.next_review_at, word.updated_at, word.review_count || 0])
+    || `${wordKey(word)}|${word.review_count || 0}|${word.last_reviewed_at || ''}|${word.next_review_at || ''}`
 }
 function refreshDueQueue(): Promise<void> {
   if (dueRefreshPromise) return dueRefreshPromise
   dueRefreshPromise = loadDueQueue().finally(() => { dueRefreshPromise = null })
   return dueRefreshPromise
 }
-async function loadDueQueue() {
-  const previous = reviewRevision(reviewWord.value)
-  // Review needs the complete due set; paging applies only to the browsing list.
-  const result: any = await get(`/vocabulary?status=review${currentBankScope ? '&scope=current' : ''}&limit=all&projection=queue`)
+// 到期队列分块读取。整队一次过桥的代价有实测：903 行到期队列要回传 298 KB，
+// 平板单次读取 1034 ms（其中桥传输 950 ms），而同一条 SQL 在 PC 上只要 3.6–7.6 ms
+// ——瓶颈是跨桥回传的字节数，不是查询本身。
+// 因此队列分两段读：首屏只取够立刻显示卡片的一小页，其余分块在后台补齐，每块到手
+// 都重排一次队列；用户一开始评分或离开复习，后台补全立刻让出通道，不和评分抢同一条
+// 本地数据库连接。
+const DUE_FIRST_PAGE = 12
+const DUE_PAGE = 150
+type DueFill = 'complete' | 'stopped' | 'failed'
+let dueQueueWords = new Map<string, any>()
+let dueQueueOffset = 0
+let dueQueueComplete = false
+let dueQueueSaved: Partial<DueQueue> | null = null
+let dueLoadToken = 0
+let dueFillPromise: Promise<DueFill> | null = null
+// 队首签名与到期计数用于前台恢复时的复用判断：两者都没变就没必要把已经涨到
+// 上百条的队列缩回第一页。
+let dueHeadSignature = ''
+let dueHeadReview = -1
+
+function dueQueueUrl(limit: number | 'all', offset: number) {
+  return `/vocabulary?status=review${currentBankScope ? '&scope=current' : ''}&limit=${limit}&offset=${offset}&projection=queue`
+}
+function duePageSignature(rows: any[]) {
+  return rows.slice(0, DUE_FIRST_PAGE)
+    .map(word => `${wordKey(word)}\u0000${reviewRevision(word)}`).join('\n')
+}
+// 卡片身份变了就把揭示状态收回：否则新卡会带着上一张的答案出现。
+function setScheduledWords(ordered: string[], words: Map<string, any>) {
   if (reviewDisposed) return
+  const identity = (word: any) => word ? `${wordKey(word)}\u0000${reviewRevision(word)}` : ''
+  const previous = identity(reviewWord.value)
+  scheduledWords.value = ordered.map(key => words.get(key)).filter(Boolean)
+  if (previous !== identity(reviewWord.value)) reveal.value = false
+}
+// pending 为真表示队列还没读完：只有取满之后才把顺序落成权威版本，否则每取一页
+// 都会先把没取到的词按本地旧顺序排到前面去。
+function applyDueQueue(pending: boolean) {
+  dueQueue = reconcileDueQueue(dueQueueSaved, [...dueQueueWords.values()], Date.now(), pending)
+  persistDueQueue()
+  setScheduledWords(orderedDueKeys(dueQueue), dueQueueWords)
+}
+// 补全只在「正在复习、且没有在评分」时进行：评分一旦开始就把通道让回去。
+function dueFillWanted(token: number, force: boolean) {
+  return !reviewDisposed && token === dueLoadToken && (force || !reviewSaving.value)
+    && reviewMode.value && reviewKind.value === 'scheduled'
+}
+function finishFill(token: number, force: boolean): DueFill {
+  if (!dueFillWanted(token, force)) return 'stopped'
+  applyDueQueue(false)
+  return 'complete'
+}
+// 远端分页不受支持时的兜底：按老办法一次读完整队。这条路只服务旧远端，它在
+// 本机进程里，字节数不像 Capacitor 桥那样昂贵。
+async function readWholeDueQueue(token: number, force: boolean): Promise<DueFill> {
+  let result: any
+  try { result = await get(dueQueueUrl('all', 0)) } catch { return 'failed' }
+  if (!dueFillWanted(token, force)) return 'stopped'
+  const rows: any[] = Array.isArray(result.items) ? result.items : []
+  dueQueueWords = new Map(rows.map((word: any) => [wordKey(word), word]))
+  dueQueueOffset = rows.length
+  dueQueueComplete = true
+  applyDueQueue(false)
+  return 'complete'
+}
+async function fillDueQueue(token: number, force: boolean): Promise<DueFill> {
+  while (!dueQueueComplete) {
+    if (!dueFillWanted(token, force)) return 'stopped'
+    let result: any
+    try { result = await get(dueQueueUrl(DUE_PAGE, dueQueueOffset)) } catch { return 'failed' }
+    if (!dueFillWanted(token, force)) return 'stopped'
+    const rows: any[] = Array.isArray(result.items) ? result.items : []
+    // 服务器忽略了 limit：回来的就是整队，按整队收尾。
+    if (rows.length > DUE_PAGE) {
+      for (const word of rows) dueQueueWords.set(wordKey(word), word)
+      break
+    }
+    const added = rows.filter(word => !dueQueueWords.has(wordKey(word)))
+    for (const word of added) dueQueueWords.set(wordKey(word), word)
+    dueQueueOffset += rows.length
+    if (!added.length) {
+      // 整页都是读过的行：服务器忽略了 offset。整页重复说明它还在从头返回，
+      // 改用一次整队读取兜底；短页重复则说明队尾已到。
+      return rows.length >= DUE_PAGE ? await readWholeDueQueue(token, force) : finishFill(token, force)
+    }
+    // 每块到手立刻重排一次：补全期间下一张卡要能按队列顺序接上，等的不能只有
+    // 首屏那 12 条。只有当队列读满（循环外的 finishFill）才落成权威顺序。
+    applyDueQueue(true)
+    dueQueueComplete = rows.length < DUE_PAGE
+  }
+  return finishFill(token, force)
+}
+// 首屏之后的补全：不阻塞首屏，但必须在队列被评完之前取满，否则会把「还没读到」
+// 当成「今天复习完了」。force 供评分流程使用：此时 reviewSaving 为真但那正是评分
+// 自己在等这份补齐，不算和用户抢通道。
+async function topUpDueQueue(force = false): Promise<void> {
+  if (dueQueueComplete || reviewDisposed) return
+  if (force) return fillDueQueueForRating()
+  if (dueFillPromise) { await dueFillPromise; return }
+  const token = dueLoadToken
+  dueFillPromise = fillDueQueue(token, false).finally(() => { dueFillPromise = null })
+  await dueFillPromise
+}
+// 评分流程等的是「队列确实取满」这个结论：后台补全可能因为评分让出通道而中途
+// 停下，别的补全也可能刚好在起步，所以要一直补到自己这一轮真正跑完；只在确实
+// 推进不了（退出复习、换会话、读取失败）时才收手，把结论交回调用方。
+async function fillDueQueueForRating(): Promise<void> {
+  for (let round = 0; round < 8 && !dueQueueComplete && !reviewDisposed; round += 1) {
+    if (dueFillPromise) { await dueFillPromise; continue }
+    const before = dueQueueOffset
+    const token = dueLoadToken
+    dueFillPromise = fillDueQueue(token, true).finally(() => { dueFillPromise = null })
+    await dueFillPromise
+    if (dueQueueOffset === before) return
+  }
+}
+async function loadDueQueue() {
+  const token = dueLoadToken + 1
+  dueLoadToken = token
+  const result: any = await get(dueQueueUrl(DUE_FIRST_PAGE, 0))
+  if (reviewDisposed || token !== dueLoadToken) return
   applyCounts(result.counts)
   dueQueueStorageKey = `vocab-due-queue:v1:${result.scope_key || (currentBankScope ? 'current' : 'all')}`
-  let saved = null
-  try { saved = JSON.parse(localStorage.getItem(dueQueueStorageKey) || 'null') } catch { /* Rebuild from durable reviews. */ }
-  dueQueue = reconcileDueQueue(saved, result.items || [])
-  persistDueQueue()
-  const words = new Map<string, any>((result.items || []).map((word: any) => [wordKey(word), word]))
-  scheduledWords.value = orderedDueKeys(dueQueue).map(key => words.get(key)).filter(Boolean)
-  if (previous !== reviewRevision(reviewWord.value)) reveal.value = false
+  dueQueueSaved = null
+  try { dueQueueSaved = JSON.parse(localStorage.getItem(dueQueueStorageKey) || 'null') } catch { /* Rebuild from durable reviews. */ }
+  const rows: any[] = Array.isArray(result.items) ? result.items : []
+  const signature = duePageSignature(rows)
+  const review = Number(result.counts?.review ?? -1)
+  // 前台恢复会重读队首：队首逐条一致、到期计数也没变时沿用已经累计的整队，
+  // 既不把列表缩回第一页，也不打断当前卡片。上一轮补全被中途停下（退出复习、
+  // 让位给评分）的情况同样走这里：直接从上次的偏移接着补，而不是把已经涨到
+  // 上百条的队列扔掉、从第 13 条重新读一遍。
+  if (signature === dueHeadSignature && review === dueHeadReview && dueQueueWords.size >= rows.length) {
+    for (const word of rows) dueQueueWords.set(wordKey(word), word)
+    if (!dueQueueComplete) void topUpDueQueue()
+    return
+  }
+  dueHeadSignature = signature
+  dueHeadReview = review
+  dueQueueWords = new Map(rows.map((word: any) => [wordKey(word), word]))
+  dueQueueOffset = rows.length
+  // 短页说明整队都在首屏里；只有确实还有剩余时才继续分块，计数也只按首块落地。
+  dueQueueComplete = rows.length < DUE_FIRST_PAGE
+  // 分页只带回队首，刷新后原来的位置可能已经不存在：回到队首，不能让界面把
+  // 「位置越界」渲染成「今天没有待复习的单词」。
+  if (reviewMode.value && reviewKind.value === 'scheduled' && reviewIndex.value >= rows.length) {
+    reviewIndex.value = 0
+    reveal.value = false
+  }
+  applyDueQueue(!dueQueueComplete)
+  if (!dueQueueComplete) void topUpDueQueue()
 }
 const reviewItems = computed(() => reviewKind.value === 'reinforcement' ? reinforcementWords.value : scheduledWords.value)
 // 浏览列表按页读取：首屏只取够填满视口的行数，再由滚动哨兵继续取下一页；
@@ -426,12 +566,27 @@ async function rate(rating: string) {
       dueQueue = completeDueWord(dueQueue, completedKey)
       persistDueQueue()
       scheduledWords.value = scheduledWords.value.filter(word => wordKey(word) !== completedKey)
+      // 评掉一个词会让它后面所有行整体前移一位：不把偏移收回来，后台补全就会
+      // 跳过紧跟在它后面的那一行（该词留到下一轮才再出现）。
+      dueQueueOffset = Math.max(0, dueQueueOffset - 1)
       reveal.value = false
     }
     reveal.value = false
     if (targetMode === 'reinforcement') {
       // 巩固评分只新增一条复习记录，词条与列表字段不变，不需要重读列表。
       reviewIndex.value += 1
+    }
+    if (targetMode === 'scheduled' && !dueQueueComplete
+      && (!reviewItems.value.length || reviewIndex.value >= reviewItems.value.length)) {
+      // 队列还没取满时先补齐再判定「今天复习完」：分页只把队首带回界面，
+      // 不能把「后台还没读到」当成「没有到期单词」。补齐期间显示骨架卡，
+      // 不让空态那行「今天没有待复习的单词。」错误地闪一下。
+      const loadToken = reviewLoadToken
+      reviewLoading.value = true
+      try { await topUpDueQueue(true) } finally { if (loadToken === reviewLoadToken) reviewLoading.value = false }
+      // 补齐期间用户可能退出复习或直接开新一轮：这份过期的评分不得改动新会话的
+      // 状态（否则新会话刚开就会被判成「已复习完」而立刻关闭）。
+      if (reviewDisposed || loadToken !== reviewLoadToken || !reviewMode.value || reviewKind.value !== 'scheduled') return
     }
     if (!reviewItems.value.length || reviewIndex.value >= reviewItems.value.length) {
       reviewMode.value = false
@@ -625,7 +780,8 @@ function filterCount(key: string) {
       </div>
       <div v-else-if="reviewWord" class="review-card vocabulary-review-card" data-review-fullscreen>
         <header class="review-header">
-          <strong>{{ reviewKind === 'scheduled' ? '每日一背' : '额外巩固' }} <span>{{ String(reviewIndex + 1).padStart(2, '0') }} / {{ String(reviewItems.length).padStart(2, '0') }}</span></strong>
+          <!-- 进度分母：正式复习读整队到期计数（分页只带回队首，用已取到的行数当分母会从 12 一路跳到真实总数）；额外巩固读本轮选中的条数。 -->
+          <strong>{{ reviewKind === 'scheduled' ? '每日一背' : '额外巩固' }} <span>{{ String(reviewIndex + 1).padStart(2, '0') }} / {{ String(reviewKind === 'scheduled' ? displayCount(counts.review) : reviewItems.length).padStart(2, '0') }}</span></strong>
           <button class="review-close" type="button" title="退出复习" aria-label="退出复习" :disabled="reviewSaving" @click="closeReview">{{ landscape ? '退出复习' : '×' }}</button>
         </header>
         <div class="review-content">

@@ -2,13 +2,16 @@ type Word = { normalized_term?: string; term: string; translation_status: string
 export type DueQueue = { version: 1; main: string[]; relearning: string[]; ordinarySinceRelearning: number }
 export const wordKey = (word: Word): string => word.normalized_term || word.term.toLowerCase()
 const time = (value?: string): number => value ? Date.parse(value.includes('T') ? value : value.replace(' ', 'T')+'Z') || 0 : 0
-export function reconcileDueQueue(saved: Partial<DueQueue> | null, words: Word[], now = Date.now()): DueQueue {
+// pending 为真表示 words 只是队首的若干页（分页读取中）：还没取到的已存键必须原样
+// 保留，否则每取一页都会先把没取到的词删掉、再按到期时间把它们排到队尾去。
+export function reconcileDueQueue(saved: Partial<DueQueue> | null, words: Word[], now = Date.now(), pending = false): DueQueue {
   const due = words.filter(w => w.translation_status === 'ready' && (!w.next_review_at || time(w.next_review_at) <= now))
   const byKey = new Map(due.map(w => [wordKey(w),w]))
   const seen = new Set<string>()
   const keep = (keys: unknown, again: boolean): string[] => Array.isArray(keys) ? keys.filter(key => {
     const word = byKey.get(key)
-    if (!word || seen.has(key) || (word.last_result === 'again') !== again) return false
+    if (!word) { if (!pending || seen.has(key)) return false; seen.add(key); return true }
+    if (seen.has(key) || (word.last_result === 'again') !== again) return false
     seen.add(key); return true
   }) : []
   const main = keep(saved?.main,false), relearning = keep(saved?.relearning,true)
@@ -33,4 +36,3 @@ export function completeDueWord(queue: DueQueue, key: string): DueQueue {
   return { ...queue, main:queue.main.filter(k=>k!==key), relearning:queue.relearning.filter(k=>k!==key),
     ordinarySinceRelearning:wasOrdinary ? Math.min(4,queue.ordinarySinceRelearning+1) : 0 }
 }
-

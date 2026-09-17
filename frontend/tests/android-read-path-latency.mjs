@@ -164,20 +164,37 @@ const dueItem = dueRows.items[0]
 // 清单只回传复习界面在详情到达前真正读取的列：卡片抬头（term/phonetic/
 // is_frequent）、队列排序（reconcileDueQueue 读 translation_status/last_result/
 // next_review_at/last_reviewed_at/created_at）与乐观并发身份（review_revision
-// 的五个输入）。lemma/study_status/review_stage/lapse_count 只服务浏览列表、
-// 编辑表单与卡片详情，队列带上它们只是多出来的桥载荷。
+// 的三个输入）。lemma/study_status/review_stage/lapse_count 只服务浏览列表、
+// 编辑表单与卡片详情，updated_at 只服务手工编辑，队列带上它们只是多出来的
+// 桥载荷（实测 903 行队列：updated_at 每行 33B，JSON 数组身份每行 121B）。
 for (const field of ['id', 'term', 'normalized_term', 'phonetic', 'translation_status',
-  'next_review_at', 'last_reviewed_at', 'created_at', 'updated_at', 'last_result',
+  'next_review_at', 'last_reviewed_at', 'created_at', 'last_result',
   'review_count', 'review_revision', 'is_frequent']) {
   assert.deepEqual(dueItem[field], fullItem[field], `到期队列清单缺少或改写了 ${field}`)
 }
-for (const field of ['lemma', 'study_status', 'review_stage', 'lapse_count']) {
+for (const field of ['lemma', 'study_status', 'review_stage', 'lapse_count', 'updated_at']) {
   assert.ok(!(field in dueItem), `到期队列不得回传复习流程不读取的 ${field}`)
 }
 assert.equal(dueItem.review_count, 1)
 assert.ok(dueItem.is_frequent, '到期队列必须把高频词带出来')
 assert.equal(dueRows.counts.total, 2)
 assert.equal(dueRows.counts.review, 1)
+// 卡片身份必须是短标量：清单与详情要能算出同一个值，而 JSON 数组身份在 903
+// 行队列里要 121B/行，是这块界面载荷的第一大头。
+assert.ok(!String(dueItem.review_revision).startsWith('['), '卡片身份必须是标量而不是 JSON 数组')
+assert.ok(String(dueItem.review_revision).length <= 64, `卡片身份必须保持短标量（${dueItem.review_revision}）`)
+// 分页只裁清单行，不裁计数：复习进度分母与“待背 N 词”都读 counts.review，
+// 因此分页后它们必须仍覆盖整个到期集合。
+const pagedRows = await vocabulary.listVocabulary(new URLSearchParams('status=all&limit=1&offset=0&projection=queue'))
+assert.equal(pagedRows.items.length, 1, '清单必须按 limit 分页')
+assert.deepEqual({ ...pagedRows.counts }, { ...dueRows.counts }, '分页不得改变计数：计数覆盖整个集合')
+// 分母读的是计数，不是已经取到手的行数：分页之后卡片抬头若拿 reviewItems.length
+// 当分母，会从「01 / 12」随分块补齐一路跳到真实总数，评分让出补全通道时还会停在中间值。
+const vocabularyView = readFileSync(new URL('../src/views/VocabularyView.vue', import.meta.url), 'utf8')
+assert.ok(vocabularyView.includes("String(reviewKind === 'scheduled' ? displayCount(counts.review) : reviewItems.length)"),
+  '复习进度分母必须读 counts.review，而不是已取到的行数')
+const secondPage = await vocabulary.listVocabulary(new URLSearchParams('status=all&limit=1&offset=1&projection=queue'))
+assert.equal(secondPage.items[0].id, 12, '清单必须按 offset 续读下一页')
 for (const sql of queueCalls) {
   assert.ok(!/SELECT \*/i.test(sql), `到期队列不得整行读取：${sql}`)
   assert.ok(!/FROM vocabulary_occurrences/i.test(sql), `到期队列不得为整队拉取出现记录：${sql}`)

@@ -9,7 +9,11 @@ const source = read('views/VocabularyView.vue').split('<script setup lang="ts">'
 const ast = ts.createSourceFile('view.ts', source, ts.ScriptTarget.Latest, true)
 const names = ['persistDueQueue','reviewRevision','refreshDueQueue','loadDueQueue','refreshReviewOnForeground','rate',
   'beginReview','startReview','startReinforcement','loadReinforcement','snapshotOf','refreshReviewSnapshot','cacheReviewDetail','reviewDetailOf','loadReviewDetail','ensureReviewDetails','applyCounts','displayCount']
-const functions = ast.statements.filter(s => ts.isFunctionDeclaration(s) && names.includes(s.name?.text)).map(s => s.getText(ast)).join('\n').replaceAll('\\n','\n')
+const queueNames = ['dueQueueUrl','duePageSignature','setScheduledWords','applyDueQueue','dueFillWanted','finishFill',
+  'readWholeDueQueue','fillDueQueue','topUpDueQueue','fillDueQueueForRating']
+// 直接取源码文本：早期版本在这里做了一次 '\\n' -> 换行的二次反转义，会把函数体里
+// 合法的字面量 '\\n'（例如 duePageSignature 的 join 分隔符）也拆成真换行而语法错误。
+const functions = ast.statements.filter(s => ts.isFunctionDeclaration(s) && [...names,...queueNames].includes(s.name?.text)).map(s => s.getText(ast)).join('\n')
 const word = id => ({id,term:'word'+id,normalized_term:'word'+id,translation_status:'ready',created_at:'2020-01-01'})
 const value = v => ({value:v})
 function setup() {
@@ -22,14 +26,21 @@ function setup() {
   ctx.reviewItems = {get value(){return ctx.reviewKind.value==='reinforcement'?ctx.reinforcementWords.value:ctx.scheduledWords.value}}
   ctx.reviewWord = {get value(){return ctx.reviewItems.value[ctx.reviewIndex.value]}}
   ctx.words = [word(1),word(2)]; ctx.posts = []; ctx.getCount = 0; ctx.getArgs = []; ctx.loadCalls = 0
+  ctx.counts = {}
   ctx.details = {1:{id:1,common_meaning:'释义-1',latest_sentence:'原句-1'},2:{id:2,common_meaning:'释义-2',latest_sentence:'原句-2'}}
+  // 列表读必须按 limit/offset 切片：分页是本次改动的前提，桩要是仍整队回包，
+  // 测试就永远走不进「分块补全」那条路。
   ctx.get = async path=>{ ctx.getCount++; ctx.getArgs.push(path)
     const detail = /^\/vocabulary\/(\d+)$/.exec(path)
     if (detail) return { ...ctx.details[Number(detail[1])] }
-    return { items:ctx.words, counts:{}, scope_key:'all' } }
+    const query = new URLSearchParams(path.split('?')[1] || '')
+    const limit = query.get('limit') || 'all'
+    const offset = Number(query.get('offset') || 0)
+    return { items: limit === 'all' ? [...ctx.words] : ctx.words.slice(offset, offset + Number(limit)),
+      counts:{...ctx.counts}, scope_key:'all' } }
   ctx.post = async(path)=>{ctx.posts.push(path);ctx.words=ctx.words.filter(w=>path!== '/vocabulary/'+w.id+'/review')}
   vm.createContext(ctx)
-  vm.runInContext(compile('let dueRefreshPromise: Promise<void>|null=null; let reviewDisposed=false; let dueQueueStorageKey="";let dueQueue=reconcileDueQueue(null,[]);let reviewLoadToken=0;let reviewSessionToken=0;let reviewDetailPending=new Set();\n'.replaceAll('\\n','\n')+functions+'\nthis.api={rate,refreshDueQueue,refreshReviewOnForeground,startReinforcement,loadReviewDetail,ensureReviewDetails,snapshotOf,refreshReviewSnapshot,cacheReviewDetail,loadDueQueue,applyCounts,displayCount,dispose:()=>{reviewDisposed=true}};'.replaceAll('\\n','\n')),ctx)
+  vm.runInContext(compile('let dueRefreshPromise: Promise<void>|null=null; let reviewDisposed=false; let dueQueueStorageKey="";let dueQueue=reconcileDueQueue(null,[]);let reviewLoadToken=0;let reviewSessionToken=0;let reviewDetailPending=new Set();const DUE_FIRST_PAGE=12;const DUE_PAGE=150;let dueQueueWords=new Map();let dueQueueOffset=0;let dueQueueComplete=false;let dueQueueSaved=null;let dueLoadToken=0;let dueFillPromise=null;let dueHeadSignature="";let dueHeadReview=-1;\n'.replaceAll('\\n','\n')+functions+'\nthis.api={rate,refreshDueQueue,refreshReviewOnForeground,startReinforcement,loadReviewDetail,ensureReviewDetails,snapshotOf,refreshReviewSnapshot,cacheReviewDetail,loadDueQueue,applyCounts,displayCount,topUpDueQueue,dispose:()=>{reviewDisposed=true}};'.replaceAll('\\n','\n')),ctx)
   return ctx
 }
 {
@@ -96,14 +107,44 @@ function setup() {
  await c.api.rate('hard');assert.equal(c.reviewWord.value.id,1);assert.equal(c.reviewSaving.value,false);assert.match(c.error.value,/refresh failed/)
 }
 
-// 队列读清单：一次桥调用，卡片不含展开字段（释义/原句），详情按需再读。
+// 队列读清单：首屏只读一小页，卡片不含展开字段（释义/原句），详情按需再读。
 {
  const c=setup();await c.api.loadDueQueue()
- assert.equal(c.getArgs[0],'/vocabulary?status=review&limit=all&projection=queue')
+ assert.equal(c.getArgs[0],'/vocabulary?status=review&limit=12&offset=0&projection=queue')
  assert.equal(c.getCount,1);assert.equal(c.scheduledWords.value.length,2)
  const snap=c.api.snapshotOf(c.scheduledWords.value[0])
  assert.equal(snap.term,'word1');assert.equal('common_meaning' in snap,false);assert.equal('latest_sentence' in snap,false)
  assert.equal(c.reviewSnapshot.value,null)
+}
+// 首屏外加页：13 条到期队列不能停在首屏 12 条，也不能把整队一次过桥。
+{
+ const c=setup();c.words=[...Array(13)].map((_,i)=>word(i+1));c.counts={review:13}
+ // 评分期间后台补全让出通道，这条断言正是「不和评分抢同一条连接」。
+ c.reviewSaving.value=true
+ await c.api.loadDueQueue()
+ assert.equal(c.getArgs.length,1)
+ assert.equal(c.scheduledWords.value.length,12)
+ assert.equal(c.counts.value.review,13)
+ await c.api.topUpDueQueue(true)
+ assert.equal(c.getArgs[1],'/vocabulary?status=review&limit=150&offset=12&projection=queue')
+ assert.equal(c.scheduledWords.value.length,13)
+ assert.ok(c.scheduledWords.value.some(w=>w.id===13))
+ // 分块补全不能漏行也不能重复：首屏 12 条 + 后一页 1 条正好是 1..13 的一份排列。
+ const ids=c.scheduledWords.value.map(w=>w.id)
+ assert.deepEqual([...ids].sort((a,b)=>a-b),[...Array(13)].map((_,i)=>i+1))
+ assert.equal(new Set(ids).size,13)
+}
+// 前台恢复与重进复习不会把已经补满的队列缩回首屏：队首与到期计数没变就沿用整队。
+{
+ const c=setup();c.words=[...Array(13)].map((_,i)=>word(i+1));c.counts={review:13}
+ await c.api.loadDueQueue();await c.api.topUpDueQueue()
+ assert.equal(c.scheduledWords.value.length,13)
+ c.getCount=0;c.getArgs=[]
+ await c.api.loadDueQueue();await c.api.topUpDueQueue()
+ assert.equal(c.getArgs[0],'/vocabulary?status=review&limit=12&offset=0&projection=queue')
+ assert.equal(c.getCount,1)
+ assert.equal(c.scheduledWords.value.length,13)
+ assert.equal(c.reviewMode.value,true)
 }
 // 当前卡优先预取下一张：翻卡只付单条详情，不再重读整队。
 {
@@ -193,3 +234,4 @@ function setup() {
 console.log('PASS due review: deleted/synced cards, failed save, overlapping refresh, duplicate rating, foreground and disposal')
 console.log('PASS counts placeholder: unknown counts never render as zero')
 console.log('PASS queue contract: list-only payload, on-demand detail, detail failure isolation, reinforcement probe')
+console.log('PASS due queue paging: first page only, chunked top-up without losing rows, foreground reuse')

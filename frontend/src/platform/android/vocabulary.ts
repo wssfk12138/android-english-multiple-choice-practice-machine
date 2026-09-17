@@ -148,14 +148,19 @@ async function serializeEntry(id: number): Promise<JsonRecord> {
   return serializeDetails(entry)
 }
 
+// 卡片身份是乐观并发的契约：到期队列清单、评分前的状态读取与单卡详情三处都要
+// 算出同一个值，所以身份只能用这三处都读得到的列。身份同时必须是短标量——
+// 903 行到期队列里 JSON 数组身份每行 121 B，是这块界面载荷的第一大头，而它当时
+// 依赖的 updated_at 只是同步与编辑的记账列（评分链路从不读回），留在身份里既贵，
+// 又会让裁掉该列的清单与状态读取算出两个身份，评分被静默判成过期。
 function reviewRevision(entry: JsonRecord): string {
-  return JSON.stringify([entry.normalized_term, entry.last_reviewed_at, entry.next_review_at, entry.updated_at, entry.review_count || 0])
+  return `${Number(entry.review_count || 0)}|${entry.last_reviewed_at || ''}|${entry.next_review_at || ''}`
 }
 
-// 评分与并发校验只需要更新后的卡片身份；读整行会把同义词、例句、语境键
-// 一起搬过桥，而复习界面从不读取这些字段。
+// 评分与并发校验只需要更新后的卡片身份与回执字段；读整行会把同义词、例句、
+// 语境键一起搬过桥，而复习界面从不读取这些字段。
 const reviewStateColumns = [
-  'id', 'normalized_term', 'last_reviewed_at', 'next_review_at', 'updated_at',
+  'id', 'last_reviewed_at', 'next_review_at',
   'study_status', 'review_stage', 'lapse_count',
   '(SELECT COUNT(*) FROM vocabulary_reviews WHERE entry_id=vocabulary_entries.id) AS review_count',
 ].join(', ')
@@ -276,15 +281,16 @@ export async function addVocabulary(body: JsonRecord): Promise<JsonRecord> {
 // 同义词、记忆提示、出现记录）改为卡片成为当前卡时按需单条读取。
 // 实测（155 词到期队列）：28 列整行 + 整队出现记录 228,680 B，清单 63,045 B，
 // 单张卡片详情 1,430 B——裁剪整行只能省 11%，裁剪到清单才是量级差别。
-// reviewRevision 依赖的 normalized_term/last_reviewed_at/next_review_at/
-// updated_at 与 review_count 子查询全部保留，清单与详情给出同一份卡片身份。
+// 卡片身份只由 review_count/last_reviewed_at/next_review_at 算出，因为只有这三个列
+// 在清单、评分前的状态读取（reviewStateColumns）与单卡详情里同时存在；updated_at 只服务
+// 同步与编辑记账，评分链路从不读回，留在清单里纯是桥载荷（903 行到期队列实测 33 B/行）。
 // 实测（155 词到期队列，平板无线调试）：再裁掉复习流程从不读取的 lemma/
 // study_status/review_stage/lapse_count 后，载荷 62,478 B → 50,373 B、
 // 同一条语句 96.4 ms → 68.3 ms。这四个列只服务浏览列表、编辑表单与卡片详情。
 const queueEntryColumns = [
   'id', 'term', 'normalized_term', 'phonetic',
   'translation_status', 'last_result',
-  'next_review_at', 'last_reviewed_at', 'created_at', 'updated_at',
+  'next_review_at', 'last_reviewed_at', 'created_at',
 ].join(', ')
 
 export async function listVocabulary(searchParams: URLSearchParams): Promise<JsonRecord> {
@@ -323,14 +329,24 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
   const itemColumns = summary
     ? 'id, term, lemma, common_meaning, contextual_meaning, contextual_occurrence_key, part_of_speech, encounter_count, study_status, translation_status'
     : queue ? queueEntryColumns : '*'
+  // 到期队列（status=review）在 SQL 侧按客户端 reconcileDueQueue 的排序键排好：
+  // 队列要分页（limit/offset）取队首，只有两侧顺序逐项一致，第一页才是真正的
+  // 队首那一页，续读页也不会跳词。键依次是：未复习的在前、上次复习时间、到期
+  // 时间（缺省回落到创建时间）、词形键（与 wordKey 的 normalized_term 口径一致）。
+  // 浏览顺序（其余筛选）保持原样，它服务的是单词本列表界面。
+  const orderBy = status === 'review'
+    ? `CASE WHEN last_reviewed_at IS NULL OR last_reviewed_at = '' THEN 0 ELSE 1 END,
+       datetime(NULLIF(last_reviewed_at, '')),
+       datetime(COALESCE(NULLIF(next_review_at, ''), NULLIF(created_at, ''))),
+       lower(COALESCE(NULLIF(normalized_term, ''), term))`
+    : `CASE WHEN datetime(last_seen_at) >= datetime('now', '-7 days') THEN 0 ELSE 1 END,
+       is_frequent DESC, encounter_count DESC, last_seen_at DESC`
   const items = await rows<JsonRecord>(
     `SELECT ${itemColumns}${summary ? '' : ', (SELECT COUNT(*) FROM vocabulary_reviews WHERE entry_id=vocabulary_entries.id) AS review_count'},
        CASE WHEN encounter_count >= 2 OR manually_frequent = 1 THEN 1 ELSE 0 END AS is_frequent
      FROM vocabulary_entries
      WHERE ${conditions.join(' AND ')}
-     ORDER BY
-       CASE WHEN datetime(last_seen_at) >= datetime('now', '-7 days') THEN 0 ELSE 1 END,
-       is_frequent DESC, encounter_count DESC, last_seen_at DESC
+     ORDER BY ${orderBy}
      ${limitAll ? '' : 'LIMIT ? OFFSET ?'}`,
     limitAll ? values : [...values, limit, offset],
   )
