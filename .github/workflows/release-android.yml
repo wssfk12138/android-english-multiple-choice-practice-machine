@@ -62,6 +62,7 @@ jobs:
           pnpm run test:all -- --standalone
           pnpm run build
           pnpm exec cap sync android
+      - uses: android-actions/setup-android@v3
       - name: Prepare Android SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - name: Restore release signing
