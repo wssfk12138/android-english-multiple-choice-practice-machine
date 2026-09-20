@@ -59,7 +59,7 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm exec playwright install --with-deps chromium
-          pnpm run test:all
+          pnpm run test:all -- --standalone
           pnpm run build
           pnpm exec cap sync android
       - name: Prepare Android SDK

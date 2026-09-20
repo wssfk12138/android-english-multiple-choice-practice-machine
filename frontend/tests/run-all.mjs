@@ -44,12 +44,20 @@ if (!env.PLAYWRIGHT_MODULE) {
 // forwards the literal `--` separator, so strip that too.
 const rawArgs = process.argv.slice(2)
 const strict = rawArgs.includes('--strict') || process.env.PLAYWRIGHT_STRICT === '1'
-const only = rawArgs.filter(a => a !== '--strict' && a !== '--')
+// The external test starts an unpublished sibling Windows backend. Keep it
+// in the default full gate; standalone CI reports it outside its scope.
+const standalone = rawArgs.includes('--standalone')
+const external = new Set(['lan-sync-candidate-integration.mjs'])
+const only = rawArgs.filter(a => !['--strict', '--standalone', '--'].includes(a))
 const tests = readdirSync(here).filter(f => f.endsWith('.mjs') && f !== 'run-all.mjs').sort()
 const rows = []
 const startedAt = Date.now()
 for (const test of tests) {
   if (only.length && !only.some(pattern => test.includes(pattern))) continue
+  if (standalone && external.has(test)) {
+    rows.push({ test, status: 'EXTERNAL', note: 'separate Windows candidate checkout required; not tested by standalone gate', ms: 0 })
+    continue
+  }
   if (prereq.has(test) && !env.PLAYWRIGHT_MODULE) {
     rows.push({ test, status: 'PREREQ', note: 'needs PLAYWRIGHT_MODULE', ms: 0 })
     continue
@@ -64,6 +72,7 @@ for (const test of tests) {
   const result = spawnSync(runner[0], [...runner.slice(1)], { cwd: here, encoding: 'utf8', timeout: 300000, env })
   const ms = Date.now() - t0
   const failed = result.status !== 0
+  if (failed) process.stderr.write(String(result.stderr || result.stdout || result.error || 'No child output'))
   rows.push({
     test,
     status: failed ? 'FAIL' : 'PASS',
@@ -77,6 +86,8 @@ for (const r of rows) console.log(`${r.status.padEnd(7)} ${(r.ms / 1000).toFixed
 const fail = rows.filter(r => r.status === 'FAIL').length
 const pass = rows.filter(r => r.status === 'PASS').length
 const pre = rows.filter(r => r.status === 'PREREQ').length
+const ext = rows.filter(r => r.status === 'EXTERNAL').length
+if (ext) console.log('External integration tests excluded from standalone scope: ' + ext)
 const totalSec = ((Date.now() - startedAt) / 1000).toFixed(1)
 console.log(`==== ${pass} passed, ${fail} failed, ${pre} prereq-skipped, ${rows.length} total, ${totalSec}s${strict ? ' (strict)' : ''}`)
 process.exit(fail || (strict && pre) || rows.length === 0 ? 1 : 0)

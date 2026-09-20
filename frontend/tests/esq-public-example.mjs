@@ -17,8 +17,8 @@ async function addDirectory(directory, prefix = '') {
     const name = prefix + entry.name
     const url = new URL(entry.name + (entry.isDirectory() ? '/' : ''), directory)
     if (entry.isDirectory()) await addDirectory(url, name + '/')
-    else zip.file(name, await readFile(url), {
-      date: new Date(2026, 0, 1), createFolders: false,
+    else zip.file(name, (await readFile(url, 'utf8')).replace(/\r\n/g, '\n'), {
+      date: new Date('2026-01-01T00:00:00Z'), createFolders: false,
     })
   }
 }
