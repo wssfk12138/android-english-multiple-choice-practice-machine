@@ -104,8 +104,8 @@ assert.ok(
   'profile indexes must be created only after legacy profile columns are added',
 )
 
-const learningHistoryMigration = source.indexOf('await runLearningHistoryRebindV1(db)')
-const learningHistoryV3Migration = source.indexOf('await runLearningHistoryRebindV3(db)', learningHistoryMigration)
+const learningHistoryMigration = source.indexOf('runLearningHistoryRebindV1(db, appliedProbe)')
+const learningHistoryV3Migration = source.indexOf('runLearningHistoryRebindV3(db, appliedProbe)', learningHistoryMigration)
 const learningHistoryDriftRepair = source.indexOf('await repairLearningHistoryRebindDrift(db)', learningHistoryV3Migration)
 assert.ok(learningHistoryV3Migration > learningHistoryMigration,
   'v3 history repair must run after the earlier startup migrations')
@@ -134,7 +134,7 @@ assert.ok(
 const main = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8')
 const mountApp = main.indexOf("createApp(App).use(router).mount('#app')")
 const startPreparation = main.indexOf('void runAndroidStartupPreparation()')
-const startupReadyEvent = main.indexOf("window.dispatchEvent(new CustomEvent('android-startup-prepared'))", startPreparation)
+const startupReadyEvent = main.indexOf("window.dispatchEvent(new CustomEvent('android-startup-prepared',", startPreparation)
 assert.ok(
   mountApp >= 0 && startPreparation > mountApp && startupReadyEvent > startPreparation,
   'the Vue shell must mount before Android database and bundled-bank preparation starts',

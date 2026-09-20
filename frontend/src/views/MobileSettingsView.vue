@@ -1,98 +1,108 @@
 <script setup lang="ts">
-import { BookOpen, ChevronDown, ExternalLink, Eye } from 'lucide-vue-next'
-import { onMounted, ref } from 'vue'
+import {
+  BookOpen,
+  CloudUpload,
+  Database,
+  Download,
+  ExternalLink,
+  Eye,
+  Import,
+  Moon,
+  NotebookText,
+  ScrollText,
+  Settings2,
+  Trash2,
+} from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { useAndroidLandscape } from '../composables/useAndroidLandscape'
+import { useThemeState } from '../composables/useThemeState'
+import '../settings-hub.css'
+import {
+  VOCAB_DISPLAY_OPTIONS,
+  loadVocabDisplayConfig,
+} from '../services/vocabularyDisplayConfig'
 
-const dark = ref(false)
-const vocabDisplayOpen = ref(false)
-const vocabularyDisplayOptions = [
-  ['common_meaning', '常用释义'],
-  ['contextual', '语境释义'],
-  ['sentence', '真题例句'],
-  ['memory_hint', '记忆提示'],
-  ['synonyms', '同义词辨析'],
-  ['antonyms', '反义词辨析'],
-  ['similar_forms', '形近词辨析'],
-] as const
-const vocabDisplayConfig = ref<Record<string, boolean>>({
-  common_meaning: true,
-  contextual: true,
-  sentence: true,
-  memory_hint: false,
-  synonyms: false,
-  antonyms: false,
-  similar_forms: false,
-})
-
-function applyTheme() {
+const landscape = useAndroidLandscape()
+const dark = useThemeState()
+function toggleTheme() {
+  dark.value = !document.documentElement.classList.contains('dark')
   document.documentElement.classList.toggle('dark', dark.value)
   localStorage.setItem('linjian-theme', dark.value ? 'dark' : 'light')
 }
-function toggleTheme() {
-  dark.value = !dark.value
-  applyTheme()
-}
+// 每个设置入口对应独立页面。
+const groups = [
+  {
+    title: '题库与数据',
+    items: [
+      { label: '导入题库', to: '/imports', icon: Import },
+      { label: '回收站', to: '/trash', icon: Trash2 },
+    ],
+  },
+  {
+    title: 'AI 与模型',
+    items: [
+      { label: '模型与 API', to: '/settings', icon: Settings2 },
+    ],
+  },
+  {
+    title: '设备与维护',
+    items: [
+      { label: '设备同步', to: '/android-sync', icon: CloudUpload },
+      { label: '更新与远程题库', to: '/android-updates', icon: Download },
+      { label: '诊断日志', to: '/android-diagnostics', icon: ScrollText },
+    ],
+  },
+] as const
 
-function loadVocabularyDisplayConfig() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('vocab-display-config') || '{}')
-    if (saved && typeof saved === 'object') {
-      vocabDisplayConfig.value = { ...vocabDisplayConfig.value, ...saved }
-    }
-  } catch {
-    // Keep the defaults when an older local value is invalid.
-  }
-}
-
-function saveVocabularyDisplayConfig() {
-  localStorage.setItem('vocab-display-config', JSON.stringify(vocabDisplayConfig.value))
-}
-
-onMounted(() => {
-  dark.value = document.documentElement.classList.contains('dark')
-  loadVocabularyDisplayConfig()
-})
+const vocabDisplaySummary = computed(() => '已开启 ' + VOCAB_DISPLAY_OPTIONS.filter(option => loadVocabDisplayConfig()[option.key]).length + ' 项')
 </script>
 
 <template>
   <div class="page mobile-hub settings-hub">
     <div class="page-head compact-page-head">
-      <div class="page-title-row"><img class="page-title-icon" src="/assets/icons/settings.png" alt=""><h1>设置</h1></div>
+      <div class="page-title-row"><span class="page-title-icon-lucide"><Settings2 :size="24" /></span><h1>设置</h1></div>
     </div>
-    <section class="settings-theme-row card">
-      <img src="/assets/icons/theme.png" alt="">
-      <span><strong>外观</strong><small>{{ dark ? '深色模式已开启' : '浅色模式已开启' }}</small></span>
-      <button class="button secondary compact" type="button" @click="toggleTheme">切换</button>
-    </section>
-    <section class="card settings-vocab-display">
-      <button class="settings-vocab-display-toggle" type="button" :aria-expanded="vocabDisplayOpen" @click="vocabDisplayOpen=!vocabDisplayOpen">
-        <span class="settings-vocab-display-icon"><Eye :size="20" /></span>
-        <span><strong>单词本显示</strong><small>选择竖屏单词详情默认展开的内容</small></span>
-        <ChevronDown :size="19" :class="{ open: vocabDisplayOpen }" />
-      </button>
-      <div v-if="vocabDisplayOpen" class="settings-vocab-display-options">
-        <label v-for="[key, label] in vocabularyDisplayOptions" :key="key">
-          <input v-model="vocabDisplayConfig[key]" type="checkbox" @change="saveVocabularyDisplayConfig">
-          <span>{{ label }}</span>
-        </label>
-        <small>仅影响 Android 竖屏单词本，横屏与电脑端保持原有显示。</small>
+
+    <section class="settings-hub-group" aria-labelledby="hub-appearance-title">
+      <h2 id="hub-appearance-title" class="settings-hub-group-title">外观与显示</h2>
+      <div class="settings-hub-rows">
+        <div v-if="landscape" class="settings-hub-row"><span class="settings-hub-row-icon"><Moon :size="19" /></span><strong>深色模式</strong><button class="settings-theme-switch" type="button" role="switch" :aria-checked="dark" aria-label="深色模式" @click="toggleTheme"><span /></button></div>
+        <RouterLink v-else class="settings-hub-row link" to="/android-appearance"><span class="settings-hub-row-icon"><Moon :size="19" /></span><span><strong>外观与显示</strong><small>浅色或深色主题</small></span><b class="settings-hub-chevron">›</b></RouterLink>
+        <RouterLink class="settings-hub-row link" to="/android-vocabulary-display">
+            <span class="settings-hub-row-icon"><Eye :size="19" /></span>
+            <span class="settings-hub-row-copy"><strong>{{ landscape ? '单词本设置' : '单词显示' }}</strong><small>{{ vocabDisplaySummary }}</small></span>
+            <b class="settings-hub-chevron" aria-hidden="true">›</b>
+        </RouterLink>
       </div>
     </section>
-    <div class="mobile-hub-list settings-hub-list">
-      <RouterLink class="card mobile-hub-item" to="/library"><img src="/assets/icons/paper.png" alt=""><span><strong>题库管理</strong><small>查看试卷、批量移动或移入回收站。</small></span><b aria-hidden="true">›</b></RouterLink>
-      <RouterLink class="card mobile-hub-item" to="/imports"><img src="/assets/icons/import.png" alt=""><span><strong>导入题库</strong><small>导入 Word、PDF 或 ESQ 题库包。</small></span><b aria-hidden="true">›</b></RouterLink>
-      <RouterLink class="card mobile-hub-item" to="/settings"><img src="/assets/icons/settings.png" alt=""><span><strong>模型与 API</strong><small>配置服务商、可用模型与学习辅助参数。</small></span><b aria-hidden="true">›</b></RouterLink>
-      <RouterLink class="card mobile-hub-item" to="/android-updates"><img src="/assets/icons/update.png" alt=""><span><strong>更新与日志</strong><small>检查内测更新、查看或发送脱敏日志。</small></span><b aria-hidden="true">›</b></RouterLink>
-      <RouterLink class="card mobile-hub-item" to="/trash"><img src="/assets/icons/diagnostics.png" alt=""><span><strong>回收站</strong><small>七天内恢复删除的试卷与题库配置。</small></span><b aria-hidden="true">›</b></RouterLink>
-    </div>
-    <section class="settings-about card" aria-labelledby="mobile-settings-about-title">
-      <div class="settings-about-heading">
-        <span class="settings-about-icon"><BookOpen :size="20" /></span>
-        <div><h2 id="mobile-settings-about-title">帮助与关于</h2><p>离线查看功能说明与常见问题，遇到问题可直接反馈。</p></div>
-      </div>
-      <div class="settings-about-actions">
-        <RouterLink class="button secondary" to="/help"><BookOpen :size="16" />使用帮助</RouterLink>
-        <a class="button ghost" href="https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&amp;h_src=YXBwX3NoYXJl&amp;link_id=0ad4723fda0b" target="_blank" rel="noopener noreferrer"><ExternalLink :size="16" />问题反馈</a>
+
+    <section v-for="group in groups" :key="group.title" class="settings-hub-group" :aria-labelledby="`hub-${group.title}`">
+      <h2 :id="`hub-${group.title}`" class="settings-hub-group-title">{{ group.title }}</h2>
+      <div class="settings-hub-rows">
+        <RouterLink v-for="item in group.items" :key="item.label" class="settings-hub-row link" :to="item.to">
+          <span class="settings-hub-row-icon"><component :is="item.icon" :size="19" /></span>
+          <span><strong>{{ item.label }}</strong></span>
+          <b class="settings-hub-chevron" aria-hidden="true">›</b>
+        </RouterLink>
       </div>
     </section>
+
+    <section class="settings-hub-group" aria-labelledby="hub-help">
+      <h2 id="hub-help" class="settings-hub-group-title">帮助</h2>
+      <div class="settings-hub-rows">
+        <RouterLink class="settings-hub-row link" to="/help">
+          <span class="settings-hub-row-icon"><BookOpen :size="19" /></span>
+          <span><strong>使用帮助</strong></span>
+          <b class="settings-hub-chevron" aria-hidden="true">›</b>
+        </RouterLink>
+        <a class="settings-hub-row link" href="https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&amp;h_src=YXBwX3NoYXJl&amp;link_id=0ad4723fda0b" target="_blank" rel="noopener noreferrer">
+          <span class="settings-hub-row-icon"><NotebookText :size="19" /></span>
+          <span><strong>问题反馈</strong></span>
+          <ExternalLink class="settings-hub-chevron" :size="17" />
+        </a>
+      </div>
+    </section>
+
+    <div class="settings-hub-brand" aria-hidden="true"><Database :size="15" />学习数据保存在本机，可随时在设备同步中备份</div>
   </div>
 </template>

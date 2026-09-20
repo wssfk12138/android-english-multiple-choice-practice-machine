@@ -1,16 +1,16 @@
 import { CapacitorHttp } from '@capacitor/core'
+import { decodeJsonResponse, JsonResponseError, remoteRequestFailure } from './json-response.ts'
 import type { QuestionBankRemoteCatalog, QuestionBankRemotePackage, UpdateManifest } from './types'
 import { MAX_ESQ_BYTES } from './question-bank-limits.ts'
 
-const MAX_CATALOG_BYTES = 2 * 1024 * 1024
 const MAX_CATALOG_PACKAGES = 500
 const PACKAGE_ID_RE = /^[a-z0-9][a-z0-9._-]{0,79}$/
 const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?$/
 const SHA256_RE = /^[a-f0-9]{64}$/i
 
-export class UpdateManifestError extends Error {
-  constructor(message: string) {
-    super(message)
+export class UpdateManifestError extends JsonResponseError {
+  constructor(message: string, code = 'REMOTE_JSON_SCHEMA') {
+    super(message, code)
     this.name = 'UpdateManifestError'
   }
 }
@@ -37,11 +37,11 @@ export async function fetchUpdateManifest(url: string): Promise<UpdateManifest> 
     headers: { Accept: 'application/json' },
     connectTimeout: 10000,
     readTimeout: 30000,
-  })
+  }).catch(remoteRequestFailure)
   if (response.status < 200 || response.status >= 300) {
-    throw new UpdateManifestError(`更新清单请求失败：${response.status}`)
+    throw new UpdateManifestError(`更新清单请求失败：${response.status}`, `HTTP_${response.status}`)
   }
-  const data: unknown = response.data
+  const data: unknown = decodeJsonResponse(response.data, '更新清单')
   assertManifest(data)
   return data
 }
@@ -61,8 +61,8 @@ export function validateQuestionBankRemoteUrl(raw: unknown, label = '远程地�
       || (ipv4[0] === 169 && ipv4[1] === 254)
       || (ipv4[0] === 172 && ipv4[1] >= 16 && ipv4[1] <= 31)
       || (ipv4[0] === 192 && ipv4[1] === 168))
-  const privateIpv6 = hostname === '::' || hostname === '::1' || hostname.startsWith('fc')
-    || hostname.startsWith('fd') || /^fe[89ab]/.test(hostname)
+  const privateIpv6 = hostname.includes(':') && (hostname === '::' || hostname === '::1'
+    || hostname.startsWith('fc') || hostname.startsWith('fd') || /^fe[89ab]/.test(hostname))
   if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443')) {
     throw new UpdateManifestError(`${label}必须使用不含凭据的 HTTPS URL`)
   }
@@ -123,14 +123,12 @@ export async function fetchQuestionBankCatalog(url: string): Promise<QuestionBan
     headers: { Accept: 'application/json' },
     connectTimeout: 10000,
     readTimeout: 30000,
-  })
+  }).catch(remoteRequestFailure)
   if (response.status < 200 || response.status >= 300) {
-    throw new UpdateManifestError(`题库目录请求失败：${response.status}`)
+    throw new UpdateManifestError(`题库目录请求失败：${response.status}`, `HTTP_${response.status}`)
   }
   validateQuestionBankRemoteUrl(response.url, '题库目录最终响应地址')
-  const data: unknown = response.data
-  const byteLength = new TextEncoder().encode(JSON.stringify(data)).byteLength
-  if (byteLength > MAX_CATALOG_BYTES) throw new UpdateManifestError('题库目录超过 2 MiB 大小上限')
+  const data: unknown = decodeJsonResponse(response.data, '题库目录')
   return validateQuestionBankCatalog(data)
 }
 
@@ -153,13 +151,16 @@ export async function fetchQuestionBankCatalogFromSources(
   const sources = [...new Set(urls.map(url => url.trim()).filter(Boolean))]
   if (!sources.length) throw new UpdateManifestError('没有可用的题库目录地址')
   const failures: string[] = []
+  const codes: string[] = []
   for (let index = 0; index < sources.length; index += 1) {
     try {
       const catalog = await fetchQuestionBankCatalog(sources[index])
       return { ...catalog, sourceUrl: sources[index], checkedSources: index + 1 }
     } catch (error) {
       failures.push(String(error instanceof Error ? error.message : error))
+      codes.push(error instanceof JsonResponseError ? error.code : 'REMOTE_NETWORK')
     }
   }
-  throw new UpdateManifestError(`题库目录均不可用：${failures.join('；')}`)
+  throw new UpdateManifestError(`题库目录均不可用：${failures.join('；')}`,
+    new Set(codes).size === 1 ? codes[0] : 'REMOTE_SOURCES_FAILED')
 }

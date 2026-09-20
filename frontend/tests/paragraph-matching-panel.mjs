@@ -18,13 +18,15 @@ assert.ok(practice.includes('@click="select(question, option.stable_key)"'))
 assert.ok(!practice.includes('先阅读段落，再为每道题选择对应字母'))
 assert.ok(styles.includes('html[data-platform="android"] .paragraph-candidate-bank'))
 assert.ok(styles.includes('html[data-platform="android"] .paragraph-candidate-reference'))
-assert.ok(styles.includes('grid-template-columns: auto minmax(0, 1fr)'))
+assert.ok(styles.replace(/\s+/g, '').includes('grid-template-columns:autominmax(0,1fr)'))
 assert.ok(styles.includes('.paragraph-candidate-bank ~ .question-card.compact-match'))
 const partBTitleRules = styles.match(/html\[data-platform="android"\]\[data-orientation="portrait"\] \.portrait-practice-card\.part-b strong \{[^}]+\}/g) || []
 assert.equal(partBTitleRules.length, 1)
 assert.match(partBTitleRules[0], /white-space:\s*normal/)
 assert.match(partBTitleRules[0], /word-break:\s*keep-all/)
-assert.match(partBTitleRules[0], /min-width:\s*0/)
+// The title is inside the shrinking grid cell; min-width belongs to that cell.
+assert.match(styles, /\.portrait-practice-card span\s*\{[^}]*min-width:\s*0/)
+assert.match(styles, /\.portrait-practice-card\.part-b\s*\{[^}]*grid-template-columns:\s*40px minmax\(0, 1fr\) 16px/)
 assert.ok(styles.includes('html[data-platform="android"][data-orientation="portrait"] .portrait-practice-card > svg'))
 
 console.log('PASS paragraph-matching candidate panel contract')

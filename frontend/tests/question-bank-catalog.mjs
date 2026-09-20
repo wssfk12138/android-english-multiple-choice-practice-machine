@@ -31,6 +31,13 @@ for (const url of ['https://localhost/bank.esq', 'https://192.168.1.2/bank.esq',
   assert.throws(() => validateQuestionBankRemoteUrl(url), /局域网/)
 }
 assert.equal(validateQuestionBankRemoteUrl('https://example.com/bank.esq'), 'https://example.com/bank.esq')
+for (const host of ['fcdn.example.com', 'fdomain.example', 'feather.example', 'fe80.example', 'fe90.example', 'fea0.example', 'feb0.example', '[2606:4700:4700::1111]']) {
+  const url = 'https://' + host + '/bank.esq'
+  assert.equal(validateQuestionBankRemoteUrl(url), url)
+}
+for (const host of ['[::]', '[::1]', '[fc00::1]', '[fd12::1]', '[fe80::1]', '[febf::1]']) {
+  assert.throws(() => validateQuestionBankRemoteUrl('https://' + host + '/bank.esq'), /局域网/)
+}
 assert.deepEqual(resolveQuestionBankCatalogSources({}), [])
 assert.deepEqual(resolveQuestionBankCatalogSources({
   officialUrl: 'https://official.example/catalog.json',

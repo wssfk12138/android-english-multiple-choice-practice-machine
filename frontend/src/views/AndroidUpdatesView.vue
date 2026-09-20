@@ -1,65 +1,26 @@
 <script setup lang="ts">
-import {
-  ClipboardCopy,
-  Download,
-  FileWarning,
-  PackageCheck,
-  RefreshCw,
-  Save,
-  Send,
-  Server,
-  Trash2,
-  Wifi,
-} from 'lucide-vue-next'
+import { ArrowLeft, Download, PackageCheck, RefreshCw, Save } from 'lucide-vue-next'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { get, post, put } from '../api'
-import {
-  clearDiagnosticLogs,
-  copyIssueReportTemplate,
-  copyDiagnosticLogs,
-  listDiagnosticLogs,
-  shareDiagnosticLogs,
-  type DiagnosticLogEntry,
-} from '../platform/android/diagnostics'
-import {
-  copyLearningHistoryDiagnostics,
-  shareLearningHistoryDiagnostics,
-} from '../platform/android/learning-history-diagnostics'
-
+import { loadQuestionBankProfiles, questionBankProfilesState } from '../services/questionBankProfiles'
 const router = useRouter()
 const settings = reactive({
   question_bank_catalog_url: '',
-})
-const lanSync = reactive({
-  host: '',
-  passcode: '',
-  auto: false,
-  configured: false,
-  runtime: { running: false, online: true, lastSyncAt: '', lastError: '' },
 })
 const appUpdate = ref<any>(null)
 const questionBankCatalog = ref<any>(null)
 const selectedPackages = ref<string[]>([])
 const packageResults = ref<Record<string, { status: 'pending' | 'success' | 'failed', message: string }>>({})
-const diagnosticLogs = ref<DiagnosticLogEntry[]>([])
 const busy = ref('')
 const notice = ref('')
 const error = ref('')
+const destinationOpen = ref(false)
+const destinationError = ref('')
+const destinations = ref<{ item: any, mode: 'new' | 'existing', name: string, profileId: number }[]>([])
 const packageKey = (item: any) => `${item.packageId}@${item.contentVersion}`
 const allPackagesSelected = computed(() => Boolean(questionBankCatalog.value?.packages?.length)
   && questionBankCatalog.value.packages.every((item: any) => selectedPackages.value.includes(packageKey(item))))
-
-const categoryLabels: Record<string, string> = {
-  question_bank_import: '本地题库导入',
-  remote_question_bank: '远程题库',
-  app_update: '程序更新',
-  startup: '启动准备',
-}
-
-async function refreshLogs() {
-  diagnosticLogs.value = await listDiagnosticLogs()
-}
 
 async function load() {
   try {
@@ -67,66 +28,6 @@ async function load() {
   } catch (cause) {
     error.value = String(cause)
   }
-  await refreshLogs()
-  await refreshLanSync()
-}
-
-async function refreshLanSync() {
-  try {
-    const result: any = await get('/android/lan-sync/status')
-    lanSync.host = String(result.host || '')
-    lanSync.auto = Boolean(result.auto)
-    lanSync.configured = Boolean(result.configured)
-    Object.assign(lanSync.runtime, result.runtime || {}, {
-      lastSyncAt: result.runtime?.lastSyncAt || result.last_sync_at || '',
-    })
-  } catch (cause) {
-    error.value = `读取局域网同步状态失败：${String(cause)}`
-  }
-}
-
-async function saveLanSync() {
-  busy.value = 'lan-sync-save'
-  error.value = ''
-  try {
-    const result: any = await put('/android/lan-sync/settings', {
-      host: lanSync.host,
-      passcode: lanSync.passcode,
-      auto: lanSync.auto,
-    })
-    lanSync.host = String(result.host || lanSync.host)
-    lanSync.configured = Boolean(result.configured)
-    Object.assign(lanSync.runtime, result.runtime || {})
-    lanSync.passcode = ''
-    notice.value = '局域网同步设置已保存'
-  } catch (cause) {
-    error.value = String(cause)
-  } finally {
-    busy.value = ''
-  }
-}
-
-async function runLanSyncNow() {
-  busy.value = 'lan-sync-run'
-  error.value = ''
-  try {
-    const result: any = await post('/android/lan-sync/run')
-    lanSync.runtime.lastSyncAt = String(result.last_sync_at || '')
-    lanSync.runtime.lastError = ''
-    notice.value = '做题记录、错题本和单词本同步完成'
-    await refreshLanSync()
-  } catch (cause) {
-    error.value = `局域网同步失败：${String(cause)}`
-    await refreshLanSync()
-  } finally {
-    busy.value = ''
-  }
-}
-
-function formatSyncTime(value: string) {
-  if (!value) return '尚未同步'
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('zh-CN')
 }
 
 async function save() {
@@ -148,8 +49,7 @@ async function checkApp() {
     notice.value = appUpdate.value.available ? '检测到新版本' : '当前已经是最新版本'
   } catch (cause) {
     error.value = String(cause)
-    await refreshLogs()
-  } finally {
+    } finally {
     busy.value = ''
   }
 }
@@ -162,8 +62,7 @@ async function installApp() {
     notice.value = '安装包已校验，正在打开 Android 系统安装界面'
   } catch (cause) {
     error.value = String(cause)
-    await refreshLogs()
-  } finally {
+    } finally {
     busy.value = ''
   }
 }
@@ -179,8 +78,7 @@ async function checkBanks() {
       : '尚未配置远程题库源，本地 ESQ 导入不受影响'
   } catch (cause) {
     error.value = String(cause)
-    await refreshLogs()
-  } finally {
+    } finally {
     busy.value = ''
   }
 }
@@ -191,22 +89,49 @@ function toggleAllPackages() {
     : (questionBankCatalog.value?.packages?.map(packageKey) || [])
 }
 
+async function openCatalogDestination() {
+  error.value = ''
+  try {
+    await loadQuestionBankProfiles()
+    destinations.value = (questionBankCatalog.value?.packages || [])
+      .filter((item: any) => selectedPackages.value.includes(packageKey(item)))
+      .map((item: any) => ({ item, mode: 'new', name: String(item.title).trim().slice(0, 80), profileId: 0 }))
+    destinationError.value = ''
+    destinationOpen.value = destinations.value.length > 0
+  } catch (cause) { error.value = String(cause) }
+}
+
 async function installSelectedPackages() {
-  const selected = (questionBankCatalog.value?.packages || [])
-    .filter((item: any) => selectedPackages.value.includes(packageKey(item)))
+  if (busy.value || !destinationOpen.value) return
+  destinationError.value = ''
+  const names = new Set(questionBankProfilesState.items.map(item => String(item.name).trim().toLocaleLowerCase()))
+  for (const target of destinations.value) {
+    if (target.mode === 'new') {
+      const name = target.name.trim()
+      if (!name || name.length > 80) { destinationError.value = '请输入 1–80 字的题库名称'; return }
+      if (names.has(name.toLocaleLowerCase())) { destinationError.value = '题库名称重复，请修改名称或选择已有题库'; return }
+      names.add(name.toLocaleLowerCase())
+    } else if (!questionBankProfilesState.items.some(item => Number(item.id) === target.profileId)) {
+      destinationError.value = '请选择已有题库'; return
+    }
+  }
+  destinationOpen.value = false
+  const selected = destinations.value
   if (!selected.length) return
   busy.value = 'catalog-install'
   error.value = ''
   notice.value = ''
   packageResults.value = {}
   const importIds: number[] = []
-  for (const item of selected) {
+  for (const target of selected) {
+    const item = target.item
     const key = packageKey(item)
     packageResults.value[key] = { status: 'pending', message: '正在下载、校验并建立导入草稿' }
     try {
       const result: any = await post('/android/updates/question-banks/download', {
         package_id: item.packageId,
         content_version: item.contentVersion,
+        ...(target.mode === 'new' ? { new_profile_name: target.name.trim() } : { profile_id: target.profileId }),
       })
       importIds.push(Number(result.id))
       packageResults.value[key] = { status: 'success', message: '已校验，等待你在导入预览中确认' }
@@ -217,20 +142,9 @@ async function installSelectedPackages() {
   busy.value = ''
   const failedCount = selected.length - importIds.length
   notice.value = `已建立 ${importIds.length} 个导入草稿${failedCount ? `，${failedCount} 个失败` : ''}`
-  await refreshLogs()
   if (importIds.length) {
     await router.push({ path: '/imports', query: { esqImportId: String(importIds[0]) } })
   }
-}
-
-function formatLogTime(value: string) {
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(new Date(value))
 }
 
 function formatFileSize(value: unknown) {
@@ -241,228 +155,96 @@ function formatFileSize(value: unknown) {
     : `${Math.ceil(bytes / 1024)} KiB`
 }
 
-async function copyLogs() {
-  error.value = ''
-  try {
-    const count = await copyDiagnosticLogs()
-    notice.value = count ? `已复制 ${count} 条脱敏诊断日志` : '暂无可复制的诊断日志'
-  } catch (cause) {
-    error.value = `复制日志失败：${String(cause)}`
-  }
-}
-
-async function copyReportTemplate() {
-  error.value = ''
-  try {
-    await copyIssueReportTemplate()
-    notice.value = '问题报告模板已复制，请补充复现步骤后主动提交'
-  } catch (cause) {
-    error.value = `复制模板失败：${String(cause)}`
-  }
-}
-
-async function shareLogs() {
-  error.value = ''
-  try {
-    const count = await shareDiagnosticLogs()
-    notice.value = count ? '已打开系统发送界面，请选择发送方式' : '暂无可发送的诊断日志'
-  } catch (cause) {
-    error.value = `导出日志失败：${String(cause)}`
-  }
-}
-
-async function clearLogs() {
-  if (!diagnosticLogs.value.length || !confirm('确认清空全部本地诊断日志吗？')) return
-  await clearDiagnosticLogs()
-  diagnosticLogs.value = []
-  notice.value = '诊断日志已清空'
-}
-
-async function copyHistoryDiagnostics() {
-  error.value = ''
-  try {
-    await copyLearningHistoryDiagnostics()
-    notice.value = '学习历史只读汇总诊断已复制'
-  } catch (cause) {
-    error.value = `复制学习历史诊断失败：${String(cause)}`
-  }
-}
-
-async function shareHistoryDiagnostics() {
-  error.value = ''
-  try {
-    await shareLearningHistoryDiagnostics()
-    notice.value = '已打开系统发送界面，请选择发送方式'
-  } catch (cause) {
-    error.value = `导出学习历史诊断失败：${String(cause)}`
-  }
-}
-
 onMounted(load)
 </script>
-
 <template>
-  <div class="page android-updates-page">
-    <div class="page-head">
-      <div class="page-title-row">
-        <span class="page-title-icon page-title-icon-lucide"><Download :size="22" /></span>
-        <h1>更新与远程题库</h1>
-      </div>
-    </div>
-    <div v-if="error" class="warning" role="alert">{{ error }}</div>
-    <div v-if="notice" class="settings-success" role="status"><PackageCheck :size="17" />{{ notice }}</div>
-
-    <section class="card update-source-card">
+<div class="page android-updates-page"><div class="page-head"><div class="page-title-row"><RouterLink class="icon-button" to="/mobile-settings" aria-label="返回设置"><ArrowLeft :size="20" /></RouterLink><h1>更新与远程题库</h1></div></div><p v-if="error" class="warning" role="alert">{{ error }}</p><p v-if="notice" class="settings-success" role="status">{{ notice }}</p><p v-if="busy" role="status" class="operation-status">正在处理，请稍候…</p>
+<div class="maintenance-update-grid">    <section class="card update-source-card" data-update-section="catalog">
       <div class="update-source-heading">
-        <span class="api-profile-icon"><Wifi :size="20" /></span>
-        <div>
-          <h2>局域网学习记录同步</h2>
-          <p class="lead">同步做题记录、错题本和单词本历史。电脑端需主动开启局域网同步，并保持独立的 8766 同步服务可访问。</p>
-        </div>
+        <span class="api-profile-icon"><Download :size="20" /></span>
+        <div><h2>远程题库</h2></div>
       </div>
       <div class="field">
-        <label for="lan-sync-host">电脑端地址</label>
-        <input id="lan-sync-host" v-model.trim="lanSync.host" inputmode="url" placeholder="http://192.168.x.x:8766">
+        <label for="android-catalog-url">远程题库目录 URL</label>
+        <input id="android-catalog-url" v-model.trim="settings.question_bank_catalog_url" inputmode="url" placeholder="https://github.com/.../question-bank-catalog.json">
       </div>
-      <div class="field">
-        <label for="lan-sync-passcode">同步口令</label>
-        <input id="lan-sync-passcode" v-model.trim="lanSync.passcode" type="password" autocomplete="new-password" placeholder="输入电脑端显示的口令">
-      </div>
-      <label class="lan-sync-toggle">
-        <input v-model="lanSync.auto" type="checkbox">
-        <span><strong>自动同步</strong><small>默认关闭；主动开启后，本地记录变化、应用或网络恢复时自动尝试同步</small></span>
-      </label>
-      <div class="update-actions lan-sync-actions">
-        <button class="button" type="button" :disabled="busy === 'lan-sync-save'" @click="saveLanSync">
-          <Save :size="16" />{{ busy === 'lan-sync-save' ? '保存中…' : '保存同步设置' }}
-        </button>
-        <button class="button secondary" type="button" :disabled="busy === 'lan-sync-run' || !lanSync.configured" @click="runLanSyncNow">
-          <RefreshCw :size="16" />{{ busy === 'lan-sync-run' ? '同步中…' : '立即同步' }}
-        </button>
-      </div>
-      <div class="lan-sync-status" aria-live="polite">
-        <span>{{ lanSync.runtime.online ? '设备网络在线' : '设备当前离线' }}</span>
-        <span>{{ lanSync.runtime.running ? '正在同步' : '当前空闲' }}</span>
-        <span>上次同步：{{ formatSyncTime(lanSync.runtime.lastSyncAt) }}</span>
-      </div>
-      <p v-if="lanSync.runtime.lastError" class="warning">上次错误：{{ lanSync.runtime.lastError }}</p>
+      <button class="button" type="button" :disabled="busy === 'save'" @click="save"><Save :size="16" />保存目录地址</button>
+      <button class="button secondary" type="button" :disabled="busy === 'banks' || busy === 'catalog-install'" @click="checkBanks"><RefreshCw :size="16" />检查远程题库</button>
     </section>
 
-    <section class="card update-source-card">
+    <section class="card update-source-card" data-update-section="update">
       <div class="update-source-heading">
-        <span class="api-profile-icon"><Server :size="20" /></span>
-        <div><h2>远程题库目录 URL</h2></div>
+        <span class="api-profile-icon"><PackageCheck :size="20" /></span>
+        <div><h2>程序更新</h2></div>
       </div>
-      <div class="field">
-        <label for="bank-update-url">远程题库目录 URL（可留空）</label>
-        <input id="bank-update-url" v-model.trim="settings.question_bank_catalog_url" inputmode="url" placeholder="https://.../catalog.json">
+      <button class="button secondary" type="button" :disabled="busy === 'app'" @click="checkApp"><RefreshCw :size="16" />检查程序更新</button>
+      <div v-if="appUpdate" class="update-result">
+        <span>当前版本 {{ appUpdate.current_version }}</span>
+        <strong>{{ appUpdate.available ? `可更新至 ${appUpdate.manifest.versionName}` : '已是最新版本' }}</strong>
+        <small v-if="appUpdate.manifest?.apkSize">安装包 {{ formatFileSize(appUpdate.manifest.apkSize) }} · 下载后校验 SHA-256</small><p v-if="appUpdate.manifest?.releaseNotes">{{ appUpdate.manifest?.releaseNotes }}</p>
+        <button v-if="appUpdate.available" class="button" type="button" :disabled="busy === 'install'" @click="installApp"><Download :size="16" />下载、校验并安装</button>
       </div>
-      <button class="button" type="button" :disabled="busy === 'save'" @click="save"><Save :size="16" />保存题库地址</button>
     </section>
 
-    <div class="grid grid-2 update-check-grid">
-      <section class="card">
-        <div class="update-source-heading">
-          <span class="api-profile-icon"><Download :size="20" /></span>
-          <div><h2>程序更新</h2></div>
-        </div>
-        <button class="button secondary" type="button" :disabled="busy === 'app'" @click="checkApp"><RefreshCw :size="16" />检查程序更新</button>
-        <div v-if="appUpdate" class="update-result">
-          <span>当前版本 {{ appUpdate.current_version }}</span>
-          <strong>{{ appUpdate.available ? `可更新至 ${appUpdate.manifest.versionName}` : '已是最新版本' }}</strong>
-          <small v-if="appUpdate.manifest.apkSize">安装包 {{ formatFileSize(appUpdate.manifest.apkSize) }} · 下载后校验 SHA-256</small>
-          <p v-if="appUpdate.manifest.releaseNotes">{{ appUpdate.manifest.releaseNotes }}</p>
-          <button v-if="appUpdate.available" class="button" type="button" :disabled="busy === 'install'" @click="installApp"><Download :size="16" />下载、校验并安装</button>
-        </div>
-      </section>
-      <section class="card">
-        <div class="update-source-heading">
-          <span class="api-profile-icon"><PackageCheck :size="20" /></span>
-          <div><h2>远程题库</h2></div>
-        </div>
-        <button class="button secondary" type="button" :disabled="busy === 'banks' || busy === 'catalog-install'" @click="checkBanks"><RefreshCw :size="16" />检查远程题库</button>
-        <div v-if="questionBankCatalog?.configured" class="update-package-list">
-          <div class="catalog-toolbar">
-            <span>{{ questionBankCatalog.packages.length }} 个可用 · 已选 {{ selectedPackages.length }} 个</span>
-            <div class="catalog-actions">
-              <button class="button ghost compact" type="button" :disabled="busy === 'catalog-install'" @click="toggleAllPackages">{{ allPackagesSelected ? '清空选择' : '全选' }}</button>
-              <button class="button compact" type="button" :disabled="busy === 'catalog-install' || !selectedPackages.length" @click="installSelectedPackages">
-                <Download :size="15" />{{ busy === 'catalog-install' ? '正在处理…' : `安装选中题库（${selectedPackages.length}）` }}
-              </button>
-            </div>
-          </div>
-          <label v-for="item in questionBankCatalog.packages" :key="packageKey(item)" class="catalog-item">
-            <input v-model="selectedPackages" type="checkbox" :value="packageKey(item)" :disabled="busy === 'catalog-install'">
-            <span>
-              <strong>{{ item.title }}</strong>
-              <small>版本 {{ item.contentVersion }} · {{ item.years.join('、') || '多年份' }} · {{ Math.ceil(item.size / 1024) }} KiB</small>
-              <small>{{ item.license }}</small>
-              <small v-if="packageResults[packageKey(item)]" :class="`catalog-${packageResults[packageKey(item)].status}`">{{ packageResults[packageKey(item)].message }}</small>
-            </span>
-          </label>
-          <p v-if="!questionBankCatalog.packages.length" class="diagnostic-empty">远程目录当前没有可安装题库。</p>
-        </div>
-      </section>
-    </div>
-
-    <section class="card diagnostic-card">
-      <div class="diagnostic-heading">
-        <div class="update-source-heading">
-          <span class="api-profile-icon"><FileWarning :size="20" /></span>
-          <div>
-            <h2>诊断日志</h2>
+</div><section v-if="questionBankCatalog?.configured" class="card catalog-results">      <div v-if="questionBankCatalog?.configured" class="update-package-list">
+        <div class="catalog-toolbar">
+          <span>{{ questionBankCatalog.packages.length }} 个可用 · 已选 {{ selectedPackages.length }} 个</span>
+          <div class="update-actions">
+            <button class="button ghost compact" type="button" :disabled="busy === 'catalog-install'" @click="toggleAllPackages">{{ allPackagesSelected ? '清空选择' : '全选' }}</button>
+            <button class="button compact" type="button" :disabled="busy === 'catalog-install' || !selectedPackages.length" @click="openCatalogDestination">
+              <Download :size="15" />安装选中题库（{{ selectedPackages.length }}）
+            </button>
           </div>
         </div>
-        <span class="pill">{{ diagnosticLogs.length }} 条</span>
+        <label v-for="item in questionBankCatalog.packages" :key="packageKey(item)" class="catalog-item selection-option">
+          <input v-model="selectedPackages" type="checkbox" :value="packageKey(item)" :disabled="busy === 'catalog-install'">
+          <span>
+            <strong>{{ item.title }}</strong>
+            <small>版本 {{ item.contentVersion }} · {{ item.years.join('、') || '多年份' }} · {{ Math.ceil(item.size / 1024) }} KiB</small>
+            <small>{{ item.license }}</small>
+            <small v-if="packageResults[packageKey(item)]" :class="`catalog-${packageResults[packageKey(item)].status}`">{{ packageResults[packageKey(item)].message }}</small>
+          </span>
+        </label>
+        <p v-if="!questionBankCatalog.packages.length" class="diagnostic-empty">远程目录当前没有可安装题库。</p>
       </div>
-      <div class="diagnostic-actions">
-        <button class="button secondary" type="button" @click="copyReportTemplate">
-          <ClipboardCopy :size="16" />复制问题报告模板
-        </button>
-        <button class="button secondary" type="button" :disabled="!diagnosticLogs.length" @click="copyLogs">
-          <ClipboardCopy :size="16" />复制日志
-        </button>
-        <button class="button" type="button" :disabled="!diagnosticLogs.length" @click="shareLogs">
-          <Send :size="16" />导出并系统分享
-        </button>
-        <button class="button ghost diagnostic-clear" type="button" :disabled="!diagnosticLogs.length" @click="clearLogs">
-          <Trash2 :size="16" />清空
-        </button>
-      </div>
-      <p class="diagnostic-privacy">诊断最多保留 50 条且导出包不超过约 1 MiB。不会后台上传，只有你点击复制、导出或系统分享时才会离开本机。</p>
-      <div class="diagnostic-actions">
-        <button class="button secondary" type="button" @click="copyHistoryDiagnostics">
-          <ClipboardCopy :size="16" />复制学习历史只读诊断
-        </button>
-        <button class="button secondary" type="button" @click="shareHistoryDiagnostics">
-          <Send :size="16" />导出并系统分享
-        </button>
-      </div>
-      <p class="diagnostic-privacy">学习历史诊断只执行本地只读汇总，包含数量和完整性类别，不含学习记录、题库名、题目、答案、词汇或任何同步标识。</p>
-      <div v-if="diagnosticLogs.length" class="diagnostic-list">
-        <details v-for="item in diagnosticLogs" :key="`${item.createdAt}:${item.event}`">
-          <summary>
-            <span>
-              <strong>{{ categoryLabels[item.module] || item.module }}</strong>
-              <small>{{ formatLogTime(item.createdAt) }} · {{ item.event }}</small>
-            </span>
-            <span class="diagnostic-code">{{ item.errorCategory }}</span>
-          </summary>
-          <div class="diagnostic-detail">
-            <p>{{ item.symptom }}</p>
-            <dl>
-              <dt>应用版本</dt><dd>{{ item.appVersion }}</dd>
-              <dt>错误类别</dt><dd>{{ item.errorCategory }}</dd>
-            </dl>
+</section>  <div v-if="destinationOpen" class="destination-overlay" role="dialog" aria-modal="true" aria-labelledby="remote-destination-title" @keydown.esc="destinationOpen = false">
+    <section class="destination-dialog">
+      <h2 id="remote-destination-title">选择导入位置</h2>
+      <div class="destination-list">
+        <fieldset v-for="(target, index) in destinations" :key="packageKey(target.item)">
+          <legend>{{ target.item.title }}</legend>
+          <div class="destination-modes">
+            <label><input v-model="target.mode" type="radio" :name="`destination-${index}`" value="new">新建题库</label>
+            <label><input v-model="target.mode" type="radio" :name="`destination-${index}`" value="existing">已有题库</label>
           </div>
-        </details>
+          <label v-if="target.mode === 'new'" class="field"><span>名称</span><input v-model="target.name" maxlength="80"></label>
+          <label v-else class="field"><span>目标题库</span><select v-model.number="target.profileId"><option :value="0" disabled>请选择</option><option v-for="profile in questionBankProfilesState.items" :key="profile.id" :value="profile.id">{{ profile.name }}</option></select></label>
+        </fieldset>
       </div>
-      <div v-else class="diagnostic-empty">目前没有导入或更新错误。</div>
+      <p v-if="destinationError" role="alert" class="catalog-failed">{{ destinationError }}</p>
+      <div class="catalog-actions"><button class="button secondary" type="button" @click="destinationOpen = false">取消</button><button class="button" type="button" @click="installSelectedPackages"><Download :size="17" />下载并预览</button></div>
     </section>
   </div>
-</template>
 
+</div></template>
 <style scoped>
+.maintenance-update-grid { display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); gap:16px; align-items:start; }
+.maintenance-update-grid > section { min-width:0; margin:0; }
+.update-result p { overflow-wrap:anywhere; }
+.catalog-results { margin-top:16px; }
+@media(max-width:900px) { .maintenance-update-grid { grid-template-columns:minmax(0,1fr); } }
+.update-source-heading > div { min-width: 0; }
+.warning { overflow-wrap: anywhere; }
+.destination-overlay { position:fixed; inset:0; z-index:1000; background:#0008; display:grid; place-items:center; padding:16px; }
+.destination-dialog { width:min(100%, 560px); max-height:calc(100dvh - 32px); display:flex; flex-direction:column; gap:16px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:20px; min-width:0; }
+.destination-dialog h2 { font-size:20px; margin:0; }
+.destination-list { overflow:auto; min-height:0; }
+.destination-list fieldset { min-width:0; margin:0 0 16px; padding:12px 0; border:0; border-bottom:1px solid var(--line); }
+.destination-list legend { overflow-wrap:anywhere; max-width:100%; font-weight:600; }
+.destination-modes { display:flex; flex-wrap:wrap; gap:16px; margin-bottom:12px; }
+.destination-modes label { display:flex; align-items:center; gap:6px; }
+.destination-dialog input, .destination-dialog select { max-width:100%; min-width:0; }
+.destination-dialog .catalog-actions { flex-shrink:0; }
 .catalog-toolbar, .catalog-actions { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
 .catalog-item { display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--line); border-radius:8px; }
 .catalog-item > span { display:grid; gap:4px; min-width:0; }

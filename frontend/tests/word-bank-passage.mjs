@@ -16,7 +16,7 @@ assert.ok(practice.includes("'word-bank-current': currentWordBankQuestionId === 
 assert.ok(practice.includes('usedWordBankLetters.has(option.stable_key)'))
 assert.ok(styles.includes('html[data-platform="android"] .word-bank-passage-blank'))
 assert.ok(styles.includes('html[data-platform="android"] .word-bank-current'))
-assert.ok(styles.includes('grid-template-columns: repeat(auto-fit, minmax(120px, 1fr))'))
+assert.match(styles.replace(/\s+/g, ''), /grid-template-columns:repeat\(auto-fit,minmax\(120px,1fr\)\)/)
 assert.ok(styles.includes('min-height: 44px'))
 assert.ok(practiceApi.includes("['part_b', 'word_bank', 'paragraph_matching']"))
 assert.ok(practiceApi.includes('options.answerOrders?.get(question.id) || sharedCandidateOrder'))

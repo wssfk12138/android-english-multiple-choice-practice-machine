@@ -1,184 +1,122 @@
 name: Android Release
 
-# 手动触发的发布流水线：构建带正式签名的 release APK，生成
-# android-update.json 并创建 GitHub Release（含 APK 与更新清单）。
-# 前置条件：仓库 Secrets 中已配置
-#   ANDROID_KEYSTORE_B64      —— release jks 的 base64（certutil/base64 编码）
-#   ANDROID_KEYSTORE_PASSWORD —— keystore 口令
-#   ANDROID_KEY_PASSWORD      —— key 口令
-# 缺少任一 Secret 时本工作流会直接失败，不会产出未签名包。
-
+# Builds a verified draft; publishing requires separate APK acceptance.
 on:
   workflow_dispatch:
     inputs:
+      source_sha:
+        description: "已审查的完整提交 SHA，须与所选分支提交一致"
+        required: true
       tag:
-        description: "Release 标签（例如 v0.1.0-beta.5）"
+        description: "Release 标签：v + version_name"
         required: true
       version_name:
-        description: "versionName（例如 0.1.0-beta.5）"
+        description: "versionName"
         required: true
       version_code:
-        description: "versionCode（必须大于所有已发布版本）"
+        description: "versionCode，须大于线上及已分发的同包名版本"
         required: true
       release_notes:
-        description: "更新说明（写入 android-update.json）"
+        description: "更新说明"
         required: false
         default: ""
-
 permissions:
   contents: write
-
+concurrency:
+  group: android-release
+  cancel-in-progress: false
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TAG: ${{ inputs.tag }}
+      VERSION_NAME: ${{ inputs.version_name }}
+      VERSION_CODE: ${{ inputs.version_code }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      RELEASE_NOTES: ${{ inputs.release_notes }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Validate release inputs
+      - name: Validate source and remote version history
         env:
-          TAG: ${{ inputs.tag }}
-          VERSION_NAME: ${{ inputs.version_name }}
-          VERSION_CODE: ${{ inputs.version_code }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if ! [[ "$VERSION_NAME" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
-            echo "::error::versionName 格式无效。"
-            exit 1
-          fi
-          if [ "$TAG" != "v$VERSION_NAME" ]; then
-            echo "::error::Release 标签必须等于 v + versionName。"
-            exit 1
-          fi
-          if ! [[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::versionCode 必须为正整数。"
-            exit 1
-          fi
-
-      - name: Verify signing secrets present
-        env:
-          HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_B64 }}
-          HAS_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          HAS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          if [ -z "$HAS_KEYSTORE" ] || [ -z "$HAS_STORE_PASSWORD" ] || [ -z "$HAS_KEY_PASSWORD" ]; then
-            echo "::error::缺少签名 Secrets（ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_PASSWORD），拒绝发布未签名包。"
-            exit 1
-          fi
-
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          python3 scripts/release_guard.py preflight
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.14.0"
-
+          node-version: "24.18.1"
       - uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "21"
-
-      - name: Enable pnpm
-        run: corepack enable
-
-      - name: Build web assets and sync
+      - name: Enable pinned pnpm
+        run: |
+          npm install --global corepack@0.35.0
+          corepack enable
+      - name: Frontend regression gate and build
         working-directory: frontend
         run: |
           pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          pnpm run test:all
           pnpm run build
-          npx cap sync android
-
-      - name: Restore keystore and signing properties
+          pnpm exec cap sync android
+      - name: Prepare Android SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Restore release signing
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        working-directory: frontend/android
-        run: |
-          echo "$ANDROID_KEYSTORE_B64" | base64 -d > app/release-ci.jks
-          test -s app/release-ci.jks
-          {
-            echo "storeFile=release-ci.jks"
-            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
-            echo "keyAlias=english-practice-machine"
-            echo "keyPassword=$ANDROID_KEY_PASSWORD"
-          } > signing.properties
-
-      - name: Build signed release APK
-        env:
-          VERSION_CODE: ${{ inputs.version_code }}
-          VERSION_NAME: ${{ inputs.version_name }}
-        working-directory: frontend/android
-        run: |
-          ./gradlew :app:assembleRelease \
-            "-PappVersionCode=$VERSION_CODE" \
-            "-PappVersionName=$VERSION_NAME" \
-            --console=plain -q
-
-      - name: Verify signature and rename APK
-        env:
-          VERSION_NAME: ${{ inputs.version_name }}
-        working-directory: frontend/android
-        run: |
-          APK="app/build/outputs/apk/release/app-release.apk"
-          BUILD_TOOLS="$ANDROID_HOME/build-tools"
-          APKSIGNER=$(ls "$BUILD_TOOLS"/*/apksigner | sort -V | tail -1)
-          "$APKSIGNER" verify --print-certs "$APK"
-          OUT="english-practice-machine-android-$VERSION_NAME.apk"
-          cp "$APK" "$GITHUB_WORKSPACE/$OUT"
-          echo "APK_PATH=$OUT" >> "$GITHUB_ENV"
-
-      - name: Generate update manifest
-        env:
-          TAG: ${{ inputs.tag }}
-          VERSION_NAME: ${{ inputs.version_name }}
-          VERSION_CODE: ${{ inputs.version_code }}
-          RELEASE_NOTES: ${{ inputs.release_notes }}
-          REPOSITORY: ${{ github.repository }}
         run: |
           python3 - <<'PY'
-          import hashlib
-          import json
-          import os
+          import base64, os
           from pathlib import Path
-
-          try:
-              version_code = int(os.environ["VERSION_CODE"])
-          except ValueError as exc:
-              raise SystemExit("version_code must be an integer") from exc
-          if version_code <= 0:
-              raise SystemExit("version_code must be positive")
-
-          apk_file = os.environ["APK_PATH"]
-          apk_path = Path(os.environ["GITHUB_WORKSPACE"]) / apk_file
-          digest = hashlib.sha256()
-          with apk_path.open("rb") as apk_stream:
-              for chunk in iter(lambda: apk_stream.read(1024 * 1024), b""):
-                  digest.update(chunk)
-          manifest = {
-              "schemaVersion": 1,
-              "channel": "beta",
-              "versionName": os.environ["VERSION_NAME"],
-              "versionCode": version_code,
-              "apkUrl": (
-                  f"https://github.com/{os.environ['REPOSITORY']}/releases/download/"
-                  f"{os.environ['TAG']}/{apk_file}"
-              ),
-              "apkSha256": digest.hexdigest(),
-              "apkSize": apk_path.stat().st_size,
-              "releaseNotes": os.environ.get("RELEASE_NOTES", ""),
-          }
-          output = Path("android-update.json")
-          output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-          json.loads(output.read_text(encoding="utf-8"))
+          names = ('ANDROID_KEYSTORE_B64', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_KEY_PASSWORD')
+          if not all(os.environ.get(n) for n in names):
+              raise SystemExit('Missing signing secrets')
+          root = Path('frontend/android')
+          data = base64.b64decode(''.join(os.environ[names[0]].split()), validate=True)
+          if not data:
+              raise SystemExit('Empty keystore')
+          (root / 'app/release-ci.jks').write_bytes(data)
+          def escape(value):
+              raw = value.encode('utf-16-be')
+              return ''.join(chr(92) + 'u%04x' % int.from_bytes(raw[i:i+2], 'big')
+                             for i in range(0, len(raw), 2))
+          properties = '\n'.join([
+              'storeFile=release-ci.jks',
+              'storePassword=' + escape(os.environ[names[1]]),
+              'keyAlias=english-practice-machine',
+              'keyPassword=' + escape(os.environ[names[2]]), '',
+          ])
+          (root / 'signing.properties').write_text(properties, encoding='ascii')
           PY
-
-      - name: Create Release
+      - name: Native tests and signed release build
+        working-directory: frontend/android
+        run: |
+          bash ./gradlew :app:testReleaseUnitTest :app:assembleRelease \
+            "-PappVersionCode=$VERSION_CODE" "-PappVersionName=$VERSION_NAME" \
+            --no-daemon --console=plain
+      - name: Verify APK identity, signature and manifest
+        run: |
+          OUT="english-practice-machine-android-$VERSION_NAME.apk"
+          cp frontend/android/app/build/outputs/apk/release/app-release.apk "$OUT"
+          python3 scripts/release_guard.py apk "$OUT"
+          echo "APK_PATH=$OUT" >> "$GITHUB_ENV"
+      - name: Recheck remote and upload draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ inputs.tag }}
-          VERSION_NAME: ${{ inputs.version_name }}
-          RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
-          NOTES="$RELEASE_NOTES"
-          if [ -z "$NOTES" ]; then NOTES="英语刷题机 Android $VERSION_NAME"; fi
-          gh release create "$TAG" \
-            "$GITHUB_WORKSPACE/$APK_PATH" \
-            android-update.json \
-            --title "英语刷题机 Android $VERSION_NAME" \
-            --notes "$NOTES"
+          python3 scripts/release_guard.py preflight
+          gh release create "$TAG" "$APK_PATH" android-update.json \
+            --draft --target "$SOURCE_SHA" \
+            --title "英语刷题机 Android $VERSION_NAME" --notes-file release-notes.txt
+          gh release download "$TAG" --dir "$RUNNER_TEMP/release-check" \
+            --pattern "$APK_PATH" --pattern android-update.json
+          python3 scripts/release_guard.py downloads "$APK_PATH" "$RUNNER_TEMP/release-check"
+          echo 'Draft verified. APK acceptance and explicit publishing remain required.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove signing material
+        if: always()
+        run: rm -f frontend/android/app/release-ci.jks frontend/android/signing.properties

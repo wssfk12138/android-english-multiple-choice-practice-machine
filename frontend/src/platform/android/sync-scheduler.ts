@@ -3,6 +3,8 @@ import { Network } from '@capacitor/network'
 import type { PluginListenerHandle } from '@capacitor/core'
 import { lanSyncStatus, runLanSync } from './lan-sync'
 import { createSyncCoordinator } from './sync-coordinator'
+import { classifyLanSyncError, type LanSyncErrorCode } from './lan-sync-errors'
+import { getLanSyncRetryDelayMs } from './sync-retry-policy'
 
 export type SyncState = {
   configured: boolean
@@ -11,7 +13,11 @@ export type SyncState = {
   online: boolean
   lastSyncAt: string
   lastError: string
+  errorCode: LanSyncErrorCode | ''
+  autoPaused: boolean
+  nextRetryAt: string
 }
+
 let state: SyncState = {
   configured: false,
   enabled: false,
@@ -19,6 +25,9 @@ let state: SyncState = {
   online: true,
   lastSyncAt: '',
   lastError: '',
+  errorCode: '',
+  autoPaused: false,
+  nextRetryAt: '',
 }
 
 const listeners = new Set<(s: SyncState) => void>()
@@ -71,31 +80,68 @@ export async function refreshSyncState(): Promise<SyncState> {
 }
 
 async function performSync(): Promise<any> {
-  setState({ running: true, lastError: '' })
+  setState({ running: true, lastError: '', errorCode: '' })
   try {
     const online = await isOnline()
     setState({ online })
     if (!online) throw new Error('设备当前离线，恢复网络后再同步')
     const result = await runLanSync()
     const at = String(result?.last_sync_at || new Date().toISOString())
-    setState({ lastSyncAt: at, lastError: '' })
+    setState({ lastSyncAt: at, lastError: '', errorCode: '', autoPaused: false, nextRetryAt: '' })
+    retryAttempt = 0
+    if (retryTimer) clearTimeout(retryTimer)
+    retryTimer = null
     return result
   } catch (cause) {
-    setState({ lastError: String(cause) })
-    throw cause
+    const classified = classifyLanSyncError(cause)
+    if (classified.pauseAuto) {
+      if (retryTimer) clearTimeout(retryTimer)
+      retryTimer = null
+      coordinator.resetPending()
+      setState({ autoPaused: true, nextRetryAt: '' })
+    }
+    setState({ lastError: classified.message, errorCode: classified.code })
+    throw classified
   } finally {
     setState({ running: false })
   }
 }
 
-const coordinator = createSyncCoordinator(performSync)
+let retryAttempt = 0
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleAutoRetry(cause: unknown): void {
+  const error = classifyLanSyncError(cause)
+  if (error.pauseAuto || !error.retryable) {
+    if (retryTimer) clearTimeout(retryTimer)
+    retryTimer = null
+    setState({ autoPaused: error.pauseAuto, nextRetryAt: '', lastError: error.message, errorCode: error.code })
+    return
+  }
+  if (!state.enabled || state.autoPaused || retryTimer) return
+  const delay = getLanSyncRetryDelayMs(retryAttempt)
+  retryAttempt += 1
+  const nextRetryAt = new Date(Date.now() + delay).toISOString()
+  setState({ nextRetryAt, lastError: error.message, errorCode: error.code })
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    setState({ nextRetryAt: '' })
+    requestAutoSync()
+  }, delay)
+}
+
+const coordinator = createSyncCoordinator(performSync, scheduleAutoRetry)
 
 export async function syncNow(): Promise<any> {
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = null
+  retryAttempt = 0
+  setState({ autoPaused: false, nextRetryAt: '' })
   return coordinator.runNow()
 }
 
 function requestAutoSync(localChange = false): void {
-  if (!state.enabled) return
+  if (!state.enabled || state.autoPaused) return
   coordinator.requestAuto(localChange)
 }
 
@@ -144,6 +190,8 @@ export async function startAutoSync(): Promise<void> {
 export function stopAutoSync(): void {
   started = false
   coordinator.resetPending()
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = null
   if (pushTimer) clearTimeout(pushTimer)
   pushTimer = null
   if (pullTimer) clearInterval(pullTimer)

@@ -38,11 +38,37 @@ public class AppUpdaterPlugin extends Plugin {
     private final Map<String, File> pendingQuestionBankAssets = new ConcurrentHashMap<>();
 
     @PluginMethod
+    public void downloadLanQuestionBank(PluginCall call) {
+        executor.execute(() -> {
+            File temporary = new File(getContext().getCacheDir(), "lan-esq-" + UUID.randomUUID() + ".part");
+            try {
+                Long size = readQuestionBankSize(call.getData().opt("expectedSize"));
+                JSObject tls = call.getObject("tls");
+                if (size == null || tls == null || getContext().getCacheDir().getUsableSpace() - size < 64L * 1024L * 1024L) {
+                    throw new IllegalArgumentException("Invalid request or insufficient storage");
+                }
+                String sha = call.getString("sha256", "");
+                LanTlsTrust trust = new LanTlsTrust(tls.optString("hostId"), tls.optString("certificatePem"), tls.optString("certificatePin"));
+                LanQuestionBankDownload.download(call.getString("url", ""), trust, call.getString("token", ""), sha, size, temporary);
+                org.json.JSONObject staged = EsqStage.stage(temporary, getContext().getFilesDir());
+                JSObject result = new JSObject();
+                result.put("packageData", staged.toString());
+                result.put("cleanupToken", "");
+                call.resolve(result);
+            } catch (Exception error) {
+                call.reject("局域网题库下载失败，请检查共享权限、电脑身份、网络和可用空间", "LAN_BANK_DOWNLOAD_FAILED");
+            } finally {
+                temporary.delete();
+            }
+        });
+    }
+
+    @PluginMethod
     public void downloadQuestionBank(PluginCall call) {
         String url = call.getString("url");
         String expectedHash = call.getString("sha256");
         String requestedName = call.getString("fileName", "question-bank.esq");
-        Long expectedSize = call.getLong("expectedSize");
+        Long expectedSize = readQuestionBankSize(call.getData().opt("expectedSize"));
         if (url == null || expectedHash == null
             || !expectedHash.matches("(?i)^[a-f0-9]{64}$")
             || expectedSize == null || expectedSize < 1 || expectedSize > EsqArchive.MAX_ARCHIVE_BYTES) {
@@ -53,6 +79,15 @@ public class AppUpdaterPlugin extends Plugin {
         final String fileName = sanitizedName.toLowerCase(Locale.ROOT).endsWith(".esq")
             ? sanitizedName : sanitizedName + ".esq";
         executor.execute(() -> downloadQuestionBank(call, url, expectedHash, expectedSize, fileName));
+    }
+
+    static Long readQuestionBankSize(Object value) {
+        // Capacitor getLong ignores JSON numbers represented as Integer.
+        if (!(value instanceof Number)) return null;
+        double size = ((Number) value).doubleValue();
+        if (!Double.isFinite(size) || size != Math.rint(size)
+            || size < 1 || size > EsqArchive.MAX_ARCHIVE_BYTES) return null;
+        return (long) size;
     }
 
     private void downloadQuestionBank(PluginCall call, String url, String expectedHash, long expectedSize, String fileName) {
@@ -88,15 +123,10 @@ public class AppUpdaterPlugin extends Plugin {
             }
             if (total != expectedSize) throw new SecurityException("题库文件大小与目录声明不一致");
             if (!hex(digest.digest()).equalsIgnoreCase(expectedHash)) throw new SecurityException("题库 SHA-256 校验失败，文件可能不完整或已被替换");
-            EsqArchive.Extraction extracted = EsqArchive.extract(temporary, getContext().getFilesDir(), expectedHash.toLowerCase(Locale.ROOT));
-            String cleanupToken = "";
-            if (extracted.createdDirectory != null) {
-                cleanupToken = UUID.randomUUID().toString();
-                pendingQuestionBankAssets.put(cleanupToken, extracted.createdDirectory);
-            }
+            org.json.JSONObject staged = EsqStage.stage(temporary, getContext().getFilesDir());
             JSObject result = new JSObject();
-            result.put("packageData", extracted.packageData.toString());
-            result.put("cleanupToken", cleanupToken);
+            result.put("packageData", staged.toString());
+            result.put("cleanupToken", "");
             call.resolve(result);
         } catch (Exception error) {
             call.reject(error.getMessage() == null ? "题库下载失败" : error.getMessage(), error);
@@ -133,8 +163,9 @@ public class AppUpdaterPlugin extends Plugin {
         }
         String host = url.getHost().replaceAll("^\\[|\\]$", "").toLowerCase(Locale.ROOT);
         if (host.equals("localhost") || host.endsWith(".localhost") || host.endsWith(".local")
-            || isForbiddenIpv4(host) || host.equals("::") || host.equals("::1")
-            || host.startsWith("fc") || host.startsWith("fd") || host.matches("^fe[89ab].*")) {
+            || isForbiddenIpv4(host)
+            || (host.contains(":") && (host.equals("::") || host.equals("::1")
+                || host.startsWith("fc") || host.startsWith("fd") || host.matches("^fe[89ab].*")))) {
             throw new SecurityException("题库地址不能指向本机、局域网或保留网络");
         }
     }

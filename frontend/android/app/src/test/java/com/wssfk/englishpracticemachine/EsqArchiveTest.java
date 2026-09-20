@@ -103,12 +103,31 @@ public class EsqArchiveTest {
         assertEquals(1, extraction.packageData.getJSONArray("assets").length());
     }
 
+    @Test
+    public void extractsLanContentFingerprintVersion() throws Exception {
+        String version = "1.0.0+" + "a".repeat(64);
+        File archive = validArchive(version);
+        EsqArchive.Extraction result = EsqArchive.extract(archive, temporary.newFolder("lan-data"), sha256(archive));
+        assertEquals(version, result.packageData.getJSONObject("manifest").getString("contentVersion"));
+        assertTrue(result.createdDirectory.isDirectory());
+    }
+
+    @Test
+    public void rejectsTraversalInContentVersion() throws Exception {
+        File archive = validArchive("1.0.0+../escape");
+        assertThrows(SecurityException.class, () -> EsqArchive.extract(archive, temporary.newFolder("unsafe-data"), sha256(archive)));
+    }
+
     private File validArchive() throws Exception {
+        return validArchive("1.0.0");
+    }
+
+    private File validArchive(String version) throws Exception {
         File archive = temporary.newFile("valid.esq");
         byte[] audio = "valid audio".getBytes(StandardCharsets.UTF_8);
         String audioHash = sha256(audio);
         try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(archive))) {
-            add(zip, "manifest.json", "{\"packageId\":\"test.bank\",\"contentVersion\":\"1.0.0\",\"papers\":[{\"paperKey\":\"p1\",\"path\":\"papers/p1.json\",\"answerPath\":\"answers/p1.json\"}]}");
+            add(zip, "manifest.json", "{\"packageId\":\"test.bank\",\"contentVersion\":\"" + version + "\",\"papers\":[{\"paperKey\":\"p1\",\"path\":\"papers/p1.json\",\"answerPath\":\"answers/p1.json\"}]}");
             add(zip, "papers/p1.json", "{\"paperKey\":\"p1\",\"year\":2026,\"units\":[]}");
             add(zip, "answers/p1.json", "{\"paperKey\":\"p1\",\"answers\":{}}");
             add(zip, "assets/index.json", "{\"assets\":[{\"assetId\":\"a1\",\"path\":\"assets/audio/a.mp3\",\"size\":" + audio.length + ",\"sha256\":\"" + audioHash + "\"}]}");

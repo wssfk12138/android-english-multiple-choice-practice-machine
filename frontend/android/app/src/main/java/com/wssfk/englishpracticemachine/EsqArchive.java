@@ -43,7 +43,15 @@ final class EsqArchive {
 
     private EsqArchive() {}
 
+    interface PaperConsumer {
+        JSONObject read(ZipFile zip, Map<String, ZipEntry> entries, JSONObject descriptor, int index) throws Exception;
+    }
+
     static Extraction extract(File archive, File dataRoot, String archiveSha256) throws Exception {
+        return extract(archive, dataRoot, archiveSha256, null);
+    }
+
+    static Extraction extract(File archive, File dataRoot, String archiveSha256, PaperConsumer consumer) throws Exception {
         if (!archive.isFile() || archive.length() < 1 || archive.length() > MAX_ARCHIVE_BYTES) {
             throw new SecurityException("ESQ 文件大小无效");
         }
@@ -56,9 +64,9 @@ final class EsqArchive {
             long[] jsonTotal = {0L};
             JSONObject manifest = readJson(zip, required(entries, "manifest.json"), jsonTotal);
             String packageId = safeIdentity(manifest.optString("packageId"), "packageId");
-            String contentVersion = safeIdentity(manifest.optString("contentVersion"), "contentVersion");
+            String contentVersion = safeContentVersion(manifest.optString("contentVersion"));
             JSONArray descriptors = manifest.optJSONArray("papers");
-            if (descriptors == null || descriptors.length() < 1 || descriptors.length() > 5000) {
+            if (descriptors == null || descriptors.length() < 1 || descriptors.length() > 100) {
                 throw new SecurityException("ESQ 试卷清单无效");
             }
 
@@ -86,6 +94,10 @@ final class EsqArchive {
             JSONArray papers = new JSONArray();
             for (int index = 0; index < descriptors.length(); index++) {
                 JSONObject descriptor = descriptors.getJSONObject(index);
+                if (consumer != null) {
+                    papers.put(consumer.read(zip, entries, descriptor, index));
+                    continue;
+                }
                 String paperPath = safeEntryName(descriptor.optString("path"));
                 String answerPath = safeEntryName(descriptor.optString("answerPath"));
                 JSONObject item = new JSONObject()
@@ -190,6 +202,7 @@ final class EsqArchive {
     private static Map<String, ZipEntry> inspect(ZipFile zip) throws Exception {
         Map<String, ZipEntry> result = new HashMap<>();
         long total = 0L;
+        long jsonTotal = 0L;
         int count = 0;
         var enumeration = zip.entries();
         while (enumeration.hasMoreElements()) {
@@ -204,8 +217,12 @@ final class EsqArchive {
             long compressed = entry.getCompressedSize();
             if (size < 0 || compressed < 0) throw new SecurityException("ESQ ZIP 条目大小无效");
             total = Math.addExact(total, size);
+            if (name.toLowerCase(Locale.ROOT).endsWith(".json")) {
+                jsonTotal = Math.addExact(jsonTotal, size);
+                if (size > MAX_JSON_BYTES || jsonTotal > MAX_TOTAL_JSON_BYTES) throw new SecurityException("ESQ JSON 数据超过限制");
+            }
             if (total > MAX_UNCOMPRESSED_BYTES) throw new SecurityException("ESQ 解压后总大小超过限制");
-            if (compressed == 0 ? size > 0 : size / Math.max(1L, compressed) > MAX_COMPRESSION_RATIO) {
+            if (compressed == 0 ? size > 0 : (double) size / compressed > MAX_COMPRESSION_RATIO) {
                 throw new SecurityException("ESQ ZIP 压缩比异常");
             }
         }
@@ -231,10 +248,17 @@ final class EsqArchive {
         }
     }
 
-    private static ZipEntry required(Map<String, ZipEntry> entries, String path) {
+    static ZipEntry required(Map<String, ZipEntry> entries, String path) {
         ZipEntry entry = entries.get(path);
         if (entry == null || entry.isDirectory()) throw new SecurityException("ESQ 缺少文件：" + path);
         return entry;
+    }
+
+    private static String safeContentVersion(String value) {
+        if (value == null || !value.matches("[A-Za-z0-9][A-Za-z0-9._+-]{0,79}")) {
+            throw new SecurityException("ESQ contentVersion invalid");
+        }
+        return value;
     }
 
     private static String safeIdentity(String value, String label) {
@@ -263,12 +287,13 @@ final class EsqArchive {
                 target.write(buffer, 0, count);
                 digest.update(buffer, 0, count);
             }
+            target.getFD().sync();
         }
         if (total != expectedSize) throw new SecurityException("ESQ 资产大小不匹配");
         return hex(digest.digest());
     }
 
-    private static String hashExisting(File file, long expectedSize) throws Exception {
+    static String hashExisting(File file, long expectedSize) throws Exception {
         if (!file.isFile() || file.length() != expectedSize) {
             throw new SecurityException("已有题库资产大小不匹配");
         }
@@ -294,4 +319,3 @@ final class EsqArchive {
         target.delete();
     }
 }
-

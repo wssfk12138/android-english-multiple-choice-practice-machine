@@ -186,6 +186,11 @@ function onPlay() {
   emit('playbackStart')
 }
 
+function onEnded() {
+  playing.value = false
+  loading.value = false
+}
+
 function preventTimedSeeking() {
   const player = audio.value
   if (!player || props.seekable) return
@@ -260,8 +265,10 @@ defineExpose({ pause })
           @loadedmetadata="onLoadedMetadata"
           @canplay="onCanPlay"
           @play="onPlay"
+          @playing="loading=false"
+          @waiting="loading=true"
           @pause="playing=false"
-          @ended="playing=false"
+          @ended="onEnded"
           @timeupdate="onTimeUpdate"
           @seeking="preventTimedSeeking"
           @error="failed=true;loading=false;playing=false"

@@ -4,6 +4,24 @@ export type OrderingFixedSlot =
 
 type JsonRecord = Record<string, any>
 
+export function validateOrderingFixedSlots(unit: JsonRecord): void {
+  const slots = unit.fixed_slots ?? unit.fixedSlots
+  if (slots === undefined) return
+  if (!Array.isArray(slots)) throw new Error('固定段位置必须是数组')
+  if (!slots.length) return
+  const numbers = (unit.questions || []).map((q: JsonRecord) => q.number).sort((a: number,b: number) => a-b)
+  const labels = new Set((unit.candidates || []).map((c: JsonRecord) => c.key))
+  const seenQuestions: number[] = [], seenFixed: string[] = []
+  for (const slot of slots) {
+    if (slot?.type === 'question' && Number.isInteger(slot.number) && numbers.includes(slot.number)) seenQuestions.push(slot.number)
+    else if (slot?.type === 'fixed' && labels.has(slot.label)) seenFixed.push(slot.label)
+    else throw new Error('固定段位置包含无效题号或候选字母')
+  }
+  if (JSON.stringify(seenQuestions.sort((a,b)=>a-b)) !== JSON.stringify(numbers)
+    || new Set(seenFixed).size !== seenFixed.length) throw new Error('固定段位置必须包含每道题且不重复')
+}
+
+
 // The Word source stores these positions as floating text boxes. The current
 // ESQ format has no coordinate field, so this small registry preserves only
 // positions verified against the original English I source documents.
@@ -35,8 +53,14 @@ export function orderingFixedSlotsForPaperUnit(
   paper: JsonRecord,
   unit: JsonRecord,
 ): OrderingFixedSlot[] {
+  // Explicit package metadata is authoritative, including an empty chain.
+  // The registry is only a compatibility fallback for old packages.
+  const explicit = unit.fixed_slots ?? unit.fixedSlots
+    ?? unit.shared_data?.fixed_slots ?? unit.shared_data?.fixedSlots
+  if (Array.isArray(explicit)) return explicit
   const unitType = String(unit.type || unit.unit_type || '')
-  if (!isEnglishOne(paper) || unitType !== 'part_b' || unit.subtype !== 'paragraph_reordering') return []
+  if (!isEnglishOne(paper) || unitType !== 'part_b'
+    || !['paragraph_reordering', 'paragraph_insertion'].includes(unit.subtype)) return []
   const year = Number(paper.year)
   return fixedSlotsFromOrder(ENGLISH_ONE_ORDERING_FIXED_SLOTS[year] || [])
 }
@@ -69,6 +93,7 @@ export function extractOrderingFixedSlots(
     const normalized = candidate.map(value => String(value))
     return expected.every(value => normalized.filter(item => item === String(value)).length === 1)
       && normalized.length === expected.length
+      && candidate.filter(value => typeof value === 'number').join(',') === '41,42,43,44,45'
   }
   if (valid(tokens)) return fixedSlotsFromOrder(tokens)
   const reversed = [...tokens].reverse()

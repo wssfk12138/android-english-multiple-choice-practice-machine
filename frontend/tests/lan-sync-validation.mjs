@@ -68,6 +68,17 @@ assert.throws(
   /内容超过 16 MiB/,
 )
 
+const sequenced = validPull()
+sequenced.cursor.practice_sessions.seq = 19
+sequenced.tombstone_cursor.seq = 23
+const validated = validateLanSyncPullResponse(sequenced, tables)
+assert.equal(validated.cursor.practice_sessions.seq, 19)
+assert.equal(validated.tombstone_cursor.seq, 23)
+for (const seq of [null, -1, 1.5, true, '1', Number.MAX_SAFE_INTEGER + 1]) {
+  assert.throws(() => validateLanSyncPullResponse({ ...validPull(), cursor: { practice_sessions: { updated_at: '', rowid: 0, seq } } }, tables))
+  assert.throws(() => validateLanSyncPullResponse({ ...validPull(), tombstone_cursor: { seq } }, tables))
+}
+
 const tooManyTables = Array.from({ length: 65 }, (_, index) => `table_${index}`)
 assert.throws(
   () => validateLanSyncPullResponse({

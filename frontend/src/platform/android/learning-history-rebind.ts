@@ -9,8 +9,16 @@ export interface LearningHistoryRebindDb {
   run(statement: string, values?: unknown[], transaction?: boolean): Promise<unknown>
   execute(statements: string, transaction?: boolean): Promise<unknown>
 }
+
 type IdMap = Map<number, number>
 type Row = Record<string, any>
+
+/**
+ * How a caller answers "has this migration key been recorded?". The Android
+ * bootstrap passes the shared key cache so the three rebind gates stop costing
+ * one bridge round trip each; other callers keep the plain query.
+ */
+export type AppliedMigrationProbe = (migrationKey: string) => Promise<boolean>
 
 const SNAPSHOT_TABLES = [
   'practice_sessions', 'practice_answers', 'practice_answer_events',
@@ -419,8 +427,12 @@ async function runMigration(
   db: LearningHistoryRebindDb,
   migrationKey: string,
   snapshotPrefix: string,
+  applied?: AppliedMigrationProbe,
 ): Promise<boolean> {
-  if (await one(db, 'SELECT 1 FROM app_migrations WHERE migration_key = ? LIMIT 1', [migrationKey])) return false
+  const alreadyApplied = applied
+    ? await applied(migrationKey)
+    : Boolean(await one(db, 'SELECT 1 FROM app_migrations WHERE migration_key = ? LIMIT 1', [migrationKey]))
+  if (alreadyApplied) return false
   const existingSnapshots = await all<Row>(db, `SELECT name FROM sqlite_master WHERE type = 'table'
     AND name LIKE ?`, [`${snapshotPrefix}%`])
   if (existingSnapshots.length) throw new Error(`检测到未标记完成的 ${migrationKey} 快照，请先人工核验`)
@@ -439,26 +451,29 @@ async function runMigration(
   }
 }
 
-export async function runLearningHistoryRebindV1(db: LearningHistoryRebindDb): Promise<boolean> {
+export async function runLearningHistoryRebindV1(db: LearningHistoryRebindDb, applied?: AppliedMigrationProbe): Promise<boolean> {
   return runMigration(
     db,
     LEARNING_HISTORY_REBIND_MIGRATION,
     'learning_history_rebind_v1_snapshot_',
+    applied,
   )
 }
 
-export async function runLearningHistoryRebindV2(db: LearningHistoryRebindDb): Promise<boolean> {
+export async function runLearningHistoryRebindV2(db: LearningHistoryRebindDb, applied?: AppliedMigrationProbe): Promise<boolean> {
   return runMigration(
     db,
     LEARNING_HISTORY_REBIND_V2_MIGRATION,
     'learning_history_rebind_v2_snapshot_',
+    applied,
   )
 }
 
-export async function runLearningHistoryRebindV3(db: LearningHistoryRebindDb): Promise<boolean> {
+export async function runLearningHistoryRebindV3(db: LearningHistoryRebindDb, applied?: AppliedMigrationProbe): Promise<boolean> {
   return runMigration(
     db,
     LEARNING_HISTORY_REBIND_V3_MIGRATION,
     'learning_history_rebind_v3_snapshot_',
+    applied,
   )
 }

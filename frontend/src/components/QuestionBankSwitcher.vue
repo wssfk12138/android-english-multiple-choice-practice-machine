@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { LibraryBig, Plus, Settings2, Trash2 } from 'lucide-vue-next'
+import { ArrowRight, BookOpen, Plus, Settings2, Trash2 } from 'lucide-vue-next'
 import { onMounted, ref } from 'vue'
+import { confirmDialog, promptDialog } from '../platform/dialogs'
+import OptionSheet from './OptionSheet.vue'
 import {
   activateQuestionBankProfile,
   createQuestionBankProfile,
@@ -11,6 +13,7 @@ import {
 } from '../services/questionBankProfiles'
 
 const emit = defineEmits<{ changed: [] }>()
+const props = withDefaults(defineProps<{ showLibraryLink?: boolean }>(), { showLibraryLink: false })
 const managing = ref(false)
 const newName = ref('')
 const error = ref('')
@@ -19,11 +22,11 @@ onMounted(() => {
   if (!questionBankProfilesState.items.length) void loadQuestionBankProfiles()
 })
 
-async function activate(event: Event) {
-  const id = Number((event.target as HTMLSelectElement).value)
-  if (!id || id === questionBankProfilesState.activeId) return
+async function activate(id: string | number) {
+  const numericId = Number(id)
+  if (!numericId || numericId === questionBankProfilesState.activeId) return
   try {
-    await activateQuestionBankProfile(id)
+    await activateQuestionBankProfile(numericId)
     emit('changed')
   } catch (cause) { error.value = String(cause) }
 }
@@ -38,7 +41,12 @@ async function createProfile() {
 }
 
 async function renameProfile(profile: any) {
-  const name = window.prompt('新的题库配置名称', profile.name)?.trim()
+  const name = (await promptDialog({
+    title: `重命名“${profile.name}”`,
+    message: ['输入新的题库配置名称；练习记录和学习数据保持不变。'],
+    confirmLabel: '保存名称',
+    input: { label: '新名称', value: profile.name, required: true },
+  }))?.trim()
   if (!name || name === profile.name) return
   try {
     await renameQuestionBankProfile(profile.id, name)
@@ -47,7 +55,16 @@ async function renameProfile(profile: any) {
 }
 
 async function removeProfile(profile: any) {
-  if (!window.confirm(`将“${profile.name}”及其中 ${profile.paper_count || 0} 套试卷移入回收站？七天内可以恢复。`)) return
+  const confirmed = await confirmDialog({
+    title: `将“${profile.name}”移入回收站？`,
+    message: [
+      `该配置中现有 ${profile.paper_count || 0} 套试卷将一并移入回收站。`,
+      '内容将在回收站保留七天，期间可以恢复。',
+    ],
+    confirmLabel: '移入回收站',
+    danger: true,
+  })
+  if (!confirmed) return
   try {
     await deleteQuestionBankProfile(profile.id)
     emit('changed')
@@ -58,12 +75,17 @@ async function removeProfile(profile: any) {
 <template>
   <div class="bank-switcher">
     <div class="bank-switcher-main">
-      <LibraryBig :size="17" />
-      <select :value="questionBankProfilesState.activeId" :disabled="questionBankProfilesState.loading" aria-label="当前题库配置" @change="activate">
-        <option v-for="profile in questionBankProfilesState.items" :key="profile.id" :value="profile.id">{{ profile.name }}</option>
-      </select>
+      <OptionSheet
+        :model-value="questionBankProfilesState.activeId"
+        :items="questionBankProfilesState.items.map(profile => ({ value: profile.id, label: profile.name }))"
+        title="切换当前题库配置"
+        :disabled="questionBankProfilesState.loading"
+        @update:model-value="activate"
+      />
       <button class="button ghost compact" type="button" @click="managing = !managing"><Settings2 :size="15" />管理</button>
       <RouterLink class="button ghost compact" to="/trash"><Trash2 :size="15" />回收站</RouterLink>
+      <RouterLink v-if="props.showLibraryLink" class="button ghost compact bank-library-link" to="/library"><BookOpen :size="17" />查看全部题库<ArrowRight :size="16" /></RouterLink>
+      <slot name="actions" />
     </div>
     <div v-if="managing" class="bank-manager card">
       <div class="bank-manager-create">

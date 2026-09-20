@@ -1,0 +1,43 @@
+
+.settings-theme-switch { width: 52px; height: 48px; padding: 10px 0; border: 0; background: transparent; cursor: pointer; flex-shrink: 0; }
+.settings-theme-switch > span { display: block; position: relative; width: 52px; height: 28px; border-radius: 14px; background: var(--muted); }
+.settings-theme-switch > span::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: white; }
+.settings-theme-switch[aria-checked="true"] > span { background: var(--primary); }
+.settings-theme-switch[aria-checked="true"] > span::after { transform: translateX(24px); }
+.settings-theme-switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+html[data-platform=android][data-orientation=landscape] .settings-hub .settings-hub-row { min-height:44px; padding-block:0; }
+html[data-platform=android][data-orientation=landscape] .settings-hub .settings-hub-row-copy { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+html[data-platform=android][data-orientation=landscape] .settings-hub .settings-theme-switch { height:44px; padding-block:8px; }
+
+.settings-hub-group { margin: 0 0 18px; }
+.settings-hub-group-title { margin: 0 0 8px; padding: 0 4px; color: var(--muted); font-size: 13px; font-weight: 700; letter-spacing: .04em; }
+.settings-hub-rows { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-sm); }
+.settings-hub-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) 52px; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 6px 14px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; background: transparent; color: var(--ink); text-align: left; }
+.settings-hub-rows > :last-child { border-bottom: 0; }
+.settings-hub-row.link { min-height: 56px; }
+.settings-hub-row.link:hover { background: var(--primary-faint); }
+.settings-hub-row-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--primary-soft); color: var(--primary); }
+.settings-hub-row strong { font-size: 16px; line-height: 1.5; font-weight: 600; }
+.settings-hub-row-copy { display: grid; gap: 1px; min-width: 0; }
+.settings-hub-row-copy small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-hub-chevron { justify-self: end; color: var(--muted); transition: transform .2s ease; }
+.settings-hub-chevron.open { transform: rotate(180deg); }
+.settings-hub-row.stack { display: block; padding: 0; }
+.settings-hub-row-toggle { display: grid; width: 100%; min-height: 56px; padding: 6px 14px; grid-template-columns: 32px minmax(0, 1fr) 52px; gap: 12px; align-items: center; border: 0; background: transparent; color: var(--ink); text-align: left; }
+.settings-hub-row-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.settings-vocab-display-options { display: grid; gap: 0; padding: 2px 14px 12px 58px; }
+.settings-vocab-display-options label { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--line); font-size: 15px; }
+.settings-vocab-display-options label:last-child { border-bottom: 0; }
+.settings-vocab-display-options input { width: 19px; height: 19px; }
+.settings-hub-brand { display: flex; align-items: center; gap: 7px; justify-content: center; margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+html[data-platform=android][data-orientation=landscape] :is(.settings-hub,.vocabulary-display) .settings-hub-group { padding:14px 18px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface); box-shadow:var(--shadow-sm); }
+html[data-platform=android][data-orientation=landscape] :is(.settings-hub,.vocabulary-display) .settings-hub-rows { border:0; box-shadow:none; background:transparent; border-radius:0; }
+html[data-platform=android][data-orientation=landscape] .settings-hub .settings-hub-row-copy { display:flex; justify-content:space-between; }
+html[data-platform=android][data-orientation=landscape] .vocabulary-display .settings-hub-rows { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:24px; }
+html[data-platform=android][data-orientation=landscape] .vocabulary-display .selection-option { min-height:44px; grid-template-columns:24px minmax(0,1fr); gap:10px; padding:4px 0; border:0; }
+html[data-platform=android][data-orientation=landscape] .vocabulary-display .selection-option .settings-hub-row-icon { display:none; }
+html[data-platform=android][data-orientation=landscape] .vocabulary-display .selection-option input { grid-column:1; grid-row:1; justify-self:start; }
+html[data-platform=android][data-orientation=landscape] .vocabulary-display .selection-option > span:not(.settings-hub-row-icon) { grid-column:2; grid-row:1; }
+@media (max-width: 720px) {
+  .settings-hub-row, .settings-hub-row-toggle { grid-template-columns: 32px minmax(0, 1fr) 52px; }
+}

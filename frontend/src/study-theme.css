@@ -1,0 +1,199 @@
+/* Approved shared palette; geometry and release UI remain platform-owned. */
+html:root .study-hero {
+  background-image: linear-gradient(90deg, rgba(250,252,255,.98), rgba(250,252,255,.86) 48%, rgba(250,252,255,.15)),
+    url("/assets/backgrounds/study-coast-morning-v1.webp");
+}
+html:root.dark .study-hero {
+  background-image: linear-gradient(90deg, rgba(37,40,47,.98), rgba(37,40,47,.86) 48%, rgba(37,40,47,.15)),
+    url("/assets/backgrounds/study-coast-dusk-v1.webp");
+}
+html:root {
+  color-scheme: light;
+  --bg: #edf2f6;
+  --surface: rgba(250, 252, 255, .94);
+  --surface-solid: #fafcff;
+  --ink: #29313c;
+  --muted: #616d7d;
+  --line: rgba(91, 110, 133, .18);
+  --line-strong: rgba(75, 95, 121, .28);
+  --primary: #416a9a;
+  --primary-hover: #315580;
+  --primary-soft: #dfeaf6;
+  --primary-faint: #edf3fa;
+  --lavender: #e9e4f5;
+  --apricot: #f7dfc6;
+  --blue: #dcecf4;
+  --danger: #b54f46;
+  --danger-soft: #fae3dd;
+  --success: #34785a;
+  --focus: rgba(65, 106, 154, .3);
+  --shadow-sm: 0 4px 14px rgba(57, 66, 58, .075);
+  --shadow: 0 16px 42px rgba(57, 66, 58, .13);
+  background-color: var(--bg);
+}
+
+html:root.dark {
+  color-scheme: dark;
+  --bg: #191b20;
+  --surface: rgba(37, 40, 47, .94);
+  --surface-solid: #25282f;
+  --ink: #f0f1f5;
+  --muted: #b7bdc8;
+  --line: rgba(211, 216, 235, .15);
+  --line-strong: rgba(211, 216, 235, .25);
+  --primary: #a5c5ed;
+  --primary-hover: #c0d7f4;
+  --primary-soft: #334154;
+  --primary-faint: #2b3340;
+  --lavender: #38324f;
+  --apricot: #49382f;
+  --blue: #263c58;
+  --danger: #f0a097;
+  --danger-soft: #4c3038;
+  --success: #91d5ae;
+  --focus: rgba(165, 197, 237, .34);
+  --shadow-sm: 0 5px 17px rgba(0, 0, 0, .2);
+  --shadow: 0 18px 48px rgba(0, 0, 0, .3);
+}
+
+html:root body {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(rgba(237, 242, 246, .22), rgba(237, 242, 246, .22)),
+    url("/assets/backgrounds/study-coast-morning-v1.webp");
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  background-size: cover;
+  background-attachment: fixed;
+}
+
+html:root.dark .button:not(.secondary):not(.ghost):not(.danger) {
+  color: #191b20;
+}
+
+html:root.dark body {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(rgba(25, 27, 32, .32), rgba(25, 27, 32, .32)),
+    url("/assets/backgrounds/study-coast-dusk-v1.webp");
+}
+
+@media (orientation: landscape) {
+  html:root[data-platform="android"] .vocabulary-review-overlay {
+    place-items: center;
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+  }
+
+  html:root[data-platform="android"] .vocabulary-review-card {
+    width: min(720px, 100%);
+    height: auto;
+    max-height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 20px 24px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    background: var(--surface-solid);
+    box-shadow: var(--shadow);
+    text-align: center;
+  }
+
+  html:root[data-platform="android"] .vocabulary-review-card .review-header,
+  html:root[data-platform="android"] .vocabulary-review-card .review-actions {
+    flex: 0 0 auto;
+  }
+
+  html:root[data-platform="android"] .vocabulary-review-card .review-content {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 20px 8px;
+  }
+
+  html:root[data-platform="android"] .vocabulary-review-card .review-term {
+    margin-top: 0;
+    font-size: 48px;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+
+  html:root[data-platform="android"] .vocabulary-review-card .reveal-button {
+    margin-top: 80px;
+  }
+
+  html:root[data-platform="android"] .vocabulary-review-card .review-answer {
+    display: grid;
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+
+  html:root[data-platform="android"] .vocabulary-review-card .review-answer small {
+    display: block;
+    color: var(--muted);
+  }
+
+  html:root[data-platform="android"] .vocabulary-review-card .review-header {
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0;
+    border: 0;
+  }
+
+  html:root[data-platform="android"] .vocabulary-review-card .review-close {
+    position: static;
+    width: 40px;
+    height: 40px;
+    font-size: 24px;
+  }
+
+  html:root[data-platform="android"] .vocabulary-review-card .review-meaning-block,
+  html:root[data-platform="android"] .vocabulary-review-card .review-sentence-block {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    overflow-wrap: anywhere;
+  }
+
+  html:root[data-platform="android"] .vocabulary-review-card .review-answer p {
+    margin: 6px 0 0;
+  }
+
+  html:root[data-platform="android"] .vocabulary-review-card .review-answer blockquote {
+    margin: 8px 0 0;
+    padding: 12px 16px;
+    max-height: none;
+    overflow: visible;
+    font-size: 17px;
+    line-height: 1.65;
+  }
+
+  html:root[data-platform="android"] .vocabulary-review-card .review-actions {
+    max-width: 440px;
+    margin-inline: auto;
+    padding: 8px 0 0;
+    border: 0;
+  }
+}
+
+/* Final landscape review: reserve the real answer before revealing it. */
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card { width:min(680px,100%); min-height:min(432.67px,100%); padding:20px; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-content { position:relative; flex:1 1 auto; padding:8px 0; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .reveal-button { position:absolute; top:110px; left:50%; transform:translateX(-50%); margin:0; z-index:1; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-answer { margin-top:8px; display:block; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .answer-reserved { visibility:hidden; pointer-events:none; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-meaning-block { margin:8px 0; text-align:center; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-meaning-heading { justify-content:center; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .memory-layer { text-align:left; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .memory-layer-static { border-top:0; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .memory-layer-static p { padding:10px 16px; border-left:3px solid var(--primary); background:var(--primary-faint); border-radius:0 8px 8px 0; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-actions { width:100%; max-width:488px; display:grid; grid-template-columns:repeat(3,minmax(0,156px)); gap:10px; justify-content:center; border-top:1px solid var(--line); padding-top:12px; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .memory-layer-static h4 { margin:8px 0; font-size:13px; font-weight:400; color:var(--muted); }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-part-of-speech { display:inline; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-close { width:auto; padding:0 6px; border:0; background:transparent; color:var(--ink); font-size:14px; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-meaning-heading { display:flex; gap:8px; }

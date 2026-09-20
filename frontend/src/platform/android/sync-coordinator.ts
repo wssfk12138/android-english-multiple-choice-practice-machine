@@ -3,7 +3,7 @@ export type SyncCoordinator<T> = {
   requestAuto: (followUpAfterActive?: boolean) => void
   resetPending: () => void
 }
-export function createSyncCoordinator<T>(run: () => Promise<T>): SyncCoordinator<T> {
+export function createSyncCoordinator<T>(run: () => Promise<T>, onAutoError?: (cause: unknown) => void): SyncCoordinator<T> {
   let active: Promise<T> | null = null
   let followUpPending = false
 
@@ -17,7 +17,7 @@ export function createSyncCoordinator<T>(run: () => Promise<T>): SyncCoordinator
       if (active === current) active = null
       if (followUpPending) {
         followUpPending = false
-        queueMicrotask(() => void runNow().catch(() => undefined))
+        queueMicrotask(() => void runNow().catch((cause) => onAutoError?.(cause)))
       }
     }
   }
@@ -29,7 +29,7 @@ export function createSyncCoordinator<T>(run: () => Promise<T>): SyncCoordinator
         if (followUpAfterActive) followUpPending = true
         return
       }
-      void runNow().catch(() => undefined)
+      void runNow().catch((cause) => onAutoError?.(cause))
     },
     resetPending(): void {
       followUpPending = false

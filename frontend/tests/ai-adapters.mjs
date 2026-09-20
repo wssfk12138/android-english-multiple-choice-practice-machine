@@ -21,6 +21,14 @@ const messages = [
   },
 ]
 const options = { temperature: 0.2, maxTokens: 321, reasoningEffort: 'high' }
+for (const adapter of SELECTABLE_ADAPTERS) {
+  if (adapter.id === 'anthropic') {
+    assert.throws(()=>adapter.serialize('synthetic',messages,{temperature:0.2}),/max_tokens.*可靠/)
+  } else {
+    const body=JSON.stringify(adapter.serialize('synthetic',messages,{temperature:0.2}))
+    assert.doesNotMatch(body,/max_tokens|max_output_tokens|maxOutputTokens/)
+  }
+}
 
 assert.equal(DEFAULT_ADAPTER, 'openai-chat')
 assert.deepEqual(
@@ -38,7 +46,7 @@ const [databaseSource, settingsSource, aiSource] = await Promise.all([
 ])
 assert.ok(databaseSource.includes("adapter TEXT NOT NULL DEFAULT 'openai-chat'"))
 assert.ok(databaseSource.includes("ensureColumn(db, 'ai_profiles', 'adapter'"))
-assert.ok(settingsSource.includes('v-for="adapter in adapters"'))
+assert.ok(settingsSource.includes('function adapterItems()'))
 assert.ok(aiSource.includes("VALUES (?, 'user', ?, ?, ?, ?)`"))
 
 const chat = adapterFor('openai-chat')

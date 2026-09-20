@@ -1,35 +1,35 @@
 <script setup lang="ts">
+import NamedModelKeys from '../components/NamedModelKeys.vue'
+import { saveModelVisibility, retryModelVisibility, visibilitySaveStates, intendedModelVisibility } from '../services/profileDrafts'
+import { useAndroidLandscape } from '../composables/useAndroidLandscape'
+import { preferDefaultProfile, profileDrafts, profileSaveStates, saveProfileDraft, flushProfileDraft, forgetProfileDraft, profileHasDraft, serializeProfileOperation } from '../services/profileDrafts'
+import OptionSheet, { type OptionSheetItem } from '../components/OptionSheet.vue'
 import {
+  BookOpen,
   Check,
   ChevronDown,
   ChevronUp,
   CirclePlus,
   Eye,
   EyeOff,
-  BookOpen,
   ExternalLink,
-  KeyRound,
-  LibraryBig,
-  Lock,
   LoaderCircle,
-  Pause,
-  Play,
-  PlugZap,
+  MoreHorizontal,
   RefreshCw,
   Save,
-  Search,
   Server,
+  PlugZap,
   Trash2,
 } from 'lucide-vue-next'
-import { onMounted, reactive, ref } from 'vue'
-import { del, get, post, put } from '../api'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { del, get, post } from '../api'
+import { confirmDialog } from '../platform/dialogs'
 import {
   SELECTABLE_ADAPTERS,
   adapterFor,
   normalizeAdapterId,
   type AdapterId,
 } from '../platform/android/ai-adapters'
-import { platformRuntime } from '../platform/runtime'
 
 type AiModel = {
   model_id: string
@@ -57,55 +57,17 @@ type AiProfile = {
   models: AiModel[]
 }
 
-type LabelStatus = {
-  year: number | null
-  years: number[]
-  total: number
-  labeled: number
-  locked: number
-  review_pending: number
-  remaining: number
-  percentage: number
-}
-
-type QuestionLabel = {
-  question_id: number
-  number: number
-  year: number
-  unit_title: string
-  primary_skill: string
-  secondary_skills: string[]
-  trap_types: string[]
-  attention_points: string[]
-  vocabulary_demand: 'low' | 'medium' | 'high'
-  context_dependency: 'low' | 'medium' | 'high'
-  grammar_dependency: 'low' | 'medium' | 'high'
-  confidence: number
-  locked: boolean
-  user_edited: boolean
-  model_name: string
-  updated_at: string
-}
-
 const profiles = ref<AiProfile[]>([])
+const landscape = useAndroidLandscape()
 const adapters = SELECTABLE_ADAPTERS
-const expanded = ref<number[]>([])
+const expandedProfileId = ref<number | null>(null)
 const busy = reactive<Record<string, boolean>>({})
 const notices = reactive<Record<number, string>>({})
 const message = ref('')
 const error = ref('')
 const creating = ref(false)
-const labelStatus = ref<LabelStatus | null>(null)
-const labelYear = ref<number | ''>('')
-const labeling = ref(false)
-const labelMessage = ref('')
-const overwriteUnlocked = ref(false)
-const labelRunId = ref('')
-const labelManagerOpen = ref(false)
-const labelRows = ref<QuestionLabel[]>([])
-const labelSearch = ref('')
-const editingLabel = ref<QuestionLabel | null>(null)
-const supportsQuestionLabeling = !platformRuntime.isAndroid
+const moreMenuFor = ref<number | null>(null)
+const modelListExpanded = reactive<Record<number, boolean>>({})
 
 function blankProfile(): AiProfile {
   return {
@@ -158,138 +120,75 @@ function endpointPreview(profile: AiProfile) {
   return adapter.chatUrl(baseUrl, profile.default_model.trim() || '{model}')
 }
 
+/** 列表中的地址摘要：只显示主机和端口，避免长 URL 撑爆列表行。 */
+function addressSummary(baseUrl: string) {
+  const text = baseUrl.trim()
+  if (!text) return '未填写地址'
+  try {
+    const url = new URL(text)
+    return `${url.host}${url.pathname === '/' ? '' : url.pathname}`
+  } catch {
+    return text.length > 36 ? `${text.slice(0, 36)}…` : text
+  }
+}
+
+function adapterItems(): OptionSheetItem[] {
+  return adapters.map(adapter => ({ value: adapter.id, label: adapter.label, hint: adapter.description }))
+}
+
+function reasoningItems(profile: AiProfile): OptionSheetItem[] {
+  return [
+    { value: '', label: '未设置（由接口决定）' },
+    { value: 'low', label: '低' },
+    { value: 'medium', label: '中' },
+    { value: 'high', label: '高' },
+    // 协议不支持时保留已选值，但不允许继续更改。
+    ...(adapterDefinition(profile).supportsReasoningEffort ? [] : [{ value: '__disabled__', label: '该协议不发送推理强度', disabled: true, unavailableNote: '已选值会保留' }]),
+  ]
+}
+
+function modelItems(profile: AiProfile): OptionSheetItem[] {
+  return profile.models.map(model => ({
+    value: model.model_id,
+    label: model.display_name || model.model_id,
+    hint: model.owned_by || model.provider || '接口模型',
+    disabled: !model.is_available,
+    unavailableNote: model.is_available ? undefined : '本次同步未发现，暂不可选',
+  }))
+}
+
+function visibleModelCount(profile: AiProfile) {
+  return profile.models.filter(model => model.is_visible).length
+}
+
+function filteredModels(profile: AiProfile) {
+  return profile.models
+}
+
 function busyKey(action: string, id: number) {
   return `${action}:${id}`
 }
 
 function toggleExpanded(id: number) {
-  expanded.value = expanded.value.includes(id)
-    ? expanded.value.filter(item => item !== id)
-    : [...expanded.value, id]
+  expandedProfileId.value = expandedProfileId.value === id ? null : id
+}
+
+function toggleMoreMenu(id: number) {
+  moreMenuFor.value = moreMenuFor.value === id ? null : id
 }
 
 async function load() {
   try {
     const result = await get<AiProfile[]>('/ai/profiles')
-    profiles.value = result.map(profile => ({
-      ...profile,
-      adapter: normalizeAdapterId(profile.adapter),
-      api_key: '',
-    }))
+    profiles.value = result.map(profile => {
+      if (!profileDrafts[profile.id]) profileDrafts[profile.id] = { ...profile, adapter: normalizeAdapterId(profile.adapter), api_key: '' }
+      else if (!profileHasDraft(profile.id)) Object.assign(profileDrafts[profile.id], profile, { adapter: normalizeAdapterId(profile.adapter), api_key: '' })
+      else profileDrafts[profile.id].models = profile.models
+      return profileDrafts[profile.id]
+    })
     error.value = ''
   } catch (cause) {
     error.value = String(cause)
-  }
-}
-
-async function loadLabelStatus() {
-  try {
-    const query = labelYear.value === '' ? '' : `?year=${labelYear.value}`
-    labelStatus.value = await get<LabelStatus>(`/ai/question-labels/status${query}`)
-  } catch (cause) {
-    labelMessage.value = `读取标注进度失败：${String(cause)}`
-  }
-}
-
-async function runLabeling() {
-  if (labeling.value) return
-  if (!window.confirm('题库智能标注会调用当前默认 API 并产生 Token 消耗。确定开始吗？')) return
-  if (!labelRunId.value) {
-    labelRunId.value = crypto.randomUUID()
-  }
-  labeling.value = true
-  labelMessage.value = '正在读取下一篇题目…'
-  try {
-    while (labeling.value) {
-      const result = await post<any>('/ai/question-labels/next', {
-        year: labelYear.value === '' ? null : labelYear.value,
-        overwrite_unlocked: overwriteUnlocked.value,
-        run_id: labelRunId.value,
-      })
-      labelRunId.value = result.run_id || labelRunId.value
-      labelStatus.value = result
-      if (result.done) {
-        labelMessage.value = '所选范围已经全部完成标注'
-        labeling.value = false
-        labelRunId.value = ''
-        break
-      }
-      labelMessage.value = `已完成：${result.unit_title}，本篇标注 ${result.processed} 道`
-      await new Promise(resolve => window.setTimeout(resolve, 120))
-    }
-  } catch (cause) {
-    labelMessage.value = String(cause)
-    labeling.value = false
-  }
-}
-
-async function pauseLabeling() {
-  labeling.value = false
-  const runId = labelRunId.value
-  if (runId) {
-    try {
-      await post(`/ai/question-labels/runs/${encodeURIComponent(runId)}/pause`, {})
-    } catch (cause) {
-      labelMessage.value = `暂停状态保存失败：${String(cause)}`
-      return
-    }
-  }
-  labelMessage.value = '已暂停。再次开始时会从下一篇未完成材料继续。'
-}
-
-async function loadQuestionLabels() {
-  const query = new URLSearchParams()
-  if (labelYear.value !== '') query.set('year', String(labelYear.value))
-  if (labelSearch.value.trim()) query.set('search', labelSearch.value.trim())
-  query.set('limit', '120')
-  try {
-    labelRows.value = await get<QuestionLabel[]>(`/ai/question-labels?${query}`)
-    labelManagerOpen.value = true
-  } catch (cause) {
-    labelMessage.value = String(cause)
-  }
-}
-
-function editLabel(row: QuestionLabel) {
-  editingLabel.value = {
-    ...row,
-    // Any manual correction is protected by default. The user can explicitly
-    // uncheck this if they want later batch labeling to replace it.
-    locked: true,
-    secondary_skills: [...(row.secondary_skills || [])],
-    trap_types: [...(row.trap_types || [])],
-    attention_points: [...(row.attention_points || [])],
-  }
-}
-
-function splitTags(value: string) {
-  return value.split(/[，,；;\n]/).map(item => item.trim()).filter(Boolean)
-}
-
-async function saveQuestionLabel() {
-  const row = editingLabel.value
-  if (!row) return
-  const key = busyKey('label', row.question_id)
-  busy[key] = true
-  try {
-    await put(`/ai/question-labels/${row.question_id}`, {
-      primary_skill: row.primary_skill,
-      secondary_skills: row.secondary_skills,
-      trap_types: row.trap_types,
-      attention_points: row.attention_points,
-      vocabulary_demand: row.vocabulary_demand,
-      context_dependency: row.context_dependency,
-      grammar_dependency: row.grammar_dependency,
-      confidence: row.confidence,
-      locked: row.locked,
-    })
-    labelMessage.value = `已保存并${row.locked ? '锁定' : '解除锁定'} ${row.year} 年第 ${row.number} 题标签`
-    editingLabel.value = null
-    await Promise.all([loadQuestionLabels(), loadLabelStatus()])
-  } catch (cause) {
-    labelMessage.value = String(cause)
-  } finally {
-    busy[key] = false
   }
 }
 
@@ -304,7 +203,6 @@ async function createProfile() {
     message.value = `已添加“${created.name}”`
     error.value = ''
     await load()
-    expanded.value = expanded.value.filter(id => id !== created.id)
     signalChanged()
   } catch (cause) {
     error.value = String(cause)
@@ -314,22 +212,16 @@ async function createProfile() {
 }
 
 async function saveProfile(profile: AiProfile) {
-  const key = busyKey('save', profile.id)
-  if (busy[key]) return
-  busy[key] = true
-  try {
-    await put(`/ai/profiles/${profile.id}`, payload(profile))
-    notices[profile.id] = '配置已保存'
-    message.value = ''
-    error.value = ''
-    await load()
-    expanded.value = expanded.value.filter(id => id !== profile.id)
-    signalChanged()
-  } catch (cause) {
-    error.value = String(cause)
-  } finally {
-    busy[key] = false
+  if (!saveProfileDraft(profile.id, payload(profile), true)) return false
+  return flushProfileDraft(profile.id)
+}
+function editProfile(profile: AiProfile, immediate = false) { saveProfileDraft(profile.id, payload(profile), immediate) }
+function chooseDefault(profile: AiProfile) {
+  preferDefaultProfile(profile.id)
+  for (const other of profiles.value) {
+    if (other.id !== profile.id && other.is_default) { other.is_default = false; editProfile(other, true) }
   }
+  editProfile(profile, true)
 }
 
 async function toggleProfile(profile: AiProfile) {
@@ -338,6 +230,7 @@ async function toggleProfile(profile: AiProfile) {
 }
 
 async function syncModels(profile: AiProfile) {
+  if (!await saveProfile(profile)) return
   const key = busyKey('sync', profile.id)
   if (busy[key]) return
   busy[key] = true
@@ -356,6 +249,7 @@ async function syncModels(profile: AiProfile) {
 }
 
 async function testProfile(profile: AiProfile) {
+  if (!await saveProfile(profile)) return
   const key = busyKey('test', profile.id)
   if (busy[key]) return
   busy[key] = true
@@ -374,33 +268,35 @@ async function testProfile(profile: AiProfile) {
 }
 
 async function setModelVisible(profile: AiProfile, model: AiModel) {
-  model.is_visible = !model.is_visible
-  try {
-    await put(`/ai/profiles/${profile.id}/models`, {
-      model_id: model.model_id,
-      is_visible: model.is_visible,
-    })
-    signalChanged()
-  } catch (cause) {
-    model.is_visible = !model.is_visible
-    error.value = String(cause)
-  }
+  await saveModelVisibility(profile.id, !intendedModelVisibility(profile.id, model), model.model_id)
 }
 
 async function setAllVisible(profile: AiProfile, visible: boolean) {
-  try {
-    await put(`/ai/profiles/${profile.id}/models/visibility`, { is_visible: visible })
-    profile.models.forEach(model => { model.is_visible = visible })
-    signalChanged()
-  } catch (cause) {
-    error.value = String(cause)
-  }
+  await saveModelVisibility(profile.id, visible)
+}
+
+function toggleModelList(profile: AiProfile) {
+  modelListExpanded[profile.id] = !modelListExpanded[profile.id]
 }
 
 async function removeProfile(profile: AiProfile) {
-  if (!window.confirm(`删除 API 配置“${profile.name}”？已保存的对话不会被删除。`)) return
+  moreMenuFor.value = null
+  const confirmed = await confirmDialog({
+    title: `删除 API 配置“${profile.name}”？`,
+    message: [
+      `该配置的地址：${addressSummary(profile.base_url)}。`,
+      '删除后该配置不再参与判分、翻译和标注。',
+      '已保存的对话不会被删除；API Key 随配置一并移除。',
+    ],
+    confirmLabel: '删除配置',
+    cancelLabel: '取消',
+    danger: true,
+  })
+  if (!confirmed) return
   try {
-    await del(`/ai/profiles/${profile.id}`)
+    await flushProfileDraft(profile.id)
+    await serializeProfileOperation(() => del(`/ai/profiles/${profile.id}`))
+    forgetProfileDraft(profile.id)
     message.value = `已删除“${profile.name}”`
     error.value = ''
     await load()
@@ -412,7 +308,6 @@ async function removeProfile(profile: AiProfile) {
 
 onMounted(() => {
   load()
-  if (supportsQuestionLabeling) loadLabelStatus()
 })
 </script>
 
@@ -430,107 +325,6 @@ onMounted(() => {
     <div v-if="error" class="warning" role="alert">{{ error }}</div>
     <div v-if="message" class="settings-success"><Check :size="17" />{{ message }}</div>
 
-    <section v-if="supportsQuestionLabeling" class="question-label-workspace card" aria-labelledby="question-label-title">
-      <div class="question-label-heading">
-        <span class="api-profile-icon"><LibraryBig :size="21" /></span>
-        <div>
-          <h2 id="question-label-title">题库智能标注</h2>
-        </div>
-      </div>
-      <div class="question-label-controls">
-        <div class="field">
-          <label for="label-year">标注范围</label>
-          <select id="label-year" v-model="labelYear" :disabled="labeling" @change="loadLabelStatus">
-            <option value="">全部年份</option>
-            <option v-for="year in labelStatus?.years || []" :key="year" :value="year">{{ year }} 年</option>
-          </select>
-        </div>
-        <label class="default-profile-check label-overwrite">
-          <input v-model="overwriteUnlocked" type="checkbox" :disabled="labeling">
-          重新标注未锁定题目
-        </label>
-        <div class="question-label-actions">
-          <button v-if="!labeling" class="button" type="button" @click="runLabeling">
-            <Play :size="16" />开始标注
-          </button>
-          <button v-else class="button secondary" type="button" @click="pauseLabeling">
-            <Pause :size="16" />暂停
-          </button>
-          <button class="button secondary" type="button" :disabled="labeling" @click="loadQuestionLabels">
-            <Search :size="16" />查看与校正
-          </button>
-        </div>
-      </div>
-      <div v-if="labelStatus" class="question-label-progress">
-        <div>
-          <span>已标注 {{ labelStatus.labeled }} / {{ labelStatus.total }} 道</span>
-          <strong>{{ labelStatus.percentage }}%</strong>
-        </div>
-        <div class="question-label-track" role="progressbar" :aria-valuenow="labelStatus.percentage" aria-valuemin="0" aria-valuemax="100">
-          <span :style="{ width: `${labelStatus.percentage}%` }" />
-        </div>
-        <small>
-          {{ labelStatus.locked }} 道标签已锁定；模型成功标注和人工校正结果都会自动锁定，只有明确解除锁定后才允许重新标注。
-          <template v-if="labelStatus.review_pending">
-            其中 {{ labelStatus.review_pending }} 道原题结构待校正，错题分析会暂时忽略其预标注。
-          </template>
-        </small>
-      </div>
-      <p v-if="labelMessage" class="api-profile-notice" role="status">{{ labelMessage }}</p>
-      <div v-if="labelManagerOpen" class="question-label-manager">
-        <div class="question-label-filter">
-          <div class="field">
-            <label for="label-search">搜索标签</label>
-            <input id="label-search" v-model="labelSearch" placeholder="篇目、题号或主要考点" @keyup.enter="loadQuestionLabels">
-          </div>
-          <button class="button secondary compact" type="button" @click="loadQuestionLabels"><Search :size="15" />搜索</button>
-        </div>
-        <div v-if="labelRows.length" class="question-label-list">
-          <button
-            v-for="row in labelRows"
-            :key="row.question_id"
-            type="button"
-            class="question-label-row"
-            :class="{ unlabeled: !row.primary_skill }"
-            @click="editLabel(row)"
-          >
-            <span><strong>{{ row.year }} 年 · {{ row.unit_title }}</strong><small>第 {{ row.number }} 题</small></span>
-            <span>{{ row.primary_skill || '尚未标注' }}</span>
-            <span class="question-label-state"><Lock v-if="row.locked" :size="13" />{{ row.locked ? '已锁定' : '可更新' }}</span>
-          </button>
-        </div>
-        <div v-else class="api-model-empty">当前范围没有符合条件的题目。</div>
-      </div>
-    </section>
-
-    <div v-if="editingLabel" class="label-editor-overlay" role="presentation" @click.self="editingLabel=null">
-      <section class="label-editor card" role="dialog" aria-modal="true" aria-labelledby="label-editor-title">
-        <header>
-          <div><h2 id="label-editor-title">{{ editingLabel.year }} 年第 {{ editingLabel.number }} 题</h2></div>
-          <button class="button ghost compact" type="button" @click="editingLabel=null">取消</button>
-        </header>
-        <div class="field"><label>主要考点</label><input v-model.trim="editingLabel.primary_skill"></div>
-        <div class="field"><label>次要考点（逗号分隔）</label><input :value="editingLabel.secondary_skills.join('，')" @input="editingLabel.secondary_skills=splitTags(($event.target as HTMLInputElement).value)"></div>
-        <div class="field"><label>常见陷阱（逗号分隔）</label><textarea :value="editingLabel.trap_types.join('，')" rows="2" @input="editingLabel.trap_types=splitTags(($event.target as HTMLTextAreaElement).value)"></textarea></div>
-        <div class="field"><label>注意事项（每条用逗号或换行分隔）</label><textarea :value="editingLabel.attention_points.join('\n')" rows="3" @input="editingLabel.attention_points=splitTags(($event.target as HTMLTextAreaElement).value)"></textarea></div>
-        <div class="grid grid-3">
-          <div class="field"><label>词汇依赖</label><select v-model="editingLabel.vocabulary_demand"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></div>
-          <div class="field"><label>上下文依赖</label><select v-model="editingLabel.context_dependency"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></div>
-          <div class="field"><label>语法依赖</label><select v-model="editingLabel.grammar_dependency"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></div>
-        </div>
-        <label class="default-profile-check">
-          <input v-model="editingLabel.locked" type="checkbox">
-          保存后锁定，后续批量标注不会覆盖
-        </label>
-        <footer>
-          <small>人工保存的内容会标记为“人工校正”，默认建议保持锁定。</small>
-          <button class="button" type="button" :disabled="busy[busyKey('label',editingLabel.question_id)] || !editingLabel.primary_skill.trim()" @click="saveQuestionLabel">
-            <Save :size="16" />保存标签
-          </button>
-        </footer>
-      </section>
-    </div>
-
     <section v-if="creating" class="api-profile-card new-profile">
       <div class="api-profile-heading">
         <span class="api-profile-icon"><CirclePlus :size="20" /></span>
@@ -538,29 +332,22 @@ onMounted(() => {
       </div>
       <div class="api-profile-body">
         <div class="grid grid-2">
-          <div class="field"><label>配置名称</label><input v-model.trim="newProfile.name" placeholder="例如：本地 Ollama"></div>
+          <div class="field"><label for="new-profile-name">配置名称</label><input id="new-profile-name" v-model.trim="newProfile.name" placeholder="例如：本地 Ollama"></div>
           <div class="field">
-            <label>接口协议</label>
-            <select v-model="newProfile.adapter">
-              <option v-for="adapter in adapters" :key="adapter.id" :value="adapter.id">{{ adapter.label }}</option>
-            </select>
-            <small>{{ adapterDefinition(newProfile).description }}</small>
+            <label id="new-profile-adapter-label">接口协议</label>
+            <OptionSheet v-model="newProfile.adapter" :items="adapterItems()" title="选择接口协议" searchable placeholder="选择接口协议" aria-labelledby="new-profile-adapter-label" />
           </div>
         </div>
         <div class="grid grid-2">
-          <div class="field"><label>默认模型（可稍后同步选择）</label><input v-model.trim="newProfile.default_model" placeholder="例如：qwen3:8b"></div>
-          <div class="field"><label>API Base URL</label><input v-model.trim="newProfile.base_url" :placeholder="adapterDefinition(newProfile).baseUrlPlaceholder"><small>请求端点：{{ endpointPreview(newProfile) }}</small></div>
+          <div class="field"><label for="new-profile-model">默认模型（可稍后同步选择）</label><input id="new-profile-model" v-model.trim="newProfile.default_model" placeholder="例如：qwen3:8b"></div>
+          <div class="field"><label for="new-profile-url">API Base URL</label><input id="new-profile-url" v-model.trim="newProfile.base_url" :placeholder="adapterDefinition(newProfile).baseUrlPlaceholder"><small>请求端点：{{ endpointPreview(newProfile) }}</small></div>
         </div>
-        <div class="field"><label>API Key</label><input v-model="newProfile.api_key" type="password" placeholder="本地接口通常可留空"></div>
-        <div class="field">
-          <label>默认推理强度</label>
-          <select v-model="newProfile.reasoning_effort" :disabled="!adapterDefinition(newProfile).supportsReasoningEffort">
-            <option value="">未设置（由接口决定）</option>
-            <option value="low">低</option>
-            <option value="medium">中</option>
-            <option value="high">高</option>
-          </select>
-          <small v-if="!adapterDefinition(newProfile).supportsReasoningEffort">该协议不发送推理强度，已选值会保留。</small>
+        <div class="grid grid-2">
+          <div class="field"><label for="new-profile-key">API Key</label><input id="new-profile-key" v-model="newProfile.api_key" type="password" placeholder="本地接口通常可留空"></div>
+          <div class="field">
+            <label>默认推理强度</label>
+            <OptionSheet v-model="newProfile.reasoning_effort" :disabled="!adapterDefinition(newProfile).supportsReasoningEffort" :items="reasoningItems(newProfile)" title="选择推理强度" />
+          </div>
         </div>
         <div class="api-create-actions">
           <button class="button secondary" type="button" @click="creating=false">取消</button>
@@ -575,18 +362,18 @@ onMounted(() => {
     <div class="api-profile-list">
       <article v-for="profile in profiles" :key="profile.id" class="api-profile-card">
         <header class="api-profile-summary">
-          <button class="api-profile-expand" type="button" :aria-expanded="expanded.includes(profile.id)" @click="toggleExpanded(profile.id)">
+          <button class="api-profile-expand" type="button" :aria-expanded="expandedProfileId === profile.id" @click="toggleExpanded(profile.id)">
             <span class="api-profile-icon"><Server :size="20" /></span>
             <span class="api-profile-copy">
               <span><strong>{{ profile.name }}</strong><small v-if="profile.is_default">默认</small></span>
-              <small>{{ profile.base_url }}</small>
+              <small>{{ addressSummary(profile.base_url) }}</small>
             </span>
             <span class="api-profile-stats">
-              <small>{{ profile.models.filter(model => model.is_visible && model.is_available).length }} 个模型可见</small>
+              <small>{{ visibleModelCount(profile) }} 个模型显示</small>
               <span :class="{ online: profile.enabled }">{{ profile.enabled ? '已启用' : '已停用' }}</span>
             </span>
-            <ChevronUp v-if="expanded.includes(profile.id)" :size="19" />
-            <ChevronDown v-else :size="19" />
+            <ChevronDown v-if="expandedProfileId !== profile.id" :size="19" />
+            <ChevronUp v-else :size="19" />
           </button>
           <button
             class="api-enable"
@@ -597,105 +384,103 @@ onMounted(() => {
             :class="{ active: profile.enabled }"
             @click="toggleProfile(profile)"
           ><span /></button>
+          <div class="api-more">
+            <button class="icon-button" type="button" :aria-label="`${profile.name} 更多操作`" :aria-expanded="moreMenuFor === profile.id" @click="toggleMoreMenu(profile.id)">
+              <MoreHorizontal :size="18" />
+            </button>
+            <div v-if="moreMenuFor === profile.id" class="api-more-menu" role="menu">
+              <button class="api-more-item danger-text" type="button" role="menuitem" @click="removeProfile(profile)">
+                <Trash2 :size="15" />删除配置
+              </button>
+            </div>
+          </div>
         </header>
 
-        <div v-if="expanded.includes(profile.id)" class="api-profile-body">
-          <div class="grid grid-2">
-            <div class="field"><label>配置名称</label><input v-model.trim="profile.name"></div>
-            <div class="field">
-              <label>接口协议</label>
-              <select v-model="profile.adapter">
-                <option v-for="adapter in adapters" :key="adapter.id" :value="adapter.id">{{ adapter.label }}</option>
-              </select>
-              <small>{{ adapterDefinition(profile).description }}</small>
-            </div>
-          </div>
-          <div class="grid grid-2 api-connection-grid">
-            <div class="field"><label>API Base URL</label><input v-model.trim="profile.base_url" :placeholder="adapterDefinition(profile).baseUrlPlaceholder"><small>请求端点：{{ endpointPreview(profile) }}</small></div>
-            <div class="field">
-              <label>API Key（留空不会清除）</label>
-              <div class="api-key-input">
-                <KeyRound :size="17" />
-                <input v-model="profile.api_key" type="password" :placeholder="profile.has_api_key ? '密钥已加密保存在本机' : '本地接口通常可留空'">
+        <div v-if="expandedProfileId === profile.id" class="api-profile-body">
+          <button v-if="profileSaveStates[profile.id]" class="api-save-status" role="status" type="button" @click="saveProfile(profile)">{{ profileSaveStates[profile.id] }}</button>
+          <button v-if="visibilitySaveStates[profile.id]" class="api-save-status visibility-save-status" role="status" type="button" :disabled="visibilitySaveStates[profile.id]?.busy" @click="retryModelVisibility(profile.id)">{{ visibilitySaveStates[profile.id]?.message }}</button>
+          <p v-if="notices[profile.id]" class="api-profile-notice" role="status">{{ notices[profile.id] }}</p>
+
+          <section class="api-detail-section" aria-labelledby="api-conn-title">
+            <h3 v-if="!landscape" id="api-conn-title">连接与密钥</h3><div class="api-connection-layout"><div class="api-connection-fields">
+            <div class="grid grid-2">
+              <div class="field"><label for="profile-name">配置名称</label><input id="profile-name" v-model="profile.name" @input="editProfile(profile)" @blur="editProfile(profile,true)"></div>
+              <div class="field">
+                <label>接口协议</label>
+                <OptionSheet v-model="profile.adapter" @update:model-value="editProfile(profile,true)" :items="adapterItems()" title="选择接口协议" searchable />
               </div>
             </div>
-          </div>
-          <div class="field">
-            <label>默认模型</label>
-            <select v-model="profile.default_model">
-              <option value="">请选择默认模型</option>
-              <option v-for="model in profile.models.filter(item => item.is_available)" :key="model.model_id" :value="model.model_id">
-                {{ model.display_name || model.model_id }}
-              </option>
-            </select>
-          </div>
-          <div class="grid grid-3">
-            <div class="field"><label>Temperature</label><input v-model.number="profile.temperature" type="number" min="0" max="2" step=".1"></div>
-            <div class="field">
-              <label>默认推理强度</label>
-              <select v-model="profile.reasoning_effort" :disabled="!adapterDefinition(profile).supportsReasoningEffort">
-                <option value="">未设置（由接口决定）</option>
-                <option value="low">低</option>
-                <option value="medium">中</option>
-                <option value="high">高</option>
-              </select>
-              <small v-if="!adapterDefinition(profile).supportsReasoningEffort">该协议不发送推理强度，已选值会保留。</small>
+            <div class="grid grid-2 api-connection-grid">
+              <div class="field"><label for="profile-url">API Base URL</label><input id="profile-url" v-model="profile.base_url" @input="editProfile(profile)" @blur="editProfile(profile,true)" :placeholder="adapterDefinition(profile).baseUrlPlaceholder"><small v-if="!landscape">请求端点：{{ endpointPreview(profile) }}</small></div>
+              </div></div><NamedModelKeys :profile="profile" @changed="signalChanged" />
+              <button class="default-config-switch-row" type="button" role="switch" :aria-checked="profile.is_default" :class="{ active: profile.is_default }" @click="!profile.is_default && chooseDefault(profile)">
+                <span>设置为默认配置</span><i aria-hidden="true"><b /></i>
+              </button>
             </div>
-            <div class="field"><label>输出 Token 上限（已停用）</label><input v-model.number="profile.max_tokens" type="number" disabled><small>保留旧配置兼容；当前不会向模型发送输出 Token 上限。</small></div>
-          </div>
-          <div class="api-profile-hints">
-            <p class="field-hint">Temperature 控制回答的随机性与创造性：值越低越稳定、越适合判分和事实类任务（错题分析、题库导入、单词翻译建议 0.2–0.5）；越高越发散，适合头脑风暴。</p>
-            <p class="field-hint">所有模型场景均由供应商决定最大输出长度；若长任务没有返回正文，程序会提示重试或切换模型/API 配置。</p>
-          </div>
-          <div class="field"><label>附加系统提示词</label><textarea v-model="profile.system_prompt" rows="3" placeholder="对该 API 下的模型统一生效"></textarea></div>
-          <label class="default-profile-check">
-            <input v-model="profile.is_default" type="checkbox" :disabled="profile.is_default">
-            设为默认 API（错题分析、单词翻译和题库校正会优先使用它）
-          </label>
+          </section>
 
-          <div class="api-actions">
+          <div class="api-model-setup-grid">
+            <section class="api-detail-section api-model-default-section" aria-labelledby="api-model-title">
+              <h3 v-if="!landscape" id="api-model-title">默认模型</h3>
+              <div class="field">
+                <label>默认模型</label>
+                <OptionSheet
+                  v-model="profile.default_model" @update:model-value="editProfile(profile,true)"
+                  :items="modelItems(profile)"
+                  title="选择默认模型"
+                  searchable
+                  :placeholder="profile.models.length ? '请选择默认模型' : '还没有模型，请先同步模型'"
+                />
+                <small v-if="!profile.models.length">点击下方“同步模型”获取模型列表。</small>
+              </div>
+            </section>
+
+            <section class="api-detail-section api-advanced-section">
+              <h3 v-if="!landscape">推理设置</h3>
+              <div class="grid grid-2">
+                <div class="field">
+                  <label>默认推理强度</label>
+                  <OptionSheet v-model="profile.reasoning_effort" @update:model-value="editProfile(profile,true)" :disabled="!adapterDefinition(profile).supportsReasoningEffort" :items="reasoningItems(profile)" title="选择推理强度" />
+                  <small v-if="!adapterDefinition(profile).supportsReasoningEffort">该协议不发送推理强度，已选值会保留。</small>
+                </div>
+              </div>
+            </section>
+          </div>
+
+<section class="api-detail-section api-model-management">
+  <div class="api-model-toolbar">
+    <div class="api-model-list-control">
+      <button class="api-model-list-toggle" type="button" :aria-expanded="!!modelListExpanded[profile.id]" @click="toggleModelList(profile)">
+        <span>模型显示列表 · {{ profile.models.length }} 个</span><ChevronDown v-if="!modelListExpanded[profile.id]" :size="18" /><ChevronUp v-else :size="18" />
+      </button>
+      <div v-if="modelListExpanded[profile.id]" class="api-model-list" role="listbox" aria-label="模型显示列表">
+        <div v-for="model in filteredModels(profile)" :key="model.model_id" class="api-model-row" :class="{ unavailable: !model.is_available }">
+          <div><strong>{{ model.display_name || model.model_id }}</strong><small>{{ model.owned_by || model.provider || '接口模型' }}<template v-if="!model.is_available"> · 本次同步未发现</template></small></div>
+          <button type="button" role="switch" :aria-checked="model.is_visible" :disabled="!model.is_available" :class="{ active:model.is_visible }" @click="setModelVisible(profile,model)">
+            <Eye v-if="model.is_visible" :size="15" /><EyeOff v-else :size="15" />{{ model.is_visible ? '显示' : '隐藏' }}
+          </button>
+        </div>
+        <div v-if="!filteredModels(profile).length" class="api-model-empty">没有模型。</div>
+      </div>
+    </div>
+    <div class="api-model-toolbar-actions">
+      <button class="button secondary compact" type="button" :disabled="busy[busyKey('sync',profile.id)]" @click="syncModels(profile)"><RefreshCw :size="15" :class="{spinning:busy[busyKey('sync',profile.id)]}" />同步模型</button>
+      <button type="button" @click="setAllVisible(profile,true)"><Eye :size="15" />全部显示</button>
+      <button type="button" @click="setAllVisible(profile,false)"><EyeOff :size="15" />全部隐藏</button>
+      <button v-if="landscape" class="api-test-connection" type="button" :disabled="busy[busyKey('test',profile.id)] || !profile.default_model" @click="testProfile(profile)"><PlugZap :size="15" />测试连接</button>
+    </div>
+  </div>
+</section>
+
+          <div v-if="!landscape" class="api-actions">
             <button class="button" type="button" :disabled="busy[busyKey('save',profile.id)]" @click="saveProfile(profile)">
               <LoaderCircle v-if="busy[busyKey('save',profile.id)]" :size="16" class="spinning" />
               <Save v-else :size="16" />保存配置
             </button>
-            <button class="button secondary" type="button" :disabled="busy[busyKey('sync',profile.id)]" @click="syncModels(profile)">
-              <RefreshCw :size="16" :class="{spinning:busy[busyKey('sync',profile.id)]}" />同步模型
-            </button>
             <button class="button secondary" type="button" :disabled="busy[busyKey('test',profile.id)] || !profile.default_model" @click="testProfile(profile)">
               <PlugZap :size="16" />测试连接
             </button>
-            <button class="button ghost api-delete" type="button" @click="removeProfile(profile)">
-              <Trash2 :size="16" />删除
-            </button>
           </div>
-          <p v-if="notices[profile.id]" class="api-profile-notice" role="status">{{ notices[profile.id] }}</p>
-
-          <section class="api-model-section">
-            <div class="api-model-heading">
-              <div><h3>模型选择器</h3><p>关闭“显示”后，该模型仍保留在配置中，但不会出现在助手的切换菜单里。</p></div>
-              <div>
-                <button type="button" @click="setAllVisible(profile,true)"><Eye :size="15" />全部显示</button>
-                <button type="button" @click="setAllVisible(profile,false)"><EyeOff :size="15" />全部隐藏</button>
-              </div>
-            </div>
-            <div v-if="profile.models.length" class="api-model-list">
-              <div v-for="model in profile.models" :key="model.model_id" class="api-model-row" :class="{ unavailable: !model.is_available }">
-                <div><strong>{{ model.display_name || model.model_id }}</strong><small>{{ model.owned_by || model.provider || '接口模型' }}<template v-if="!model.is_available"> · 本次同步未发现</template></small></div>
-                <button
-                  type="button"
-                  role="switch"
-                  :aria-checked="model.is_visible"
-                  :disabled="!model.is_available"
-                  :class="{ active:model.is_visible }"
-                  @click="setModelVisible(profile,model)"
-                >
-                  <Eye v-if="model.is_visible" :size="15" /><EyeOff v-else :size="15" />
-                  {{ model.is_visible ? '显示' : '隐藏' }}
-                </button>
-              </div>
-            </div>
-            <div v-else class="api-model-empty">还没有模型列表。保存配置后点击“同步模型”。</div>
-          </section>
         </div>
       </article>
     </div>
@@ -712,3 +497,40 @@ onMounted(() => {
     </section>
   </div>
 </template>
+
+<style scoped>
+.api-save-status { border:0; background:transparent; color:var(--muted); min-height:32px; padding:0; text-align:left; }
+.api-connection-layout { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+.api-connection-layout,.api-connection-fields { display:contents; }
+html[data-platform="android"][data-orientation="landscape"] .api-connection-layout { display:grid; gap:20px; }
+html[data-platform="android"][data-orientation="landscape"] .api-connection-fields > .grid { display:contents; }
+html[data-platform="android"][data-orientation="landscape"] .api-connection-fields { display:grid; gap:12px; align-content:start; padding-right:20px; border-right:1px solid var(--line); }
+html[data-platform="android"][data-orientation="landscape"] .api-connection-fields .field { display:grid; grid-template-columns:100px minmax(0,1fr); gap:12px; align-items:center; margin:0; }
+html[data-platform="android"][data-orientation="landscape"] .api-model-setup-grid { grid-template-columns:minmax(0,1.2fr) minmax(0,.85fr) auto; align-items:start; gap:12px; margin-top:12px; padding-top:12px; }
+html[data-platform="android"][data-orientation="landscape"] .api-model-setup-grid .field { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px; align-items:center; margin:0; }
+html[data-platform="android"][data-orientation="landscape"] .api-advanced-section .grid { display:block; }
+html[data-platform="android"][data-orientation="landscape"] .api-model-setup-grid small { grid-column:1 / -1; }
+html[data-platform="android"][data-orientation="landscape"] .api-model-management { margin-top:12px; padding-top:0; border:0; }
+.api-model-setup-grid { display:grid; grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr); gap:14px; margin-top:19px; padding-top:17px; border-top:1px solid var(--line); }
+.api-model-setup-grid > .api-detail-section { min-width:0; margin-top:0; padding-top:0; border-top:0; align-content:start; }
+.api-advanced-section .api-profile-hints { margin-bottom:0; }
+.default-config-switch-row { width:100%; min-height:44px; padding:7px 0; display:flex; align-items:center; justify-content:space-between; gap:14px; border:0; color:var(--ink); background:transparent; font:inherit; text-align:left; }
+.default-config-switch-row > i { flex:0 0 auto; width:44px; height:26px; padding:3px; border-radius:999px; background:var(--line-strong); transition:background-color .2s ease; }
+.default-config-switch-row > i > b { display:block; width:20px; height:20px; border-radius:50%; background:white; box-shadow:0 2px 7px rgba(30,45,37,.2); transition:transform .2s ease; }
+.default-config-switch-row.active > i { background:var(--primary); }
+.default-config-switch-row.active > i > b { transform:translateX(18px); }
+.api-model-toolbar { position:relative; flex-wrap:nowrap; align-items:flex-start; }
+.api-model-list-control { position:relative; z-index:30; flex:1 1 auto; min-width:0; }
+.api-model-list-toggle { width:100%; min-height:42px; padding:8px 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:var(--surface-solid); font:inherit; text-align:left; }
+.api-model-list-toggle span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.api-model-list { position:absolute; z-index:40; top:calc(100% + 6px); left:0; width:100%; max-width:none; box-shadow:var(--shadow-md); }
+.api-model-toolbar-actions { position:relative; z-index:1; flex:0 0 auto; flex-wrap:nowrap; }
+.api-test-connection { position:relative; z-index:1; }
+@media (max-width:720px) {
+  .api-connection-layout { grid-template-columns:minmax(0,1fr); }
+  .api-model-setup-grid { grid-template-columns:minmax(0,1fr); gap:0; }
+  .api-model-setup-grid > .api-detail-section + .api-detail-section { margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
+  .api-model-toolbar { flex-wrap:wrap; }
+  .api-model-list-control { flex-basis:100%; }
+}
+</style>

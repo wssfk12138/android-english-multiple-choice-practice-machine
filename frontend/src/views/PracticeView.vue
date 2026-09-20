@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { selectedSourceSentence } from '../vocabulary-context'
 import {
   AlertCircle,
   ArrowLeft,
@@ -18,7 +19,11 @@ import {
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { get, post, put } from '../api'
+import PracticeContentChoice from '../components/PracticeContentChoice.vue'
 import ContentBlocks from '../components/ContentBlocks.vue'
+import PassageBlank from '../components/PassageBlank.vue'
+import { splitPassageBlanks } from '../passage-blanks'
+import { swipeStep, type SwipeStart } from '../practice-swipe'
 import ListeningPlayer from '../components/ListeningPlayer.vue'
 
 const route = useRoute()
@@ -31,11 +36,12 @@ const vocabularyToast = ref('')
 const unansweredNotice = ref('')
 const highlightedQuestionId = ref<number | null>(null)
 const resultPanelVisible = ref(false)
+const pendingSubmission = ref<'unit' | 'session' | null>(null)
 const answerCardVisible = ref(false)
 const portraitMoreVisible = ref(false)
 const resultPanelMode = ref<'unit' | 'session'>('unit')
 const resultPanelUnitId = ref<number | null>(null)
-const vocabMenu = ref({ visible: false, x: 0, y: 0, term: '', sentence: '', questionId: null as number | null })
+const vocabMenu = ref({ visible: false, x: 0, y: 0, term: '', sentence: '', sourceKind: 'unknown', selectionStart: -1, questionId: null as number | null })
 const listeningPlayer = ref<InstanceType<typeof ListeningPlayer> | null>(null)
 const currentListeningQuestionId = ref<number | null>(null)
 const currentWordBankQuestionId = ref<number | null>(null)
@@ -58,6 +64,9 @@ const timerNow = ref(Date.now())
 let timerTicker: number | null = null
 const activeUnit = computed(() => session.value?.units?.[activeUnitIndex.value])
 const activeContentBlocks = computed(() => activeUnit.value?.content_blocks || [])
+const clozeBlankNumbers = computed<number[]>(() => activeUnit.value?.unit_type === 'cloze'
+  ? (activeUnit.value.questions || []).map((question: any) => Number(question.number)).filter(Number.isFinite)
+  : [])
 const activeContentPackage = computed(() => ({
   packageId: activeUnit.value?.shared_data?.content_package_id || '',
   contentVersion: activeUnit.value?.shared_data?.content_version || '',
@@ -176,6 +185,7 @@ type PassageSegment = {
 const passageSegments = computed<PassageSegment[]>(() => {
   const unit = activeUnit.value
   const passage = unit?.passage || '该题型请在右侧完成候选项匹配。'
+  if (unit?.unit_type === 'cloze') return splitPassageBlanks(passage, clozeBlankNumbers.value)
   const usesInlineBlanks = unit?.unit_type === 'cloze'
     || unit?.unit_type === 'word_bank'
     || (unit?.unit_type === 'part_b' && unit?.subtype !== 'true_false')
@@ -536,9 +546,31 @@ function finishTimer() {
   persistTimer()
 }
 
+const contentChoiceSessionId = ref<number | null>(null)
+const contentChoiceBusy = ref(false)
+const contentChoiceError = ref('')
+async function chooseContent(choice: 'continue' | 'restart') {
+  if (contentChoiceBusy.value || contentChoiceSessionId.value === null) return
+  contentChoiceBusy.value = true
+  contentChoiceError.value = ''
+  try {
+    const result: any = await post('/practice/sessions/' + contentChoiceSessionId.value + '/content-choice', {choice})
+    if (Number(route.params.id) !== Number(result.id)) await router.replace('/practice/' + result.id)
+    await load()
+  } catch (e) { contentChoiceError.value = String(e) }
+  finally { contentChoiceBusy.value = false }
+}
+
 async function load() {
   try {
-    session.value = await get(`/practice/sessions/${route.params.id}`)
+    const loaded: any = await get('/practice/sessions/' + route.params.id)
+    if (loaded.content_choice_required) {
+      session.value = null
+      contentChoiceSessionId.value = Number(loaded.id)
+      return
+    }
+    contentChoiceSessionId.value = null
+    session.value = loaded
     loadPendingVocabulary(session.value.id)
     initializeTimer()
     syncCurrentListeningQuestion()
@@ -763,7 +795,10 @@ async function submitCurrentUnit() {
     await focusUnanswered(missing.unitIndex, missing.question)
     return
   }
-  if (!confirm(`确定提交“${activeUnit.value.title}”吗？提交后会显示本篇对错，且本篇不能继续修改。`)) return
+  pendingSubmission.value = 'unit'
+}
+
+async function confirmCurrentUnitSubmission() {
   const submittedUnitId = activeUnit.value.id
   try {
     session.value = await post(
@@ -783,8 +818,10 @@ async function submitSession() {
     await focusUnanswered(missing.unitIndex, missing.question)
     return
   }
-  const label = session.value.mode === 'paper' ? '整年试卷' : '本次练习'
-  if (!confirm(`确定提交${label}吗？提交后才会显示对错，且不能继续修改。`)) return
+  pendingSubmission.value = 'session'
+}
+
+async function confirmSessionSubmission() {
   try {
     session.value = await post(`/practice/sessions/${session.value.id}/submit`)
     finishTimer()
@@ -797,11 +834,55 @@ async function submitSession() {
 }
 
 function switchUnit(index: number) {
+  if (!session.value?.units?.[index] || saving.value !== null) return
   activeUnitIndex.value = index
   unansweredNotice.value = ''
   highlightedQuestionId.value = null
   syncCurrentListeningQuestion()
   syncCurrentWordBankQuestion()
+}
+
+let swipeStart: SwipeStart | null = null
+let suppressSwipeClickUntil = 0
+function swipeBlocked() {
+  return document.documentElement.dataset.platform !== 'android' || saving.value !== null
+    || portraitPaneResizing.value || vocabMenu.value.visible || resultPanelVisible.value
+    || pendingSubmission.value !== null || answerCardVisible.value || portraitMoreVisible.value
+    || Boolean(window.getSelection()?.toString().trim())
+}
+function startPracticeSwipe(event: TouchEvent) {
+  swipeStart = null
+  if (event.touches.length !== 1 || swipeBlocked()) return
+  const touch = event.touches[0]!
+  if (touch.clientX < 28 || touch.clientX > window.innerWidth - 28) return
+  let element = event.target instanceof Element ? event.target : null
+  if (element?.closest('button, input, textarea, select, a, [role="button"], [role="slider"], [contenteditable="true"], .portrait-pane-splitter')) return
+  while (element && element !== practiceLayout.value) {
+    if (element.scrollWidth > element.clientWidth + 2 && /auto|scroll/.test(getComputedStyle(element).overflowX)) return
+    element = element.parentElement
+  }
+  swipeStart = { x: touch.clientX, y: touch.clientY, at: Date.now(), orientation: String(window.innerWidth > window.innerHeight) }
+}
+function movePracticeSwipe(event: TouchEvent) {
+  if (!swipeStart) return
+  if (event.touches.length !== 1 || swipeBlocked()) { swipeStart = null; return }
+  const touch = event.touches[0]!
+  const dx = Math.abs(touch.clientX - swipeStart.x), dy = Math.abs(touch.clientY - swipeStart.y)
+  if (dy > 16 && dy >= dx) swipeStart = null
+}
+function finishPracticeSwipe(event: TouchEvent) {
+  const start = swipeStart
+  swipeStart = null
+  if (!start || event.changedTouches.length !== 1 || swipeBlocked()) return
+  const touch = event.changedTouches[0]!
+  const step = swipeStep(start, touch.clientX, touch.clientY, Date.now(), String(window.innerWidth > window.innerHeight))
+  if (!step || !session.value?.units?.[activeUnitIndex.value + step]) return
+  event.preventDefault()
+  suppressSwipeClickUntil = Date.now() + 400
+  switchUnit(activeUnitIndex.value + step)
+}
+function blockSwipeClick(event: MouseEvent) {
+  if (Date.now() < suppressSwipeClickUntil) { event.preventDefault(); event.stopPropagation() }
 }
 
 async function jumpToQuestion(unitIndex: number, questionId: number) {
@@ -819,6 +900,13 @@ function questionCardState(unit: any, question: any, unitIndex: number) {
     current: unitIndex === activeUnitIndex.value && highlightedQuestionId.value === question.id,
     submitted: Boolean(unit.submission?.submitted || session.value?.status === 'submitted'),
   }
+}
+
+async function confirmPendingSubmission() {
+  const action = pendingSubmission.value
+  pendingSubmission.value = null
+  if (action === 'unit') await confirmCurrentUnitSubmission()
+  if (action === 'session') await confirmSessionSubmission()
 }
 
 function showUnitResult(unitId = activeUnit.value?.id) {
@@ -854,24 +942,6 @@ function openUnitFromResult(unitId: number) {
   resultPanelVisible.value = false
 }
 
-function sentenceAround(text: string, term: string) {
-  const compact = text.replace(/\s+/g, ' ').trim()
-  const index = compact.toLowerCase().indexOf(term.toLowerCase())
-  if (index < 0) return compact.slice(0, 1200)
-  const left = Math.max(
-    compact.lastIndexOf('.', index - 1),
-    compact.lastIndexOf('!', index - 1),
-    compact.lastIndexOf('?', index - 1),
-  )
-  const endings = [
-    compact.indexOf('.', index + term.length),
-    compact.indexOf('!', index + term.length),
-    compact.indexOf('?', index + term.length),
-  ].filter(value => value >= 0)
-  const right = endings.length ? Math.min(...endings) + 1 : compact.length
-  return compact.slice(left + 1, right).trim().slice(0, 1500)
-}
-
 function openVocabularyMenu(event: MouseEvent) {
   const selection = window.getSelection()
   const term = selection?.toString().trim().replace(/\s+/g, ' ') || ''
@@ -904,12 +974,21 @@ function openVocabularyMenu(event: MouseEvent) {
   const y = below + menuHeight <= window.innerHeight - bottomReserve
     ? below
     : Math.max(edge, above)
+  const selectedRange = selection?.rangeCount ? selection.getRangeAt(0) : null
+  if (!selectedRange || !source.contains(selectedRange.startContainer) || !source.contains(selectedRange.endContainer)) return
+  const sourceRange = selectedRange.cloneRange()
+  sourceRange.selectNodeContents(source)
+  const sourceText = sourceRange.toString()
+  sourceRange.setEnd(selectedRange.startContainer, selectedRange.startOffset)
+  const selectionStart = sourceRange.toString().length + (selectedRange.toString().length - selectedRange.toString().trimStart().length)
   vocabMenu.value = {
     visible: true,
     x,
     y,
     term,
-    sentence: sentenceAround(source.innerText || source.textContent || '', term),
+    sentence: selectedSourceSentence(sourceText, term, selectionStart),
+    sourceKind: source.closest('.option, .candidate-reference, .ordering-paragraph') ? 'option' : source.closest('.passage') ? 'passage' : 'question',
+    selectionStart,
     questionId: question?.dataset.questionId ? Number(question.dataset.questionId) : null,
   }
 }
@@ -921,6 +1000,8 @@ async function addSelectedVocabulary() {
     const result: any = await post('/vocabulary', {
       term: item.term,
       context_sentence: item.sentence,
+      source_kind: item.sourceKind,
+      selection_start: item.selectionStart,
       unit_id: activeUnit.value.id,
       question_id: item.questionId,
       year: activeUnit.value.year,
@@ -947,7 +1028,8 @@ async function copySelectedTerm() {
 </script>
 
 <template>
-  <div class="practice-page" @click="vocabMenu.visible=false">
+  <PracticeContentChoice v-if="contentChoiceSessionId !== null" :busy="contentChoiceBusy" :error="contentChoiceError" @choose="chooseContent" />
+  <div v-else class="practice-page" @click="vocabMenu.visible=false">
     <header class="portrait-practice-top" v-if="session">
       <div class="portrait-practice-actions">
         <button class="portrait-icon-button" type="button" title="退出练习" aria-label="退出练习" @click="router.push('/library')">
@@ -1035,6 +1117,11 @@ async function copySelectedTerm() {
       v-if="session && activeUnit"
       ref="practiceLayout"
       class="practice-layout"
+      @touchstart.passive="startPracticeSwipe"
+      @touchmove.passive="movePracticeSwipe"
+      @touchend="finishPracticeSwipe"
+      @touchcancel="swipeStart = null"
+      @click.capture="blockSwipeClick"
       :class="{'listening-layout':isListening, 'portrait-pane-resizing':portraitPaneResizing}"
       :style="{
         '--portrait-passage-size': `${portraitPaneRatio}fr`,
@@ -1071,6 +1158,7 @@ async function copySelectedTerm() {
           <ContentBlocks
             v-if="activeContentBlocks.length"
             :blocks="activeContentBlocks"
+            :blank-numbers="clozeBlankNumbers"
             :package-id="activeContentPackage.packageId"
             :content-version="activeContentPackage.contentVersion"
           />
@@ -1079,9 +1167,7 @@ async function copySelectedTerm() {
               <span class="word-bank-blank-number">{{ segment.number }}</span>
               <span class="word-bank-blank-answer">{{ wordBankAnswerForBlank(segment.number) || '选择词语' }}</span>
             </button>
-            <span v-else-if="segment.type === 'blank'" class="passage-blank" :aria-label="`第 ${segment.number} 空`">
-              <span class="blank-number">{{ segment.number }}</span>
-            </span>
+            <PassageBlank v-else-if="segment.type === 'blank'" :number="segment.number" />
             <template v-else>{{ segment.text }}</template>
           </template>
         </div>
@@ -1313,6 +1399,21 @@ async function copySelectedTerm() {
           </button>
           <button v-else class="button" type="button" @click="answerCardVisible=false;router.push('/wrong')">查看错题</button>
         </footer>
+      </div>
+    </section>
+    <section v-if="pendingSubmission" class="result-overlay" role="dialog" aria-modal="true" aria-labelledby="submission-confirm-title" @click.self="pendingSubmission=null">
+      <div class="result-dialog submission-confirm-dialog card">
+        <div class="result-dialog-heading">
+          <span class="result-icon"><AlertCircle :size="27" /></span>
+          <div>
+            <h2 id="submission-confirm-title">{{ pendingSubmission === 'unit' ? '确认提交本篇' : (session?.mode === 'paper' ? '确认提交整卷' : '确认提交练习') }}</h2>
+            <p>{{ pendingSubmission === 'unit' ? `提交“${activeUnit?.title}”后会显示本篇对错，且本篇不能继续修改。` : '提交后才会显示对错，且不能继续修改。' }}</p>
+          </div>
+        </div>
+        <div class="result-dialog-actions">
+          <button class="button secondary" type="button" @click="pendingSubmission=null">取消</button>
+          <button class="button" type="button" @click="confirmPendingSubmission">确认提交</button>
+        </div>
       </div>
     </section>
     <section

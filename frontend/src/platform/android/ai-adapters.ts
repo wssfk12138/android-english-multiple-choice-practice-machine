@@ -157,9 +157,12 @@ const anthropic: AdapterDefinition = {
   chatUrl: baseUrl => { const base = cleanBase(baseUrl); return `${base}${base.endsWith('/v1') ? '' : '/v1'}/messages` },
   headers: apiKey => ({ ...(apiKey ? { 'x-api-key': apiKey } : {}), 'anthropic-version': '2023-06-01' }),
   serialize: (model, messages, options) => {
+    if (!Number.isSafeInteger(options.maxTokens) || Number(options.maxTokens) <= 0) {
+      throw new Error('Anthropic Messages 协议要求明确的 max_tokens；当前未取得该模型可靠的输出容量，无法使用服务端默认上限。请改用支持省略上限的协议配置。')
+    }
     const split = splitSystem(messages)
     return {
-      model, max_tokens: options.maxTokens || 4096, temperature: options.temperature,
+      model, ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}), temperature: options.temperature,
       ...(split.system ? { system: split.system } : {}),
       messages: split.messages.map(message => ({
         role: message.role,
@@ -282,7 +285,7 @@ const commandCode: AdapterDefinition = {
               ? { type: 'text', text: part.text }
               : { type: 'image', image: part.image_url.url }),
         })),
-        tools: [], system: split.system, max_tokens: options.maxTokens || 64000,
+        tools: [], system: split.system, ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
         stream: true, temperature: options.temperature,
         ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
       },

@@ -209,7 +209,8 @@ export async function listQuestionLabels(search: URLSearchParams): Promise<JsonR
        COALESCE(l.locked, 0) AS locked,
        COALESCE(l.user_edited, 0) AS user_edited,
        COALESCE(l.model_name, '') AS model_name,
-       COALESCE(l.updated_at, '') AS updated_at
+       COALESCE(l.updated_at, '') AS updated_at,
+       CASE WHEN l.question_id IS NOT NULL AND l.label_version <= COALESCE(json_extract(u.shared_data, '$.label_review_versions."' || q.external_key || '"'), 0) THEN 1 ELSE 0 END AS content_review_required
      FROM questions q JOIN units u ON u.id = q.unit_id
      JOIN papers p ON p.id = u.paper_id
      LEFT JOIN question_ai_labels l ON l.question_id = q.id

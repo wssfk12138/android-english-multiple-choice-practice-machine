@@ -8,6 +8,20 @@ import java.net.URL;
 
 public class AppUpdaterPluginTest {
     @Test
+    public void domainPrefixesAreNotIpv6Literals() throws Exception {
+        for (String host : new String[] {
+            "fcdn.example.com", "fdomain.example", "feather.example", "fe80.example",
+            "fe90.example", "fea0.example", "feb0.example", "[2606:4700:4700::1111]"
+        }) {
+            AppUpdaterPlugin.validateRemoteUrl(new URL("https://" + host + "/bank.esq"));
+        }
+        for (String host : new String[] { "[::]", "[::1]", "[fc00::1]", "[fd12::1]", "[fe80::1]", "[febf::1]" }) {
+            assertThrows(SecurityException.class,
+                () -> AppUpdaterPlugin.validateRemoteUrl(new URL("https://" + host + "/bank.esq")));
+        }
+    }
+
+    @Test
     public void questionBankUrlsRequireCredentialFreeHttps() throws Exception {
         AppUpdaterPlugin.validateRemoteUrl(new URL("https://example.com/bank.esq"));
 

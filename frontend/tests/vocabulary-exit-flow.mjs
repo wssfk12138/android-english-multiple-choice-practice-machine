@@ -11,7 +11,9 @@ assert.match(practice, /practiceExitTranslation\s*=\s*flushVocabularyTranslation
 assert.match(practice, /onBeforeRouteLeave\(async \(\) => \{\s*await flushVocabularyOnPracticeExit\(\)/s)
 assert.match(practice, /onBeforeUnmount\(\(\) => \{[\s\S]*void flushVocabularyOnPracticeExit\(\)/)
 assert.match(vocabulary, /trigger:\s*'vocabulary_open'/)
-assert.match(vocabulary, /setInterval\(refreshTranslationStatuses, 2500\)/)
+// 2026-09-12 performance repair: the translation polling interval moved from
+// 2500 ms to 5000 ms; the polling contract itself is unchanged.
+assert.match(vocabulary, /setInterval\(refreshTranslationStatuses, 5000\)/)
 assert.match(localApi, /trigger === 'practice_exit' \|\| trigger === 'vocabulary_open'/)
 assert.match(localApi, /queueAndStartVocabularyTranslations\(\[id\]\)/)
 assert.match(assistant, /class="ai-history-dismiss-area"/)

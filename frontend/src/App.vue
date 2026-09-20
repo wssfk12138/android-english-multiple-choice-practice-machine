@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { BookOpenText, Download, Moon, PackageCheck, Settings2, Sun, Trash2 } from 'lucide-vue-next'
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { App as CapacitorApp } from '@capacitor/app'
 import type { PluginListenerHandle } from '@capacitor/core'
 import { useRoute, useRouter } from 'vue-router'
 import { platformRuntime } from './platform/runtime'
+import { useThemeState } from './composables/useThemeState'
+import AppDialogHost from './components/AppDialogHost.vue'
 import { post } from './api'
 import {
   checkAppUpdate,
@@ -17,12 +19,8 @@ const route = useRoute()
 const router = useRouter()
 const ANDROID_ONBOARDING_KEY = 'linjian-android-onboarding-v1'
 // 初始化时同步读取主题偏好，避免暗色用户在首帧渲染前闪一下浅色（FOUC）。
-const dark = ref(
-  localStorage.getItem('linjian-theme') === 'dark'
-    || (!localStorage.getItem('linjian-theme')
-      && typeof matchMedia !== 'undefined'
-      && matchMedia('(prefers-color-scheme: dark)').matches),
-)
+const dark = useThemeState()
+dark.value = localStorage.getItem('linjian-theme') === 'dark'
 const installerCleanup = ref<PendingInstallerCleanup | null>(null)
 const installerCleanupBusy = ref(false)
 const installerCleanupError = ref('')
@@ -48,23 +46,47 @@ async function finishAndroidOnboarding(destination = '') {
   if (destination) await router.push(destination)
 }
 
+function detectPortrait() {
+  // Android WebView can briefly report a stale CSS orientation while a
+  // tablet is rotating. Prefer the native screen orientation, then use the
+  // visual viewport dimensions and only finally fall back to matchMedia.
+  const orientationType = typeof screen !== 'undefined'
+    ? screen.orientation?.type
+    : undefined
+  if (orientationType?.startsWith('portrait')) return true
+  if (orientationType?.startsWith('landscape')) return false
+  const viewport = window.visualViewport
+  const width = viewport?.width || window.innerWidth
+  const height = viewport?.height || window.innerHeight
+  if (width > 0 && height > 0 && Math.abs(width - height) > 24) {
+    return height > width
+  }
+  return window.matchMedia('(orientation: portrait)').matches
+}
+
 function updateWindowMode() {
-  const width = window.innerWidth
-  const portrait = window.matchMedia('(orientation: portrait)').matches
+  const width = window.visualViewport?.width || window.innerWidth
+  const portrait = detectPortrait()
   // Portrait is a dedicated Android information architecture on phones and
   // tablets. Landscape continues to use the existing rail and split panes.
   const androidPortrait = platformRuntime.isAndroid && portrait
   const mode = androidPortrait || width < 600 ? 'compact' : width < 840 ? 'medium' : 'expanded'
   document.documentElement.dataset.windowMode = mode
   document.documentElement.dataset.orientation = portrait ? 'portrait' : 'landscape'
+  // The mobile settings hub stays available in both orientations; rotation no
+  // longer force-jumps to the model page. Each page adapts its own layout.
 }
+
+watch(() => route.path, () => {
+  dark.value = document.documentElement.classList.contains('dark')
+})
 function applyTheme() {
   document.documentElement.classList.toggle('dark', dark.value)
   localStorage.setItem('linjian-theme', dark.value ? 'dark' : 'light')
 }
 
 function toggleTheme() {
-  dark.value = !dark.value
+  dark.value = !document.documentElement.classList.contains('dark')
   applyTheme()
 }
 
@@ -137,6 +159,9 @@ onMounted(async () => {
   updateWindowMode()
   window.addEventListener('resize', updateWindowMode, { passive: true })
   window.addEventListener('orientationchange', updateWindowMode, { passive: true })
+  window.visualViewport?.addEventListener('resize', updateWindowMode, { passive: true })
+  window.setTimeout(updateWindowMode, 120)
+  window.setTimeout(updateWindowMode, 320)
   applyTheme()
   if (platformRuntime.isAndroid) {
     const { resumeVocabularyTranslations } = await import('./platform/android/vocabulary-translation-runner')
@@ -152,6 +177,8 @@ onMounted(async () => {
     }
     appStateListener = await CapacitorApp.addListener('appStateChange', ({ isActive }) => {
       if (isActive) {
+        updateWindowMode()
+        window.setTimeout(updateWindowMode, 180)
         resumeVocabularyTranslations()
       } else if (route.path.startsWith('/practice')) {
         void post('/vocabulary/translation-runs', {
@@ -188,6 +215,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', updateWindowMode)
   window.removeEventListener('orientationchange', updateWindowMode)
+  window.visualViewport?.removeEventListener('resize', updateWindowMode)
   window.removeEventListener('keydown', handleInstallerCleanupKeydown)
   void appStateListener?.remove()
   if (platformRuntime.isAndroid) {
@@ -271,7 +299,7 @@ onBeforeUnmount(() => {
         <RouterLink to="/vocabulary"><img src="/assets/icons/vocabulary.png" alt="" /><span>单词本</span></RouterLink>
         <RouterLink to="/imports"><img src="/assets/icons/import.png" alt="" /><span>导入题库</span></RouterLink>
         <RouterLink to="/assistant"><img src="/assets/icons/ai.png" alt="" /><span>AI 学习助手</span></RouterLink>
-        <RouterLink to="/settings"><img src="/assets/icons/settings.png" alt="" /><span>模型与设置</span></RouterLink>
+        <RouterLink to="/mobile-settings"><Settings2 :size="22" /><span>设置</span></RouterLink>
         <RouterLink v-if="platformRuntime.isAndroid" to="/android-updates"><img src="/assets/icons/update.png" alt="" /><span>更新</span></RouterLink>
       </nav>
       <nav class="mobile-tab-nav" aria-label="手机主要导航">
@@ -297,5 +325,6 @@ onBeforeUnmount(() => {
     <main class="main-content">
       <RouterView />
     </main>
+    <AppDialogHost />
   </div>
 </template>

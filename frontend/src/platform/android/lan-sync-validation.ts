@@ -1,7 +1,7 @@
 export type LanSyncJsonRecord = Record<string, unknown>
 
-export type LanSyncCursor = Record<string, { updated_at: string, rowid: number }>
-export type LanSyncTombstoneCursor = { deleted_at?: string, rowid?: number }
+export type LanSyncCursor = Record<string, { updated_at: string, rowid: number, seq?: number }>
+export type LanSyncTombstoneCursor = { deleted_at?: string, rowid?: number, seq?: number }
 
 export type ValidatedLanSyncPull = {
   changes: Record<string, LanSyncJsonRecord[]>
@@ -76,6 +76,10 @@ function validateCursor(
       invalid(`cursor.${table}.rowid 必须是非负安全整数`)
     }
     result[table] = { updated_at: updatedAt, rowid: Number(rowid) }
+    if ('seq' in watermark) {
+      if (!Number.isSafeInteger(watermark.seq) || Number(watermark.seq) < 0) invalid('Invalid sync sequence')
+      result[table].seq = Number(watermark.seq)
+    }
   }
   return result
 }
@@ -83,6 +87,10 @@ function validateCursor(
 function validateTombstoneCursor(value: unknown): LanSyncTombstoneCursor {
   const cursor = plainRecord(value, 'tombstone_cursor')
   const result: LanSyncTombstoneCursor = {}
+  if ('seq' in cursor) {
+    if (!Number.isSafeInteger(cursor.seq) || Number(cursor.seq) < 0) invalid('Invalid sync sequence')
+    result.seq = Number(cursor.seq)
+  }
   if ('deleted_at' in cursor) {
     if (typeof cursor.deleted_at !== 'string') {
       invalid('tombstone_cursor.deleted_at 必须是字符串')
@@ -101,7 +109,7 @@ function validateTombstoneCursor(value: unknown): LanSyncTombstoneCursor {
 export function validateLanSyncHandshakeResponse(
   value: unknown,
   tables: readonly string[],
-): { token: string } {
+): { token: string, pairingToken?: string } {
   assertResponseSize(value)
   const response = plainRecord(value, 'handshake')
   if (typeof response.token !== 'string' || !response.token || response.token.length > 128) {
@@ -116,7 +124,14 @@ export function validateLanSyncHandshakeResponse(
       invalid(`tables 包含不允许的表 ${String(table)}`)
     }
   }
-  return { token: response.token }
+  if (response.pairing_token !== null && response.pairing_token !== undefined
+    && (typeof response.pairing_token !== 'string' || response.pairing_token.length > 256)) {
+    invalid('pairing_token 必须是至多 256 个字符的字符串或 null')
+  }
+  const pairingToken = typeof response.pairing_token === 'string' && response.pairing_token
+    ? response.pairing_token
+    : null
+  return pairingToken ? { token: response.token, pairingToken } : { token: response.token }
 }
 
 export function validateLanSyncPullResponse(

@@ -6,6 +6,8 @@ import {
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, del, get, patch, post, put } from '../api'
+import { confirmDialog } from '../platform/dialogs'
+import OptionSheet from '../components/OptionSheet.vue'
 import QuestionBankSwitcher from '../components/QuestionBankSwitcher.vue'
 import { loadQuestionBankProfiles, questionBankProfilesState } from '../services/questionBankProfiles'
 import {
@@ -18,6 +20,7 @@ import {
 
 type LabelRow = {
   question_id: number; number: number; year: number; unit_title: string
+  content_review_required?: boolean | number
   primary_skill: string; secondary_skills: string[]; trap_types: string[]
   attention_points: string[]; vocabulary_demand: 'low' | 'medium' | 'high'
   context_dependency: 'low' | 'medium' | 'high'; grammar_dependency: 'low' | 'medium' | 'high'
@@ -26,6 +29,11 @@ type LabelRow = {
 
 const route = useRoute()
 const router = useRouter()
+const levelOptions = [
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+]
 const jobs = ref<any[]>([])
 const current = ref<any>(null)
 const selectedFile = ref<File | null>(null)
@@ -58,12 +66,16 @@ const modelSelectorOpen = ref(false)
 const selectorModels = ref<any[]>([])
 const selectedModelKey = ref('')
 const targetProfileId = ref(0)
+const pendingNewProfileName = ref<string | undefined>(undefined)
 const importDestinationOpen = ref(false)
 const pendingImportKind = ref<'document' | 'esq'>('document')
 const importDestinationMode = ref<'new_profile' | 'existing_profile'>('new_profile')
 const importProfileName = ref('')
 const existingProfileId = ref(0)
 const importDestinationError = ref('')
+const esqDestinationName = computed(() => questionBankProfilesState.items.find(
+  profile => Number(profile.id) === Number(esqCurrent.value?.profile_id),
+)?.name || '目标配置不可用')
 
 const questions = computed(() =>
   current.value?.draft?.units?.flatMap((unit: any) => unit.questions || []) || [],
@@ -124,6 +136,7 @@ function chooseImportDestination(kind: 'document' | 'esq') {
 
 async function confirmImportDestination() {
   importDestinationError.value = ''
+  pendingNewProfileName.value = undefined
   let profileId = existingProfileId.value
   if (importDestinationMode.value === 'new_profile') {
     const name = importProfileName.value.trim()
@@ -136,23 +149,22 @@ async function confirmImportDestination() {
       existingProfileId.value = Number(duplicate.id)
       return
     }
-    try {
-      const created: any = await post('/question-bank-profiles', { name })
-      profileId = Number(created.id)
-      await loadQuestionBankProfiles()
-    } catch (cause) { importDestinationError.value = String(cause); return }
+    pendingNewProfileName.value = name
+    profileId = 0
   }
-  if (!questionBankProfilesState.items.some(profile => Number(profile.id) === profileId)) {
+  if (!pendingNewProfileName.value && !questionBankProfilesState.items.some(profile => Number(profile.id) === profileId)) {
     importDestinationError.value = '请选择要导入的已有题库配置'
     return
   }
-  targetProfileId.value = profileId
+  if (profileId) targetProfileId.value = profileId
   importDestinationOpen.value = false
   if (pendingImportKind.value === 'document') importConfirmOpen.value = true
   else await performEsqUpload(profileId)
 }
 
-function upload() { chooseImportDestination('document') }
+function upload() {
+  chooseImportDestination('document')
+}
 
 async function performDocumentUpload(profileId: number) {
   if (!selectedFile.value) return
@@ -163,13 +175,17 @@ async function performDocumentUpload(profileId: number) {
   uploadStage.value = useModelAssist.value ? '正在提取文档并调用模型校对…' : '正在提取文档并生成本地草稿…'
   const form = new FormData()
   form.append('file', selectedFile.value)
-  form.append('profile_id', String(profileId))
+  if (pendingNewProfileName.value) form.append('new_profile_name', pendingNewProfileName.value)
+  else form.append('profile_id', String(profileId))
   if (selectedAnswerFile.value) form.append('answer_file', selectedAnswerFile.value)
   selectedAudioFiles.value.forEach(file => form.append('audio_files', file))
   form.append('use_model_assist', String(useModelAssist.value))
   form.append('model_assist_correct_structure', String(modelAssistRewrite.value))
   try {
     const result: any = await api('/imports', { method: 'POST', body: form })
+    targetProfileId.value = Number(result.profile_id)
+    pendingNewProfileName.value = undefined
+    await loadQuestionBankProfiles()
     await openJob(result.id)
     await loadJobs()
     notice.value = result.ignored_paper_count > 0
@@ -189,22 +205,26 @@ async function openJob(id: number) {
   )
 }
 
-async function saveDraft(showNotice = true) {
-  if (!current.value) return
+async function saveDraft(showNotice = true): Promise<boolean> {
+  if (!current.value || busy.value || current.value.status === 'published') return false
   busy.value = true
+  error.value = ''
+  notice.value = ''
   try {
     const result: any = await put(`/imports/${current.value.id}`, {
       draft_data: current.value.draft,
       reason: '用户逐字段校对',
     })
     current.value.draft = result.draft
-    if (showNotice) notice.value = '草稿已保存并重新校验'
     await loadJobs()
-  } catch (cause) { error.value = String(cause) }
+    if (showNotice) notice.value = '草稿已保存并重新校验'
+    return true
+  } catch (cause) { error.value = String(cause); return false }
   finally { busy.value = false }
 }
 
 async function saveAnswers() {
+  if (!await saveDraft(false)) return
   const answers = Object.fromEntries(
     questions.value.map((question: any) => [
       String(question.number),
@@ -269,12 +289,20 @@ function stopPublishStage() {
 
 async function publishDocument() {
   if (!current.value) return
-  await saveDraft(false)
+  if (!await saveDraft(false)) return
   if (current.value.draft.warnings?.length) {
     error.value = '仍有校验问题，请按警告逐项修正后再批准入库。'
     return
   }
-  if (!confirm(`确认发布 ${current.value.draft.year} 年题库吗？`)) return
+  const confirmed = await confirmDialog({
+    title: `发布 ${current.value.draft.year} 年题库？`,
+    message: [
+      `将把校对完成的草稿正式写入题库“${current.value.draft.title}”。`,
+      '发布后题目进入可练习状态；草稿内容可在发布前继续修改。',
+    ],
+    confirmLabel: '发布题库',
+  })
+  if (!confirmed) return
   busy.value = true
   startPublishStage('正在发布题库…')
   try {
@@ -339,16 +367,22 @@ async function saveLabel() {
   notice.value = `已人工校正并${row.locked ? '锁定' : '解锁'}该题标签`
 }
 
-function uploadEsq() { chooseImportDestination('esq') }
+function uploadEsq() {
+  chooseImportDestination('esq')
+}
 
 async function performEsqUpload(profileId: number) {
   if (!selectedEsqFile.value) return
   busy.value = true
   const form = new FormData()
   form.append('file', selectedEsqFile.value)
-  form.append('profile_id', String(profileId))
+  if (pendingNewProfileName.value) form.append('new_profile_name', pendingNewProfileName.value)
+  else form.append('profile_id', String(profileId))
   try {
     const result: any = await api('/question-banks/imports', { method: 'POST', body: form })
+    targetProfileId.value = Number(result.profile_id)
+    pendingNewProfileName.value = undefined
+    await loadQuestionBankProfiles()
     await openEsqJob(result.id)
     await loadEsqJobs()
   } catch (cause) { error.value = String(cause) }
@@ -389,7 +423,16 @@ async function publishEsq() {
 }
 
 async function removeImportJob(job: any, esq = false) {
-  if (!confirm(`将未完成导入“${job.display_name || job.filename}”及原始文件移入回收站？`)) return
+  const confirmed = await confirmDialog({
+    title: `移入回收站“${job.display_name || job.filename}”？`,
+    message: [
+      '将删除该未完成导入及其原始文件。',
+      '内容将在回收站保留七天，期间可以恢复。',
+    ],
+    confirmLabel: '移入回收站',
+    danger: true,
+  })
+  if (!confirmed) return
   try {
     await del(`${esq ? '/question-banks/imports' : '/imports'}/${job.id}`)
     if (esq) {
@@ -418,24 +461,23 @@ async function removeImportJob(job: any, esq = false) {
     <div v-if="error" class="warning" role="alert">{{ error }}</div>
     <div v-if="notice" class="success-note" aria-live="polite">{{ notice }}</div>
     <div v-if="uploadStage" class="import-progress" role="status"><RefreshCw class="spin" :size="18" />{{ uploadStage }}</div>
-    <div v-if="publishStage" class="import-publish-toast" role="status" aria-live="polite"><RefreshCw class="spin" :size="17" /><span><b>{{ publishStage }}</b><small>{{ publishSeconds < 5 ? '大题库包发布可能需要数分钟，请保持本页开启。' : '已进行 ' + publishSeconds + ' 秒；大题库包发布可能需要数分钟，请保持本页开启。' }}</small></span></div>
+    <div v-if="publishStage" class="import-publish-toast" role="status" aria-live="polite"><RefreshCw class="spin" :size="17" /><span><b>{{ publishStage }}</b><small>{{ publishSeconds < 5 ? '大题库包发布可能需要数分钟，请保持本页开启。' : `已进行 ${publishSeconds} 秒；大题库包发布可能需要数分钟，请保持本页开启。` }}</small></span></div>
 
     <section class="import-source-grid">
       <article class="card import-source-card">
-        <div class="source-heading"><FileUp :size="22" /><div><h2>Word / PDF 辅助导入</h2><p>试卷支持 DOC、DOCX；答案支持 DOC、DOCX、文本型 PDF。</p></div></div>
+        <div class="source-heading"><FileUp :size="22" /><div><h2>Word / PDF 辅助导入</h2></div></div>
         <label class="field"><span>试卷文件</span><input type="file" accept=".doc,.docx" @change="selectedFile=($event.target as HTMLInputElement).files?.[0]||null"></label>
         <label class="field"><span>答案文件（可选）</span><input type="file" accept=".doc,.docx,.pdf" @change="selectedAnswerFile=($event.target as HTMLInputElement).files?.[0]||null"></label>
-        <label class="field"><span>听力音频（可多选，支持 MP3 / M4A / WAV / OGG）</span><input type="file" accept=".mp3,.m4a,.wav,.ogg,audio/mpeg,audio/mp4,audio/wav,audio/ogg" multiple @change="selectedAudioFiles=Array.from(($event.target as HTMLInputElement).files || [])"><small v-if="selectedAudioFiles.length">已选择 {{ selectedAudioFiles.length }} 个音频文件</small></label>
-        <label class="check-row"><input v-model="useModelAssist" type="checkbox"><span><b>上传时使用模型辅助定位题目与答案</b><small>默认全量核对；失败时保留本地草稿。</small></span></label>
-        <label class="check-row"><input v-model="modelAssistRewrite" type="checkbox"><span><b>允许模型修正题干和选项归属</b><small>默认关闭，仅在材料能明确证明错位时修改。</small></span></label>
+        <label class="field"><span>听力音频（可选，可多选）</span><input type="file" accept=".mp3,.m4a,.wav,.ogg,audio/mpeg,audio/mp4,audio/wav,audio/ogg" multiple @change="selectedAudioFiles=Array.from(($event.target as HTMLInputElement).files || [])"><small v-if="selectedAudioFiles.length">已选择 {{ selectedAudioFiles.length }} 个音频文件</small></label>
+        <label class="check-row"><input v-model="useModelAssist" type="checkbox"><span><b>上传时使用模型辅助定位题目与答案</b></span></label>
+        <label class="check-row"><input v-model="modelAssistRewrite" type="checkbox"><span><b>允许模型修正题干和选项归属</b></span></label>
         <button class="button" type="button" :disabled="busy || !selectedFile" @click="upload">
           <Sparkles v-if="useModelAssist" :size="17" /><FileUp v-else :size="17" />{{ busy ? '正在处理…' : '生成结构化草稿' }}
         </button>
-        <small>扫描版或水印严重且没有文字层的答案 PDF 会提示人工录入。</small>
       </article>
 
       <article class="card import-source-card">
-        <div class="source-heading"><FileArchive :size="22" /><div><h2>ESQ 分享题库</h2><p>保留跨设备分享与远程题库更新能力。</p></div></div>
+        <div class="source-heading"><FileArchive :size="22" /><div><h2>ESQ 分享题库</h2></div></div>
         <label class="field"><span>ESQ 文件</span><input type="file" accept=".esq" @change="selectedEsqFile=($event.target as HTMLInputElement).files?.[0]||null"></label>
         <button class="button secondary" type="button" :disabled="busy || !selectedEsqFile" @click="uploadEsq"><FileArchive :size="17" />校验题库包</button>
         <div class="history-mini">
@@ -450,6 +492,7 @@ async function removeImportJob(job: any, esq = false) {
     </section>
 
     <section v-if="esqCurrent" class="card review-card">
+      <p>导入目标题库：{{ esqDestinationName }}</p>
       <div class="review-head"><div><span class="pill">ESQ 1.0</span><h2>{{ esqCurrent.preview.title }}</h2><p>{{ esqCurrent.preview.totals.questions }} 道题 · {{ esqCurrent.preview.totals.units }} 篇</p></div><div class="review-actions"><button class="button" :disabled="busy" @click="publishEsq"><FileCheck2 :size="17" />发布题库包</button><button class="button secondary" type="button" :disabled="busy" @click="closeEsqPreview"><X :size="17" />关闭预览</button></div></div>
       <div v-for="conflict in esqCurrent.preview.conflicts.filter((item:any)=>item.existing)" :key="conflict.paperKey" class="conflict-row">
         <b>{{ conflict.year }} 年已存在</b>
@@ -468,7 +511,7 @@ async function removeImportJob(job: any, esq = false) {
           </button>
           <button v-if="job.status!=='published'" class="button ghost danger compact" type="button" @click="removeImportJob(job)"><Trash2 :size="14" /></button>
         </div>
-        <p v-if="!jobs.length" class="empty-copy">上传后会在这里保留草稿记录。</p>
+        <p v-if="!jobs.length" class="empty-copy">暂无导入记录</p>
       </aside>
 
       <main v-if="current?.draft" class="review-stack">
@@ -486,13 +529,15 @@ async function removeImportJob(job: any, esq = false) {
             <Sparkles :size="18" />
             <span v-if="current.draft.model_assist.status==='failed'">模型辅助不可用：{{ current.draft.model_assist.error }}</span>
             <span v-else>模型 {{ current.draft.model_assist.model_name }} 已核对；写入 {{ current.draft.model_assist.applied_answers }} 个答案，修正 {{ current.draft.model_assist.applied_fixes }} 题。</span>
-            <button class="button secondary" type="button" :disabled="busy" @click="retryModelAssist()">重新调用</button>
-            <button class="button ghost" type="button" @click="openModelSelector"><Settings :size="15" />选择其他模型</button>
+            <div class="assist-actions">
+              <button class="button secondary" type="button" :disabled="busy" @click="retryModelAssist()"><RefreshCw :size="15" />重新调用</button>
+              <button class="button ghost" type="button" :disabled="busy" @click="openModelSelector"><Settings :size="15" />选择其他模型</button>
+            </div>
           </div>
           <div v-for="warning in current.draft.warnings" :key="warning" class="warning" role="alert">{{ warning }}</div>
           <div class="review-actions">
-            <button class="button secondary" type="button" @click="saveDraft()"><Save :size="16" />保存草稿</button>
-            <button class="button secondary" type="button" @click="saveAnswers"><FileKey2 :size="16" />确认答案 {{ answerProgress.completed }}/{{ answerProgress.total }}</button>
+            <button class="button secondary" type="button" :disabled="busy || current.status==='published'" @click="saveDraft()"><Save :size="16" />保存草稿</button>
+            <button class="button secondary" type="button" :disabled="busy || current.status==='published'" @click="saveAnswers"><FileKey2 :size="16" />确认答案 {{ answerProgress.completed }}/{{ answerProgress.total }}</button>
           </div>
         </article>
 
@@ -510,7 +555,7 @@ async function removeImportJob(job: any, esq = false) {
             <section v-for="question in unit.questions" :key="question.number" class="question-editor">
               <div class="question-editor-head">
                 <label class="compact-field"><span>题号</span><input v-model.number="question.number" type="number"></label>
-                <label class="compact-field"><span>答案</span><select v-model="current.draft.answers[question.number]"><option value="">未填写</option><option v-for="option in question.options" :key="option.key" :value="option.key">{{ option.key }}</option></select></label>
+                <label class="compact-field"><span>答案</span><OptionSheet v-model="current.draft.answers[question.number]" :items="[{ value: '', label: '未填写' }, ...question.options.map((option: any) => ({ value: option.key, label: option.key }))]" title="选择本题答案" /></label>
               </div>
               <label class="field"><span>题干</span><textarea v-model="question.stem" rows="2"></textarea></label>
               <div class="option-editor-grid">
@@ -520,7 +565,7 @@ async function removeImportJob(job: any, esq = false) {
           </div>
         </article>
       </main>
-      <div v-else class="card empty-workspace"><FileUp :size="34" /><h2>选择导入记录开始校对</h2><p>逐字段编辑能直观看到文章、题干、选项与答案的归属。</p></div>
+      <div v-else class="card empty-workspace"><FileUp :size="34" /><h2>选择导入记录开始校对</h2></div>
     </section>
 
     <section class="card label-center">
@@ -530,7 +575,7 @@ async function removeImportJob(job: any, esq = false) {
       <div v-if="questionLabelingState.error" class="warning" role="alert">{{ questionLabelingState.error }}</div>
       <div v-if="labelManagerOpen" class="label-list">
         <div class="label-search"><input v-model="labelSearch" placeholder="按年份、篇目、题号或考点搜索"><button class="button secondary" @click="loadLabels"><Search :size="15" />搜索</button></div>
-        <button v-for="row in labelRows" :key="row.question_id" type="button" @click="editLabel(row)"><span><b>{{ row.year }} · {{ row.unit_title }} · 第 {{ row.number }} 题</b><small>{{ row.primary_skill || '尚未标注' }} · {{ row.model_name }}</small></span><Lock v-if="row.locked" :size="15" /></button>
+        <button v-for="row in labelRows" :key="row.question_id" type="button" @click="editLabel(row)"><span><b>{{ row.year }} · {{ row.unit_title }} · 第 {{ row.number }} 题</b><small>{{ row.primary_skill || '尚未标注' }}{{ row.content_review_required ? ' · 题面已修正，标签待复核' : '' }} · {{ row.model_name }}</small></span><Lock v-if="row.locked" :size="15" /></button>
       </div>
     </section>
 
@@ -552,9 +597,9 @@ async function removeImportJob(job: any, esq = false) {
         <label class="field"><span>干扰项类型</span><textarea :value="editingLabel.trap_types.join('，')" @input="editingLabel!.trap_types=tags(($event.target as HTMLTextAreaElement).value)"></textarea></label>
         <label class="field"><span>注意事项</span><textarea :value="editingLabel.attention_points.join('，')" @input="editingLabel!.attention_points=tags(($event.target as HTMLTextAreaElement).value)"></textarea></label>
         <div class="draft-meta-grid">
-          <label class="field"><span>词汇要求</span><select v-model="editingLabel.vocabulary_demand"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
-          <label class="field"><span>上下文依赖</span><select v-model="editingLabel.context_dependency"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
-          <label class="field"><span>语法依赖</span><select v-model="editingLabel.grammar_dependency"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
+          <label class="field"><span>词汇要求</span><OptionSheet v-model="editingLabel.vocabulary_demand" :items="levelOptions" title="选择词汇要求" /></label>
+          <label class="field"><span>上下文依赖</span><OptionSheet v-model="editingLabel.context_dependency" :items="levelOptions" title="选择上下文依赖" /></label>
+          <label class="field"><span>语法依赖</span><OptionSheet v-model="editingLabel.grammar_dependency" :items="levelOptions" title="选择语法依赖" /></label>
         </div>
         <label class="check-row"><input v-model="editingLabel.locked" type="checkbox"><span><b>锁定人工校正结果</b><small>后续批量标注不会覆盖。</small></span></label>
         <div class="review-actions"><button class="button secondary" @click="editingLabel=null">取消</button><button class="button" @click="saveLabel"><Check :size="16" />保存并锁定</button></div>
@@ -566,11 +611,7 @@ async function removeImportJob(job: any, esq = false) {
         <h2 id="model-selector-title">选择其他模型重新校对</h2>
         <p>将重新向所选模型提供完整试卷、答案附件和当前草稿。本地解析结果会保留到模型成功返回为止。</p>
         <label class="field"><span>可用模型</span>
-          <select v-model="selectedModelKey">
-            <option v-for="item in selectorModels" :key="`${item.profile_id}:${item.model_id}`" :value="`${item.profile_id}::${item.model_id}`">
-              {{ item.profile_name }} / {{ item.display_name || item.model_id }}
-            </option>
-          </select>
+          <OptionSheet v-model="selectedModelKey" :items="selectorModels.map((item: any) => ({ value: `${item.profile_id}::${item.model_id}`, label: item.display_name || item.model_id, hint: item.profile_name }))" title="选择重新校对模型" searchable />
         </label>
         <div v-if="!selectorModels.length" class="warning" role="alert">当前没有可用模型，请先到模型与设置中启用配置并刷新模型列表。</div>
         <div class="review-actions">
@@ -601,7 +642,7 @@ async function removeImportJob(job: any, esq = false) {
         <label class="check-row"><input v-model="importDestinationMode" type="radio" value="new_profile"><span><b>按题库包名称创建新题库配置（推荐）</b><small>适合导入不同考试或科目的新题库，不会切换当前学习题库。</small></span></label>
         <label v-if="importDestinationMode === 'new_profile'" class="field"><span>新题库配置名称</span><input v-model.trim="importProfileName" maxlength="80" @keyup.enter="confirmImportDestination"></label>
         <label class="check-row"><input v-model="importDestinationMode" type="radio" value="existing_profile"><span><b>导入已有题库配置</b><small>仅在文件确实属于已有题库时选择。</small></span></label>
-        <label v-if="importDestinationMode === 'existing_profile'" class="field"><span>已有题库配置</span><select v-model.number="existingProfileId"><option v-for="profile in questionBankProfilesState.items" :key="profile.id" :value="profile.id">{{ profile.name }}</option></select></label>
+        <label v-if="importDestinationMode === 'existing_profile'" class="field"><span>已有题库配置</span><OptionSheet v-model="existingProfileId" :items="questionBankProfilesState.items.map((profile: any) => ({ value: Number(profile.id), label: profile.name }))" title="选择已有题库配置" searchable /></label>
         <p v-if="importDestinationError" class="warning" role="alert">{{ importDestinationError }}</p>
         <div style="display:flex;gap:10px;margin-top:20px;justify-content:center"><button class="button ghost" type="button" @click="importDestinationOpen=false">取消</button><button class="button" type="button" @click="confirmImportDestination">继续导入</button></div>
       </div>
@@ -611,4 +652,16 @@ async function removeImportJob(job: any, esq = false) {
 
 <style scoped>
 .import-page{padding-bottom:48px}.import-source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:18px}.import-source-card{display:flex;flex-direction:column;gap:14px}.source-heading,.review-head,.review-actions,.question-editor-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.source-heading{justify-content:flex-start;align-items:flex-start}.source-heading h2,.review-head h2{margin:0}.source-heading p,.review-head p{margin:4px 0 0;color:var(--muted)}.field{display:flex;flex-direction:column;gap:7px}.field span,.compact-field span{font-size:12px;color:var(--muted);font-weight:700}.field input,.field textarea,.field select,.compact-field input,.compact-field select,.label-search input{width:100%;border:1px solid var(--line);border-radius:10px;background:var(--surface-solid);color:var(--ink);padding:11px 12px;font:inherit}.check-row{display:flex;gap:10px;align-items:flex-start;padding:11px;border:1px solid var(--line);border-radius:12px}.check-row input{margin-top:4px;min-width:20px;min-height:20px}.check-row span{display:flex;flex-direction:column;gap:3px}.check-row small{color:var(--muted)}.history-mini,.history-panel,.label-list{display:flex;flex-direction:column;gap:8px}.history-mini button,.history-panel>button,.label-list>button{min-height:48px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-solid);color:var(--ink);display:flex;justify-content:space-between;text-align:left}.history-mini span,.history-panel span,.label-list span{display:flex;flex-direction:column;gap:3px}.history-mini small,.history-panel small,.label-list small{color:var(--muted)}.workspace-grid{display:grid;grid-template-columns:240px minmax(0,1fr);gap:18px;align-items:start}.history-panel{position:sticky;top:18px}.history-panel>button.active{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}.review-stack{display:flex;flex-direction:column;gap:16px}.review-card,.unit-editor{overflow:hidden}.draft-meta-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.draft-meta-grid .wide{grid-column:span 2}.assist-summary,.import-progress,.success-note{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:12px;margin:12px 0;background:color-mix(in srgb,var(--accent) 12%,var(--surface-solid));color:var(--ink)}.assist-summary.failed{background:color-mix(in srgb,var(--danger) 10%,var(--surface-solid))}.assist-summary span{flex:1}.unit-editor-head{width:100%;min-height:64px;padding:14px 16px;border:0;background:transparent;color:var(--ink);display:flex;justify-content:space-between;text-align:left}.unit-editor-head span:first-child{display:flex;flex-direction:column;gap:4px}.unit-editor-head small{color:var(--muted)}.unit-editor-body{border-top:1px solid var(--line);padding:16px}.question-editor{padding:16px 0;border-top:1px solid var(--line)}.compact-field{display:flex;align-items:center;gap:7px}.compact-field input,.compact-field select{width:90px}.option-editor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}.option-editor{display:grid;grid-template-columns:28px 1fr;gap:8px;align-items:start}.option-editor b{width:28px;height:28px;border-radius:8px;background:var(--accent-soft);display:grid;place-items:center}.option-editor textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--surface-solid);color:var(--ink);font:inherit}.empty-workspace{text-align:center;padding:52px 24px}.label-center{margin-top:18px}.label-progress{height:9px;border-radius:999px;background:var(--line);overflow:hidden;margin:16px 0}.label-progress span{display:block;height:100%;background:var(--accent);transition:width .2s}.label-search{display:flex;gap:8px}.label-search input{flex:1}.modal-overlay{position:fixed;inset:0;z-index:1000;background:rgba(12,20,17,.55);display:grid;place-items:center;padding:24px}.modal-card{width:min(620px,100%);max-height:90vh;overflow:auto}.label-editor-modal{display:flex;flex-direction:column;gap:13px}.conflict-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--line)}.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media(max-width:900px){.import-source-grid,.workspace-grid{grid-template-columns:1fr}.history-panel{position:static}.draft-meta-grid,.option-editor-grid{grid-template-columns:1fr}.draft-meta-grid .wide{grid-column:auto}.review-head{align-items:flex-start;flex-direction:column}}@media(prefers-reduced-motion:reduce){.spin{animation:none}.label-progress span{transition:none}}
+</style>
+
+<style scoped>
+.assist-summary { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; }
+.assist-summary > span { min-width: 0; overflow-wrap: anywhere; }
+.assist-summary > svg { margin-top: 3px; }
+.assist-actions { grid-column: 2; display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.assist-actions .button { flex: 0 0 auto; min-height: 44px; max-width: 100%; white-space: normal; word-break: keep-all; overflow-wrap: anywhere; }
+.assist-actions .button svg { flex-shrink: 0; }
+@media (max-width: 480px) {
+  .assist-actions { grid-column: 1 / -1; }
+}
 </style>

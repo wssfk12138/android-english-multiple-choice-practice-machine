@@ -4,7 +4,7 @@ import { queueTranslations } from './vocabulary'
 
 let worker: Promise<void> | null = null
 
-async function pendingIds(limit = 40): Promise<number[]> {
+async function pendingIds(limit = 8): Promise<number[]> {
   return (await rows<{ id: number }>(
     `SELECT id FROM vocabulary_entries
      WHERE user_edited = 0 AND translation_status = 'queued'
@@ -17,9 +17,13 @@ async function work() {
   while (true) {
     const ids = await pendingIds()
     if (!ids.length) return
+    await run(
+      `UPDATE vocabulary_entries SET translation_status = 'translating', updated_at = CURRENT_TIMESTAMP
+       WHERE id IN (${ids.map(() => '?').join(',')}) AND user_edited = 0 AND translation_status = 'queued'`,
+      ids,
+    )
     try {
-      const translated = await translateVocabularyEntries(ids)
-      if (!translated) return
+      await translateVocabularyEntries(ids)
       // A partial model response must not spin indefinitely. Keep unmatched
       // entries visible as failed so the user can retry them explicitly.
       await run(
@@ -27,7 +31,7 @@ async function work() {
           translation_error = '模型没有返回该单词的有效翻译',
           updated_at = CURRENT_TIMESTAMP
          WHERE id IN (${ids.map(() => '?').join(',')})
-           AND translation_status = 'queued'`,
+           AND user_edited = 0 AND translation_status = 'translating'`,
         ids,
       )
     } catch (cause) {
@@ -35,8 +39,14 @@ async function work() {
         `UPDATE vocabulary_entries SET translation_status = 'failed',
           translation_error = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id IN (${ids.map(() => '?').join(',')})
-           AND translation_status = 'queued'`,
+           AND user_edited = 0 AND translation_status = 'translating'`,
         [String(cause).slice(0, 600), ...ids],
+      )
+      // Stop on a provider/configuration failure without leaving an invisible queue.
+      await run(
+        `UPDATE vocabulary_entries SET translation_status = 'failed', translation_error = ?,
+         updated_at = CURRENT_TIMESTAMP WHERE user_edited = 0 AND translation_status = 'queued'`,
+        [String(cause).slice(0, 600)],
       )
       return
     }

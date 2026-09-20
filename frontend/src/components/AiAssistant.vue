@@ -17,6 +17,11 @@ import {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, del, get } from '../api'
+import OptionSheet from './OptionSheet.vue'
+import { assistantSession } from '../services/assistantSession'
+import { agentInstructions, createDocument, documentStorage, outputName, runDocumentAgent } from '../services/documentAgent'
+import { saveAssistantDocument } from '../services/saveAssistantDocument'
+import { platformRuntime } from '../platform/runtime'
 
 type SelectorModel = {
   profile_id: number
@@ -51,31 +56,23 @@ type Attachment = {
   dataUrl: string
 }
 
-type ReasoningEffort = '' | 'low' | 'medium' | 'high'
-
 const router = useRouter()
+const { document: currentDocument, progress, messages, conversationId, input, loading, loadingData, attachments, reasoningEffort, models, conversations, error } = assistantSession
+const inputPlaceholder = platformRuntime.isAndroid
+  ? '输入问题…'
+  : '输入问题，Enter 发送，Shift + Enter 换行'
 
-const models = ref<SelectorModel[]>([])
-const conversations = ref<ConversationSummary[]>([])
-const messages = ref<ChatMessage[]>([])
 const selectedModel = ref(localStorage.getItem('linjian-ai-model') || '')
-const reasoningEffort = ref<ReasoningEffort>('')
-const conversationId = ref<number | null>(null)
-const input = ref('')
-const loading = ref(false)
-const loadingData = ref(false)
-const historyOpen = ref(true)
-const error = ref('')
-const messageList = ref<HTMLElement | null>(null)
-let controller: AbortController | null = null
 
-const attachments = ref<Attachment[]>([])
+const historyOpen = ref(true)
+const messageList = ref<HTMLElement | null>(null)
+
 const noVisionModels = ref(new Set<string>())
 const visionError = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+const documentInput = ref<HTMLInputElement | null>(null)
 let attachmentSeq = 0
 const MAX_ATTACHMENTS = 4
-// data URL 为 ASCII base64，长度近似字节数；后端会做同样的上限校验。
 const MAX_ATTACHMENT_DATA_URL_CHARS = 8 * 1024 * 1024
 
 const VISION_ERROR_PATTERN = /(image|vision|multimodal|multi-modal|unsupported|invalid content|content part|does not support|not support)/i
@@ -157,15 +154,19 @@ const activeModel = computed(() =>
   models.value.find(item => modelValue(item) === selectedModel.value),
 )
 
-const groupedModels = computed(() => {
-  const groups = new Map<string, SelectorModel[]>()
-  for (const model of models.value) {
-    const current = groups.get(model.profile_name) || []
-    current.push(model)
-    groups.set(model.profile_name, current)
-  }
-  return [...groups.entries()].map(([name, items]) => ({ name, items }))
-})
+// 主题化选择弹层的扁平选项；所属配置名称作为辅助说明保留分组语义。
+const modelOptions = computed(() => models.value.map(model => ({
+  value: modelValue(model),
+  label: model.display_name || model.model_id,
+  hint: model.profile_name,
+})))
+
+const reasoningOptions = [
+  { value: '', label: '跟随配置' },
+  { value: 'low', label: '推理：低' },
+  { value: 'medium', label: '推理：中' },
+  { value: 'high', label: '推理：高' },
+]
 
 async function scrollToBottom() {
   await nextTick()
@@ -246,6 +247,9 @@ async function loadData() {
 }
 
 function startNewConversation() {
+  if (loading.value || loadingData.value) return
+  currentDocument.value = null
+  progress.value = []
   conversationId.value = null
   messages.value = []
   if (window.innerWidth <= 820) historyOpen.value = false
@@ -254,10 +258,16 @@ function startNewConversation() {
 }
 
 async function openConversation(id: number) {
+  if (loading.value || loadingData.value) return
+  loadingData.value = true
   try {
     const result = await get<{ id: number, messages: ChatMessage[] }>(`/ai/conversations/${id}`)
     conversationId.value = result.id
     messages.value = result.messages || []
+    attachments.value = []
+    input.value = ''
+    progress.value = []
+    currentDocument.value = await documentStorage(id)
     const latest = [...messages.value].reverse().find(item => item.profile_id && item.model_id)
     if (latest) {
       const value = `${latest.profile_id}:${encodeURIComponent(latest.model_id || '')}`
@@ -267,12 +277,16 @@ async function openConversation(id: number) {
     await scrollToBottom()
   } catch (cause) {
     error.value = String(cause)
+  } finally {
+    loadingData.value = false
   }
 }
 
 async function removeConversation(id: number) {
+  if (loading.value || loadingData.value) return
   try {
     await del(`/ai/conversations/${id}`)
+    await documentStorage(id, null)
     if (conversationId.value === id) startNewConversation()
     await refreshConversations()
   } catch (cause) {
@@ -281,10 +295,11 @@ async function removeConversation(id: number) {
 }
 
 async function sendMessage() {
+  if (currentDocument.value) return sendDocumentMessage()
   const text = input.value.trim()
   const selection = activeModel.value
   const currentAttachments = attachments.value
-  if ((!text && !currentAttachments.length) || !selection || loading.value) return
+  if ((!text && !currentAttachments.length) || !selection || loading.value || loadingData.value) return
   const attachmentPayload = currentAttachments.map(item => ({ name: item.name, dataUrl: item.dataUrl }))
 
   messages.value.push({
@@ -298,7 +313,8 @@ async function sendMessage() {
   attachments.value = []
   error.value = ''
   loading.value = true
-  controller = new AbortController()
+  assistantSession.controller = new AbortController()
+  const requestController = assistantSession.controller
   await scrollToBottom()
   try {
     const result = await api<{
@@ -314,13 +330,14 @@ async function sendMessage() {
         ...(attachmentPayload.length ? { attachments: attachmentPayload } : {}),
         ...(reasoningEffort.value ? { reasoning_effort: reasoningEffort.value } : {}),
       }),
-      signal: controller.signal,
+      signal: requestController.signal,
     })
+    requestController.signal.throwIfAborted()
     conversationId.value = result.conversation_id
     messages.value.push(result.message)
     await refreshConversations()
   } catch (cause: any) {
-    if (cause?.name === 'AbortError') {
+    if (requestController.signal.aborted || cause?.name === 'AbortError') {
       messages.value.push({
         role: 'assistant',
         content: '已停止等待本次回答。你可以调整问题后重新发送。',
@@ -344,13 +361,80 @@ async function sendMessage() {
     }
   } finally {
     loading.value = false
-    controller = null
+    assistantSession.controller = null
+    await scrollToBottom()
+  }
+}
+
+async function chooseDocument(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  target.value = ''
+  if (!file || loading.value || loadingData.value) return
+  loadingData.value = true
+  try {
+    const prepared = await createDocument(file)
+    if (!conversationId.value) {
+      const created = await api<{ id: number }>('/ai/conversations', { method: 'POST' })
+      conversationId.value = created.id
+    }
+    await documentStorage(conversationId.value, prepared)
+    currentDocument.value = prepared
+    attachments.value = []
+    progress.value = []
+  } catch (cause) { error.value = String(cause) }
+  finally { loadingData.value = false }
+}
+
+async function downloadDocument() {
+  if (!currentDocument.value || loading.value) return
+  try { await saveAssistantDocument(currentDocument.value.working, outputName(currentDocument.value)) }
+  catch (cause) { error.value = String(cause) }
+}
+
+async function sendDocumentMessage() {
+  const text = input.value.trim()
+  const selection = activeModel.value
+  const doc = currentDocument.value
+  const id = conversationId.value
+  if (!text || !selection || !doc || !id || loading.value || loadingData.value) return
+  const history = messages.value.slice(-4).map(m => ({ role: m.role, content: m.content }))
+  messages.value.push({ role: 'user', content: text })
+  input.value = ''
+  error.value = ''
+  loading.value = true
+  progress.value = []
+  const abort = new AbortController()
+  assistantSession.controller = abort
+  try {
+    const answer = await runDocumentAgent(doc, [
+      { role: 'system', content: agentInstructions }, ...history,
+      { role: 'user', content: '当前附件：' + doc.name + '\n' + text },
+    ], async thread => {
+      const result = await api<{ content: string }>('/ai/agent-turn', {
+        method: 'POST', signal: abort.signal,
+        body: JSON.stringify({ profile_id: selection.profile_id, model: selection.model_id, reasoning_effort: reasoningEffort.value || null, messages: thread }),
+      })
+      return result.content
+    }, event => { progress.value.push(event); scrollToBottom() }, abort.signal)
+    abort.signal.throwIfAborted()
+    await documentStorage(id, doc)
+    await api('/ai/agent-exchange', { method: 'POST', body: JSON.stringify({ conversation_id: id, profile_id: selection.profile_id, model: selection.model_id, message: text, answer }) })
+    messages.value.push({ role: 'assistant', content: answer })
+    await refreshConversations()
+  } catch (cause) {
+    const description = abort.signal.aborted ? '已停止任务；已执行的修改保留在工作副本。' : String(cause)
+    messages.value.push({ role: 'assistant', content: description, error: true })
+    try { await documentStorage(id, doc) } catch { error.value = '工作副本未能保存到本机，请在离开应用前下载。' }
+  } finally {
+    loading.value = false
+    assistantSession.controller = null
     await scrollToBottom()
   }
 }
 
 function stopMessage() {
-  controller?.abort()
+  assistantSession.controller?.abort()
 }
 
 function handleInputKey(event: KeyboardEvent) {
@@ -376,10 +460,10 @@ onMounted(() => {
   if (window.innerWidth <= 820) historyOpen.value = false
   window.addEventListener('linjian-ai-config-changed', configChanged)
   loadData()
+  scrollToBottom()
 })
 
 onBeforeUnmount(() => {
-  controller?.abort()
   window.removeEventListener('linjian-ai-config-changed', configChanged)
 })
 </script>
@@ -490,13 +574,23 @@ onBeforeUnmount(() => {
           </article>
           <article v-if="loading" class="ai-message assistant">
             <span class="ai-message-avatar"><Bot :size="15" /></span>
-            <div class="ai-thinking"><LoaderCircle :size="16" class="spinning" />正在思考…</div>
+            <div class="ai-thinking"><LoaderCircle :size="16" class="spinning" />{{ progress.at(-1) || '等待模型回答…' }}</div>
           </article>
         </div>
 
         <div v-if="error" class="ai-inline-error" role="alert">{{ error }}</div>
 
         <form class="ai-composer" @submit.prevent="sendMessage">
+          <div v-if="currentDocument" class="ai-document-bar">
+            <span>{{ currentDocument.name }} · 工作副本 v{{ currentDocument.revision }}</span>
+            <button type="button" class="button secondary compact" :disabled="loading" @click="downloadDocument">下载副本</button>
+          </div>
+          <details v-if="progress.length" class="ai-tool-progress">
+            <summary>任务进度 · {{ progress.at(-1) }}</summary>
+            <ol><li v-for="(step, index) in progress" :key="index">{{ step }}</li></ol>
+          </details>
+          <input ref="documentInput" class="ai-file-input" type="file" accept=".docx" @change="chooseDocument">
+          <button type="button" class="button secondary compact" :disabled="loading || loadingData" @click="documentInput?.click()">添加 Word</button>
           <div v-if="attachments.length" class="ai-attachment-strip">
             <span v-for="item in attachments" :key="item.id" class="ai-attachment-chip">
               <img :src="item.dataUrl" alt="">
@@ -514,7 +608,7 @@ onBeforeUnmount(() => {
             rows="3"
             maxlength="20000"
             :disabled="!models.length"
-            placeholder="输入问题，Enter 发送，Shift + Enter 换行"
+            :placeholder="inputPlaceholder"
             aria-label="向 AI 学习助手提问"
             @keydown="handleInputKey"
           />
@@ -530,7 +624,7 @@ onBeforeUnmount(() => {
             <button
               class="ai-attach-button"
               type="button"
-              :disabled="loading || attachDisabled"
+              :disabled="loading || attachDisabled || !!currentDocument"
               :title="attachDisabled ? '该模型此前拒绝图片输入，请更换模型后再上传' : '添加图片'"
               aria-label="添加图片"
               @click="triggerAttach"
@@ -538,30 +632,23 @@ onBeforeUnmount(() => {
               <Plus :size="18" />
             </button>
             <div class="ai-model-control">
-              <label class="sr-only" for="assistant-model">对话模型</label>
-              <select
-                id="assistant-model"
+              <OptionSheet
                 v-model="selectedModel"
+                :items="modelOptions"
+                title="切换对话模型"
+                searchable
+                :placeholder="models.length ? '选择对话模型' : '暂无可用模型'"
                 :disabled="!models.length || loading"
-                aria-label="切换对话模型"
-              >
-                <option v-if="!models.length" value="">暂无可用模型</option>
-                <optgroup v-for="group in groupedModels" :key="group.name" :label="group.name">
-                  <option v-for="model in group.items" :key="modelValue(model)" :value="modelValue(model)">
-                    {{ model.display_name || model.model_id }}
-                  </option>
-                </optgroup>
-              </select>
+              />
             </div>
             <div class="ai-model-control ai-reasoning-control">
-              <label class="sr-only" for="assistant-reasoning-effort">本次对话推理强度</label>
-              <span class="ai-reasoning-label" aria-hidden="true">推理强度</span>
-              <select id="assistant-reasoning-effort" v-model="reasoningEffort" :disabled="loading" aria-label="本次对话推理强度">
-                <option value="">跟随配置</option>
-                <option value="low">推理：低</option>
-                <option value="medium">推理：中</option>
-                <option value="high">推理：高</option>
-              </select>
+              <OptionSheet
+                v-model="reasoningEffort"
+                :items="reasoningOptions"
+                title="本次对话推理强度"
+                :placeholder="reasoningEffort ? '' : '跟随配置'"
+                :disabled="loading"
+              />
             </div>
             <button
               v-if="loading"
@@ -602,3 +689,8 @@ onBeforeUnmount(() => {
     </section>
   </div>
 </template>
+<style scoped>
+.ai-document-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; overflow-wrap: anywhere; }
+.ai-document-bar span { flex: 1; min-width: 0; }
+.ai-tool-progress { max-height: 140px; overflow: auto; font-size: 12px; padding: 6px 0; }
+</style>

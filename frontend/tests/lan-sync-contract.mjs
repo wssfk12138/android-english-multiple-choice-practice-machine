@@ -13,7 +13,7 @@ const lanSyncSerialization = read('../src/platform/android/lan-sync-serializatio
 const syncScheduler = read('../src/platform/android/sync-scheduler.ts')
 const syncCoordinator = read('../src/platform/android/sync-coordinator.ts')
 const vocabulary = read('../src/platform/android/vocabulary.ts')
-const updates = read('../src/views/AndroidUpdatesView.vue')
+const updates = read('../src/views/AndroidSyncView.vue')
 
 assert.match(app, /startAutoSync()/, 'Android startup must start the sync scheduler')
 assert.match(app, /stopAutoSync()/, 'Android teardown must stop the sync scheduler')
@@ -35,21 +35,13 @@ assert.match(lanSync, /canonicalObjectKey[\s\S]*recordTombstone\(db, table, cano
 assert.match(lanSync, /await transaction\(async \(db\)/, 'pulled changes and tombstones must apply atomically')
 assert.match(lanSync, /const visibleItems = items[\s\S]*const last = visibleItems\.at\(-1\)/, 'an invisible tombstone must not advance the local watermark')
 assert.match(lanSync, /profileFingerprint: JSON\.stringify\(\[\.\.\.profiles\]\.sort\(\)\)/, 'profile visibility must have a stable fingerprint')
-assert.match(lanSync, /const profileChanged =[\s\S]*lan_sync_cursor_profiles/, 'profile changes must invalidate old incremental watermarks')
-assert.match(lanSync, /const remoteCursor = profileChanged[\s\S]*const localTombstoneCursor = profileChanged/, 'all four watermarks must restart when profile visibility changes')
+assert.match(lanSync, /stored.profileFingerprint === profileFingerprint \? stored : \{\}/, 'profile changes must invalidate every category watermark')
+assert.match(lanSync, /scope \+ 'cursor:' \+ category/, 'categories and hosts require independent cursor records')
 const pushStatusCheck = lanSync.indexOf('if (pushResponse.status !== 200)')
-for (const setting of [
-  'lan_sync_remote_cursor',
-  'lan_sync_remote_tombstone_cursor',
-  'lan_sync_local_cursor',
-  'lan_sync_local_tombstone_cursor',
-  'lan_sync_cursor_profiles',
-]) {
-  assert.ok(
-    lanSync.indexOf(`setSyncSetting('${setting}'`) > pushStatusCheck,
-    `${setting} must only persist after the push succeeds`,
-  )
-}
+assert.ok(lanSync.includes('new LocalApiError(pullResponse.status,'), 'pull must preserve the HTTP status for error classification')
+assert.ok(lanSync.includes('new LocalApiError(pushResponse.status,'), 'push must preserve the HTTP status for error classification')
+assert.ok(lanSync.indexOf('setSyncSetting(cursorKey,') > pushStatusCheck, 'category cursor record persists only after push succeeds')
+assert.match(lanSync, /remote: pulled.cursor,[\s\S]*remoteTombstone: pulled.tombstone_cursor, local: localBatch.cursor, localTombstone: deleted.cursor/, 'four cursors persist in one durable record')
 assert.match(lanSync, /pa\.deleted_at IS NULL AND p\.deleted_at IS NULL/, 'stable references must ignore deleted question-bank rows')
 assert.match(lanSync, /\? = '' OR p\.name = \?/, 'stable references must be scoped by profile name')
 assert.match(lanSync, /conflicts in profile/, 'ambiguous stable references must fail instead of using an arbitrary row')
@@ -59,7 +51,7 @@ assert.match(lanSync, /loadSerializationLookup/, 'outgoing references must be pr
 assert.match(lanSync, /serializeLocalRow\(table, item, lookup\)/, 'outgoing rows must use the prefetched lookup')
 assert.match(lanSyncSerialization, /lookupStableKey/, 'stable keys must resolve from an in-memory lookup')
 assert.match(lanSyncSerialization, /lookupProfile/, 'profile isolation must resolve from the same in-memory lookup')
-assert.match(syncScheduler, /createSyncCoordinator\(performSync\)/, 'the scheduler must use a single-flight coordinator')
+assert.match(syncScheduler, /createSyncCoordinator\(performSync(?:,\s*[^)]*)?\)/, 'the scheduler must use a single-flight coordinator')
 assert.match(syncCoordinator, /if \(active\) return active/, 'manual sync calls must join the active run')
 assert.match(syncCoordinator, /followUpPending/, 'a local mutation during sync must retain one follow-up run')
 assert.match(syncScheduler, /setState\(\{ running: false \}\)/, 'sync completion and failure must both clear the running state')
@@ -74,6 +66,6 @@ assert.match(lanSync, /localSessionHasLearningData\(db, syncId\)/, 'a remote emp
 assert.match(lanSync, /isUnresolvedSessionUnitReference\(error, syncId\)/, 'compatibility handling must only catch the bounded stale-unit error')
 assert.match(practice, /sync_tombstones[\s\S]*DELETE FROM wrong_current_questions/, 'replacing the wrong-question pool must tombstone old rows')
 assert.match(practice, /practice_unit_submissions pus WHERE pus\.session_id = s\.id\) DESC,[\s\S]*TRIM\(COALESCE\(pa\.user_answer/, 'active sessions must prefer real progress over the newest empty shell')
-assert.match(updates, /局域网学习记录同步/, 'the Android settings UI must expose LAN sync')
+assert.match(updates, /设备同步/, 'the Android settings UI must expose LAN sync')
 
 console.log('Android LAN sync wiring and mutation contracts: OK')
