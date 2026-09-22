@@ -28,9 +28,36 @@ function fixture() {
     occurrences: [{ id: index + 1, context_sentence: sentence, year: 2026, unit_title: 'Synthetic reading' }],
   }))
   globalThis.fixtureWords = words
+  globalThis.vocabRevision = 1
+  // 队列投影只回传卡片抬头与复习计划字段；释义、原句、出现记录改由详情按需读取。
+  const listRow = word => ({ id:word.id, term:word.term, normalized_term:word.term.toLowerCase(), lemma:'', phonetic:word.phonetic,
+    translation_status:word.translation_status, study_status:word.study_status, review_stage:0, lapse_count:0, last_result:'',
+    next_review_at:null, last_reviewed_at:null, created_at:'2026-01-01', updated_at:'2026-01-01', is_frequent:0 })
   globalThis.mockApi = async (path, body) => {
     if (path === '/vocabulary/translation-runs') return { workerStarted: false }
-    if (path.startsWith('/vocabulary?')) return { items: words.filter(word=>!path.includes('status=review')||!word.rated), counts: { total: 3, frequent: 0, mastered: 0, pending: 0, review: 3 } }
+    if (path.startsWith('/vocabulary?')) {
+      // 首屏延迟用于验证「响应未返回时不得渲染终态」；默认不延迟。
+      if (globalThis.__firstListDelay) {
+        const delay = globalThis.__firstListDelay
+        globalThis.__firstListDelay = 0
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
+      const query = new URLSearchParams(path.slice(path.indexOf('?') + 1))
+      const base = query.get('status') === 'review' ? words.filter(word => !word.rated) : words
+      const search = query.get('search')
+      const pool = search ? base.filter(word => word.term.includes(search)) : base
+      const limit = query.get('limit')
+      const rows = !limit || limit === 'all' ? pool : pool.slice(0, Number(limit))
+      const items = query.get('projection') === 'queue'
+        ? rows.map(listRow)
+        : query.get('projection') === 'review'
+          // 真实后端的复习卡详情已收窄到「常用释义 + 真题原句」，这里故意仍回传整行字段：
+          // 用来证明复习卡渲染与多出来的字段无关，设置项全开也不会多出栏目。
+          ? rows.map(word => ({ ...listRow(word), review_detail: structuredClone(word) }))
+        : rows
+      return { items, revision: 'v2:' + globalThis.vocabRevision,
+        counts: { total: 3, frequent: 0, mastered: 0, pending: 0, review: 3 } }
+    }
     const match = path.match(/^\/vocabulary\/(\d+)(?:\/review)?$/)
     if (match) {
       const word = words.find(word => word.id === Number(match[1]))
@@ -111,6 +138,12 @@ async function inspectReview(page) {
 let browser
 const evidence=[]
 let cases=0
+// 复习界面先用骨架卡占位，清单与释义/原句随后落地；布局测量必须等到两者就绪。
+const waitReviewCard = page => page.locator('.vocabulary-review-card:not([aria-busy="true"]) .reveal-button').waitFor()
+const waitReviewAnswer = page => page.waitForFunction(()=>{
+  const skeleton=document.querySelector('.review-answer .muted')
+  return !skeleton || !skeleton.textContent.includes('正在读取释义与原句')
+})
 try {
   await server.listen()
   browser=await chromium.launch({headless:true})
@@ -120,6 +153,7 @@ try {
     page.on('pageerror',error=>errors.push(error.message))
     await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.abort())
     await page.addInitScript(()=>Object.defineProperty(screen.orientation,'type',{get:()=>innerHeight>innerWidth?'portrait-primary':'landscape-primary'}))
+    await page.addInitScript(value=>localStorage.setItem('linjian-theme',value?'dark':'light'),dark)
     await page.goto(server.resolvedUrls.local[0]+'__vocabulary-layout')
     await page.locator('.vocab-list-item').first().waitFor()
     await page.evaluate(scale=>{document.documentElement.style.fontSize=16*scale+'px'},fontScale)
@@ -130,9 +164,7 @@ try {
     await filterToggle.click()
     await page.locator('.vocab-filter-options label').filter({hasText:'已掌握'}).click()
     assert.match(await filterToggle.innerText(),/已掌握/)
-    assert.equal(await page.getByRole('radio',{name:'已掌握'}).isChecked(),true)
     assert.match(await filterToggle.innerText(),/0/)
-    await filterToggle.click()
     assert.equal(await page.locator('.vocab-filter-options').count(),0)
     for (const word of ['evidence',longWord,veryLongWord]) {
       // 首次进入不再自动展开第一个词条（窄屏信息架构），由用例显式点击目标词。
@@ -157,12 +189,25 @@ try {
       await visibleDetail.getByRole('button',{name:'取消',exact:true}).click()
       cases++
     }
+    // 复习卡与设置里的单词显示项解耦：先把 11 项全部打开，再进入每日一背，用来证明复习卡不受设置影响。
+    await page.evaluate(()=>{
+      localStorage.setItem('vocab-display-config',JSON.stringify({common_meaning:true,phonetic:true,part_of_speech:true,source_sentence:true,model_sentence:true,memory_hint:true,synonyms:true,antonyms:true,similar_forms:true,morphology:true,note:true}))
+      window.dispatchEvent(new CustomEvent('vocab-display-change'))
+    })
     await page.locator('.page-head button').click()
+    await waitReviewCard(page)
+    await waitReviewAnswer(page)
     for (const state of ['hidden','revealed']) {
       if(state==='revealed') await page.locator('.reveal-button').click()
       if(state==='revealed') {
+        await waitReviewAnswer(page)
         assert.equal(await page.locator('.review-answer .review-meaning-block').first().getAttribute('class'),'review-meaning-block detail-section')
-        assert.equal(await page.locator('.review-answer .review-part-of-speech').innerText(),'n.')
+        // 显示项全开时复习卡仍只有常用释义与真题原句：唯一栏目是常驻的原句块，其余 9 项既不渲染标题也不渲染内容。
+        assert.deepEqual(await page.locator('.review-answer .memory-layer').evaluateAll(items=>items.map(el=>el.querySelector('h4,summary')?.textContent?.trim())),['真题原句'],label+': 每日一背只应渲染真题原句栏目')
+        assert.equal(await page.locator('.review-answer details').count(),0,label+': 每日一背不应有可折叠栏目')
+        assert.equal(await page.locator('.review-answer .review-part-of-speech').count(),0,label+': 词性不应出现在每日一背内容中')
+        const answerText=await page.locator('.review-answer').innerText()
+        for (const column of ['音标','词性','模型例句','词形变化','同义词辨析','反义词辨析','形近词辨析','记忆提示','我的笔记']) assert.ok(!answerText.includes(column),label+': 每日一背内容不应包含「'+column+'」')
         assert.deepEqual(await page.locator('.review-actions button').allTextContents(),['不认识','认识','熟练'])
         const tops=await page.locator('.review-actions button').evaluateAll(buttons=>buttons.map(button=>button.getBoundingClientRect().top))
         assert.ok(Math.max(...tops)-Math.min(...tops)<2,'rating buttons stay in one row')
@@ -174,13 +219,12 @@ try {
         assert.ok(measured.card.width<=720, 'landscape review uses desktop card width')
         assert.ok(measured.card.top>=16&&measured.card.bottom<=height-16, 'review leaves space around its border')
         assert.ok(Math.abs(measured.card.left-(width-measured.card.width)/2)<2, 'review card is centered')
-        if(state==='hidden') {
-          assert.ok(measured.card.height>=480 && measured.card.height<=520, 'unrevealed card retains desktop recall proportions')
-          assert.ok(measured.term.top-measured.header.bottom>=60, 'word has breathing room below the header')
-          const recallGap=await page.locator('.reveal-button').evaluate(button=>button.getBoundingClientRect().top-document.querySelector('.review-phonetic').getBoundingClientRect().bottom)
-          assert.ok(recallGap>=79 && recallGap<=81, 'recall button uses desktop spacing')
+        if(state==='revealed') {
+          const hidden=evidence.findLast(item=>item.label===label&&item.state==='hidden')
+          assert.ok(Math.abs(measured.card.height-hidden.card.height)<1,'revealing reserves actual content without card jump')
+          const widths=await page.locator('.review-actions button').evaluateAll(items=>items.map(el=>el.getBoundingClientRect().width))
+          assert.ok(widths.every(value=>Math.abs(value-156)<1),'landscape buttons use approved 156px width')
         }
-        else assert.ok(measured.actions.top-measured.content.bottom<=12, 'rating follows the answer without unused vertical space')
       }
       cases++
     }
@@ -196,6 +240,7 @@ try {
     await page.evaluate(()=>globalThis.releaseRating())
     await page.waitForFunction(()=>document.querySelector('.review-term')?.textContent.includes('interdisciplinary'))
     await page.locator('.reveal-button').click()
+    await waitReviewAnswer(page)
     // Rotate with long title and multiple open layers, then narrow to one layer.
     if(width===1280 && !dark && fontScale===1) {
       const collapsible = page.locator('.review-answer .memory-layer details')
@@ -215,18 +260,21 @@ try {
       fixtureWords[0].common_meaning='Synthetic long definition for layout regression. '.repeat(80)
       fixtureWords[0].latest_sentence=fixtureWords[0].latest_sentence.repeat(30)
       for (const word of fixtureWords) word.common_meaning=fixtureWords[0].common_meaning
+      globalThis.vocabRevision += 1
     })
     for (const kind of ['scheduled','reinforcement']) {
       if(kind==='scheduled') await page.locator('.page-head button').click()
       else await page.locator('.vocab-reinforcement-actions button').first().click()
+      await waitReviewCard(page)
       await page.locator('.reveal-button').click()
+      await waitReviewAnswer(page)
       const measured=await inspectReview(page)
       evidence.push({label,kind,...measured})
       if(output) await page.screenshot({path:join(output,label+'-'+kind+'.png')})
       assert.ok(measured.card.top>=-1&&measured.card.bottom<=height+1)
       assert.ok(measured.actions.top>=0&&measured.actions.bottom<=height+1)
       assert.ok(measured.close.top>=0&&measured.close.bottom<=height+1)
-      assert.ok(measured.scrollHeight>measured.clientHeight, 'long answer scrolls inside review content')
+      assert.ok(measured.scrollHeight>measured.clientHeight, label+' '+kind+': long answer scrolls inside review content '+JSON.stringify(measured))
       await page.locator('.review-content').evaluate(element=>{element.scrollTop=element.scrollHeight})
       assert.ok(await page.locator('.review-content').evaluate(element=>element.scrollTop>0))
       await page.getByRole('button',{name:'退出复习',exact:true}).click()
@@ -236,6 +284,32 @@ try {
     assert.deepEqual(errors,[])
     console.log(label+': word containment, edit reachability, theme and both scrolling review modes passed')
     await page.close()
+  }
+  // 首屏响应尚未返回时不得渲染终态：既不显示“没有单词”，也不把计数显示成 0。
+  {
+    const page=await browser.newPage({viewport:{width:390,height:844}})
+    const errors=[];page.on('pageerror',error=>errors.push(error.message))
+    await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.abort())
+    await page.addInitScript(()=>Object.defineProperty(screen.orientation,'type',{get:()=>innerHeight>innerWidth?'portrait-primary':'landscape-primary'}))
+    await page.addInitScript(()=>{globalThis.__firstListDelay=700})
+    await page.goto(server.resolvedUrls.local[0]+'__vocabulary-layout')
+    await page.waitForFunction(()=>document.querySelector('.vocab-list-state'))
+    assert.equal(await page.locator('.vocab-list-state').getAttribute('aria-busy'),'true')
+    assert.match(await page.locator('.vocab-list-state').innerText(),/正在读取单词/)
+    assert.equal(await page.locator('.vocab-list-item').count(),0)
+    assert.equal(await page.locator('.vocab-list .empty:not(.vocab-list-state)').count(),0)
+    assert.equal(await page.locator('.vocab-stat-chip strong').first().innerText(),'—')
+    assert.equal(await page.locator('.vocab-filter-toggle').innerText(),'筛选：全部单词 · —')
+    await page.locator('.vocab-list-item').first().waitFor()
+    assert.equal(await page.locator('.vocab-list-state').count(),0)
+    assert.equal(await page.locator('.vocab-stat-chip strong').first().innerText(),'3')
+    // 真的没有结果时仍然要显示终态空列表。
+    await page.locator('.search-field input').fill('zzz')
+    await page.waitForFunction(()=>[...document.querySelectorAll('.empty')].some(el=>el.textContent.includes('还没有符合条件的单词')))
+    assert.equal(await page.locator('.vocab-list-state').count(),0)
+    assert.deepEqual(errors,[])
+    await page.close()
+    console.log('Vocabulary first-load state: a pending response shows a reading state instead of an empty/zero list')
   }
   console.log('Vocabulary layout: '+cases+' scenarios passed')
 } finally {

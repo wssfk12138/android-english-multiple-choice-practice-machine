@@ -208,6 +208,31 @@ for (const field of ['synonyms', 'memory_hint', 'latest_sentence', 'occurrences'
 const queueBytes = JSON.stringify(dueRows.items).length
 const fullBytes = JSON.stringify(fullRows.items).length
 assert.ok(queueBytes < fullBytes / 2, `到期队列体积必须降到整行的一半以下（${queueBytes} vs ${fullBytes}）`)
+
+// 每日一背首批卡一次取回队列字段和轻量详情，只多一次批量出现记录读取；
+// 不得为每张卡逐条查库，也不得触发 localSimilarMatches 的整本词库扫描。
+const warmReviewMark = bridgeCalls()
+const reviewRows = await vocabulary.listVocabulary(new URLSearchParams('status=review&limit=12&offset=0&projection=review'))
+const warmReviewCalls = since(warmReviewMark)
+assert.equal(reviewRows.items.length, 1)
+const warmed = reviewRows.items[0]
+assert.equal(warmed.review_detail.latest_sentence, 'He went home yesterday.', '首批卡必须预热原句')
+assert.equal(warmed.review_detail.common_meaning, '去（过去式）', '首批卡必须预热常用释义')
+// 每日一背只显示「常用释义 + 真题原句」，设置页的 11 个显示项只作用于单词本首页卡片，
+// 所以复习卡详情不能回传展开内容：界面读不到就不该过桥，也不该为它整本词库扫描相似词。
+assert.deepEqual(Object.keys(warmed.review_detail).sort(),
+  ['common_meaning', 'contextual_meaning', 'latest_sentence', 'occurrences'],
+  '复习卡详情只含释义与原句两组字段')
+for (const field of ['memory_hint', 'synonyms', 'antonyms', 'similar_forms', 'local_similar',
+  'morphology', 'generated_example', 'note', 'part_of_speech', 'lemma']) {
+  assert.ok(!(field in warmed.review_detail), `复习卡详情不得回传界面不显示的 ${field}`)
+}
+assert.ok(!('review_detail' in dueItem), '后续 queue 投影仍保持极小载荷')
+assert.equal(warmReviewCalls.length, 3, '首批复习卡只允许词条、计数、批量出现记录三次读取')
+assert.equal(warmReviewCalls.filter(sql => /FROM vocabulary_occurrences/i.test(sql)).length, 1, '出现记录必须一次批量读取')
+for (const sql of warmReviewCalls) {
+  assert.ok(!/SELECT\s+id,\s*term\s+FROM\s+vocabulary_entries/i.test(sql), `首批卡不得扫描整本词库计算相似词：${sql}`)
+}
 const card = await vocabulary.serializeEntry(11)
 assert.equal(card.latest_sentence, 'He went home yesterday.', '复习卡片展开时必须读到原句')
 assert.equal(card.memory_hint, '联想：go 的过去式', '复习卡片展开时必须读到记忆提示')
@@ -253,10 +278,9 @@ const txBefore = transactionCalls
 const reviewMark = bridgeCalls()
 const ack = await vocabulary.reviewVocabulary(11, 'hard', 'scheduled', dueItem.review_revision)
 const reviewCalls = since(reviewMark)
-// 评分链路的语句形状：两次状态读取（乐观并发校验 + 回执）与一次 executeSet
-// 里的两条写语句。旧的 transaction() 外壳还要额外付两次 isTransactionActive
-// 与显式 BEGIN/COMMIT 的跨桥往返。
-assert.equal(reviewCalls.length, 4, `评分只允许“读状态 + 两条写语句 + 读回执”，实际 ${reviewCalls.length} 条`)
+// 评分链路的语句形状：一次状态读取（乐观并发校验）与一次 executeSet
+// 里的两条写语句。评分回执直接由已验证状态构建，不再追加读回执。
+assert.equal(reviewCalls.length, 3, `评分只允许“读状态 + 两条写语句”，实际 ${reviewCalls.length} 条`)
 assert.equal(executedSets.length, 1, '评分必须一次 executeSet 写完两条语句')
 assert.equal(executedSets[0].transaction, true, 'executeSet 必须自带原生事务，失败整组回滚')
 assert.equal(executedSets[0].returnMode, 'no', 'executeSet 不得要求回执列（原生 set 取不到 SELECT 结果）')

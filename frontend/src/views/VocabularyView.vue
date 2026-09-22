@@ -6,11 +6,12 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { del, get, post, put } from '../api'
 import { confirmDialog } from '../platform/dialogs'
-import { loadVocabDisplayConfig } from '../services/vocabularyDisplayConfig'
+import { VOCAB_REVIEW_DISPLAY_CONFIG, loadVocabDisplayConfig } from '../services/vocabularyDisplayConfig'
 import { reconcileDueQueue, orderedDueKeys, completeDueWord, wordKey, type DueQueue } from '../vocabulary-due-queue'
 import { nextTick } from 'vue'
 import { platformRuntime } from '../platform/runtime'
 import { useAndroidLandscape } from '../composables/useAndroidLandscape'
+import { loadVocabularyListSnapshot, loadVocabularyReviewSnapshot, saveVocabularyListSnapshot, saveVocabularyReviewSnapshot } from '../services/vocabularySnapshots'
 
 const route = useRoute()
 const landscape = useAndroidLandscape()
@@ -22,6 +23,20 @@ const currentBankScope = route.query.scope === 'current'
 const search = ref('')
 const error = ref('')
 const notice = ref('')
+let noticeTimer: ReturnType<typeof setTimeout> | null = null
+function clearNotice() {
+  if (noticeTimer) clearTimeout(noticeTimer)
+  noticeTimer = null
+  notice.value = ''
+}
+function showNotice(message: string, duration = 3200) {
+  if (noticeTimer) clearTimeout(noticeTimer)
+  notice.value = message
+  noticeTimer = setTimeout(() => {
+    noticeTimer = null
+    notice.value = ''
+  }, duration)
+}
 const editing = ref(false)
 const editForm = reactive<any>({})
 const hasSelectedContent = computed(() => selected.value?.translation_status === 'ready'
@@ -46,9 +61,24 @@ const reviewDetailPending = new Set<number>()
 let dueQueue: DueQueue = reconcileDueQueue(null, [])
 let dueQueueStorageKey = ''
 const reviewSaving = ref(false)
+let reviewSnapshotTimer: ReturnType<typeof setTimeout> | null = null
+let dueQueueTimer: ReturnType<typeof setTimeout> | null = null
+let reviewCommandId = ''
+function newReviewCommandId() {
+  const bytes = new Uint8Array(16)
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes)
+  else for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256)
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+}
 function persistDueQueue() {
-  try { localStorage.setItem(dueQueueStorageKey, JSON.stringify(dueQueue)) }
-  catch { error.value = '无法保存复习进度，请检查设备存储空间' }
+  if (!dueQueueStorageKey) return
+  if (dueQueueTimer) clearTimeout(dueQueueTimer)
+  const snapshot = JSON.stringify(dueQueue)
+  dueQueueTimer = setTimeout(() => {
+    dueQueueTimer = null
+    try { localStorage.setItem(dueQueueStorageKey, snapshot) }
+    catch { error.value = '无法保存复习进度，请检查设备存储空间' }
+  }, 0)
 }
 let dueRefreshPromise: Promise<void> | null = null
 let reviewDisposed = false
@@ -72,12 +102,13 @@ function refreshDueQueue(): Promise<void> {
 // 到期队列分块读取。整队一次过桥的代价有实测：903 行到期队列要回传 298 KB，
 // 平板单次读取 1034 ms（其中桥传输 950 ms），而同一条 SQL 在 PC 上只要 3.6–7.6 ms
 // ——瓶颈是跨桥回传的字节数，不是查询本身。
-// 因此队列分两段读：首屏只取够立刻显示卡片的一小页，其余分块在后台补齐，每块到手
-// 都重排一次队列；用户一开始评分或离开复习，后台补全立刻让出通道，不和评分抢同一条
-// 本地数据库连接。
+// 因此队列按需分段读：首屏只取够立刻显示卡片的一小页；接近用完时，等首卡至少
+// 绘制两帧并进入空闲窗口后才补一小页。每次后台只读一页，用户开始评分或离开复习时
+// 立刻让出通道，不和评分抢同一条本地数据库连接。
 const DUE_FIRST_PAGE = 12
-const DUE_PAGE = 150
-type DueFill = 'complete' | 'stopped' | 'failed'
+const DUE_PAGE = 48
+const DUE_PREFETCH_THRESHOLD = 4
+type DueFill = 'complete' | 'partial' | 'stopped' | 'failed'
 let dueQueueWords = new Map<string, any>()
 let dueQueueOffset = 0
 let dueQueueComplete = false
@@ -88,20 +119,39 @@ let dueFillPromise: Promise<DueFill> | null = null
 // 上百条的队列缩回第一页。
 let dueHeadSignature = ''
 let dueHeadReview = -1
+let reviewSnapshotRevision = ''
 
 function dueQueueUrl(limit: number | 'all', offset: number) {
-  return `/vocabulary?status=review${currentBankScope ? '&scope=current' : ''}&limit=${limit}&offset=${offset}&projection=queue`
+  const projection = limit === DUE_FIRST_PAGE && offset === 0 ? 'review' : 'queue'
+  return `/vocabulary?status=review${currentBankScope ? '&scope=current' : ''}&limit=${limit}&offset=${offset}&projection=${projection}`
 }
 function duePageSignature(rows: any[]) {
   return rows.slice(0, DUE_FIRST_PAGE)
     .map(word => `${wordKey(word)}\u0000${reviewRevision(word)}`).join('\n')
 }
+function extractReviewRows(items: any): any[] {
+  return (Array.isArray(items) ? items : []).map((item: any) => {
+    if (item.review_detail) cacheReviewDetail(Number(item.id), item.review_detail)
+    const { review_detail: _detail, ...queueItem } = item
+    return queueItem
+  })
+}
 // 卡片身份变了就把揭示状态收回：否则新卡会带着上一张的答案出现。
 function setScheduledWords(ordered: string[], words: Map<string, any>) {
   if (reviewDisposed) return
   const identity = (word: any) => word ? `${wordKey(word)}\u0000${reviewRevision(word)}` : ''
-  const previous = identity(reviewWord.value)
-  scheduledWords.value = ordered.map(key => words.get(key)).filter(Boolean)
+  const previousWord = reviewWord.value
+  const previous = identity(previousWord)
+  const previousKey = previousWord ? wordKey(previousWord) : ''
+  const nextWords = ordered.map(key => words.get(key)).filter(Boolean)
+  scheduledWords.value = nextWords
+  // 后台刷新可能在当前卡片前插入新到期单词。按单词身份恢复位置，
+  // 不让数组下标变化把用户跳回另一张卡；当前卡确实失效时才夹到最近位置。
+  if (reviewMode.value && reviewKind.value === 'scheduled' && previousKey) {
+    const nextIndex = nextWords.findIndex(word => wordKey(word) === previousKey)
+    if (nextIndex >= 0) reviewIndex.value = nextIndex
+    else if (reviewIndex.value >= nextWords.length) reviewIndex.value = Math.max(0, nextWords.length - 1)
+  }
   if (previous !== identity(reviewWord.value)) reveal.value = false
 }
 // pending 为真表示队列还没读完：只有取满之后才把顺序落成权威版本，否则每取一页
@@ -127,7 +177,7 @@ async function readWholeDueQueue(token: number, force: boolean): Promise<DueFill
   let result: any
   try { result = await get(dueQueueUrl('all', 0)) } catch { return 'failed' }
   if (!dueFillWanted(token, force)) return 'stopped'
-  const rows: any[] = Array.isArray(result.items) ? result.items : []
+  const rows = extractReviewRows(result.items)
   dueQueueWords = new Map(rows.map((word: any) => [wordKey(word), word]))
   dueQueueOffset = rows.length
   dueQueueComplete = true
@@ -135,35 +185,33 @@ async function readWholeDueQueue(token: number, force: boolean): Promise<DueFill
   return 'complete'
 }
 async function fillDueQueue(token: number, force: boolean): Promise<DueFill> {
-  while (!dueQueueComplete) {
-    if (!dueFillWanted(token, force)) return 'stopped'
-    let result: any
-    try { result = await get(dueQueueUrl(DUE_PAGE, dueQueueOffset)) } catch { return 'failed' }
-    if (!dueFillWanted(token, force)) return 'stopped'
-    const rows: any[] = Array.isArray(result.items) ? result.items : []
-    // 服务器忽略了 limit：回来的就是整队，按整队收尾。
-    if (rows.length > DUE_PAGE) {
-      for (const word of rows) dueQueueWords.set(wordKey(word), word)
-      break
-    }
-    const added = rows.filter(word => !dueQueueWords.has(wordKey(word)))
-    for (const word of added) dueQueueWords.set(wordKey(word), word)
-    dueQueueOffset += rows.length
-    if (!added.length) {
-      // 整页都是读过的行：服务器忽略了 offset。整页重复说明它还在从头返回，
-      // 改用一次整队读取兜底；短页重复则说明队尾已到。
-      return rows.length >= DUE_PAGE ? await readWholeDueQueue(token, force) : finishFill(token, force)
-    }
-    // 每块到手立刻重排一次：补全期间下一张卡要能按队列顺序接上，等的不能只有
-    // 首屏那 12 条。只有当队列读满（循环外的 finishFill）才落成权威顺序。
-    applyDueQueue(true)
-    dueQueueComplete = rows.length < DUE_PAGE
+  if (dueQueueComplete) return 'complete'
+  if (!dueFillWanted(token, force)) return 'stopped'
+  let result: any
+  try { result = await get(dueQueueUrl(DUE_PAGE, dueQueueOffset)) } catch { return 'failed' }
+  if (!dueFillWanted(token, force)) return 'stopped'
+  const rows: any[] = Array.isArray(result.items) ? result.items : []
+  // 服务器忽略了 limit：回来的就是整队，按整队收尾。
+  if (rows.length > DUE_PAGE) {
+    for (const word of rows) dueQueueWords.set(wordKey(word), word)
+    dueQueueOffset = dueQueueWords.size
+    dueQueueComplete = true
+    return finishFill(token, force)
   }
-  return finishFill(token, force)
+  const added = rows.filter(word => !dueQueueWords.has(wordKey(word)))
+  for (const word of added) dueQueueWords.set(wordKey(word), word)
+  dueQueueOffset += rows.length
+  if (!added.length) {
+    // 整页都是读过的行：服务器忽略了 offset。整页重复说明它还在从头返回，
+    // 改用一次整队读取兜底；短页重复则说明队尾已到。
+    return rows.length >= DUE_PAGE ? await readWholeDueQueue(token, force) : finishFill(token, force)
+  }
+  dueQueueComplete = rows.length < DUE_PAGE
+  applyDueQueue(!dueQueueComplete)
+  return dueQueueComplete ? finishFill(token, force) : 'partial'
 }
-// 首屏之后的补全：不阻塞首屏，但必须在队列被评完之前取满，否则会把「还没读到」
-// 当成「今天复习完了」。force 供评分流程使用：此时 reviewSaving 为真但那正是评分
-// 自己在等这份补齐，不算和用户抢通道。
+// 首屏之后按剩余窗口补页：不阻塞首屏，也不能把「还没读到」当成「今天复习完了」。
+// force 供评分流程使用：此时 reviewSaving 为真，但它只取到下一批可见卡或队尾。
 async function topUpDueQueue(force = false): Promise<void> {
   if (dueQueueComplete || reviewDisposed) return
   if (force) return fillDueQueueForRating()
@@ -172,29 +220,58 @@ async function topUpDueQueue(force = false): Promise<void> {
   dueFillPromise = fillDueQueue(token, false).finally(() => { dueFillPromise = null })
   await dueFillPromise
 }
-// 评分流程等的是「队列确实取满」这个结论：后台补全可能因为评分让出通道而中途
-// 停下，别的补全也可能刚好在起步，所以要一直补到自己这一轮真正跑完；只在确实
-// 推进不了（退出复习、换会话、读取失败）时才收手，把结论交回调用方。
+// 评分流程只需要读到下一批可见卡，或者确认队尾；不必为判定下一张卡而把几百行
+// 全部搬过桥。后台补全可能因评分让出通道，所以先等待它结束，再读一页。
 async function fillDueQueueForRating(): Promise<void> {
   for (let round = 0; round < 8 && !dueQueueComplete && !reviewDisposed; round += 1) {
     if (dueFillPromise) { await dueFillPromise; continue }
     const before = dueQueueOffset
+    const beforeVisible = scheduledWords.value.length
     const token = dueLoadToken
     dueFillPromise = fillDueQueue(token, true).finally(() => { dueFillPromise = null })
     await dueFillPromise
-    if (dueQueueOffset === before) return
+    if (dueQueueComplete || scheduledWords.value.length > beforeVisible || dueQueueOffset === before) return
   }
+}
+
+async function scheduleDueQueueTopUp(): Promise<void> {
+  if (dueQueueComplete || dueQueueOffset <= 0 || reviewDisposed || reviewSaving.value
+    || !reviewMode.value || reviewKind.value !== 'scheduled') return
+  const remaining = Math.max(0, scheduledWords.value.length - reviewIndex.value)
+  if (remaining > DUE_PREFETCH_THRESHOLD) return
+  const token = dueLoadToken
+  await nextTick()
+  await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+  await waitForVocabularyIdle(1200)
+  if (token !== dueLoadToken || dueQueueComplete || reviewDisposed || reviewSaving.value
+    || !reviewMode.value || reviewKind.value !== 'scheduled') return
+  if (Math.max(0, scheduledWords.value.length - reviewIndex.value) > DUE_PREFETCH_THRESHOLD) return
+  await topUpDueQueue()
 }
 async function loadDueQueue() {
   const token = dueLoadToken + 1
   dueLoadToken = token
   const result: any = await get(dueQueueUrl(DUE_FIRST_PAGE, 0))
   if (reviewDisposed || token !== dueLoadToken) return
+  error.value = ''
+  const incomingRevision = String(result.revision || '')
+  // 内容版本变了说明词条内容可能已被后台补全改写，旧详情必须收回；但合并只带回
+  // 首屏 12 张的内嵌详情，当前卡落在首屏之外时（恢复上次进度后很常见）必须补读，
+  // 否则卡片会永久停在“正在读取释义与原句…”：详情已被清空，卡片身份又没变，
+  // 逐卡读取的触发器不会再次点火。
+  const detailsRecalled = Boolean(reviewSnapshotRevision && incomingRevision && reviewSnapshotRevision !== incomingRevision)
+  if (detailsRecalled) reviewDetails.value = {}
+  if (incomingRevision) reviewSnapshotRevision = incomingRevision
   applyCounts(result.counts)
   dueQueueStorageKey = `vocab-due-queue:v1:${result.scope_key || (currentBankScope ? 'current' : 'all')}`
+  const snapshotQueue = dueQueueSaved
   dueQueueSaved = null
-  try { dueQueueSaved = JSON.parse(localStorage.getItem(dueQueueStorageKey) || 'null') } catch { /* Rebuild from durable reviews. */ }
-  const rows: any[] = Array.isArray(result.items) ? result.items : []
+  try {
+    dueQueueSaved = JSON.parse(localStorage.getItem(dueQueueStorageKey) || 'null') || snapshotQueue
+  } catch {
+    dueQueueSaved = snapshotQueue
+  }
+  const rows = extractReviewRows(result.items)
   const signature = duePageSignature(rows)
   const review = Number(result.counts?.review ?? -1)
   // 前台恢复会重读队首：队首逐条一致、到期计数也没变时沿用已经累计的整队，
@@ -203,23 +280,23 @@ async function loadDueQueue() {
   // 上百条的队列扔掉、从第 13 条重新读一遍。
   if (signature === dueHeadSignature && review === dueHeadReview && dueQueueWords.size >= rows.length) {
     for (const word of rows) dueQueueWords.set(wordKey(word), word)
-    if (!dueQueueComplete) void topUpDueQueue()
+    if (!dueQueueComplete) void scheduleDueQueueTopUp()
+    if (detailsRecalled) void ensureReviewDetails()
     return
   }
   dueHeadSignature = signature
   dueHeadReview = review
-  dueQueueWords = new Map(rows.map((word: any) => [wordKey(word), word]))
+  // 快照或上一次分页已经展示过的词先保留。首屏刷新只负责覆盖已返回的词，
+  // 后续分页再补齐新增词；这样不会因为首屏响应把第 13 张以后的缓存截掉。
+  const cachedWords = dueQueueWords
+  dueQueueWords = new Map(cachedWords)
+  for (const word of rows) dueQueueWords.set(wordKey(word), word)
   dueQueueOffset = rows.length
-  // 短页说明整队都在首屏里；只有确实还有剩余时才继续分块，计数也只按首块落地。
+  // 短页说明整队都在首屏里；只有确实还有剩余时才继续分块。
   dueQueueComplete = rows.length < DUE_FIRST_PAGE
-  // 分页只带回队首，刷新后原来的位置可能已经不存在：回到队首，不能让界面把
-  // 「位置越界」渲染成「今天没有待复习的单词」。
-  if (reviewMode.value && reviewKind.value === 'scheduled' && reviewIndex.value >= rows.length) {
-    reviewIndex.value = 0
-    reveal.value = false
-  }
   applyDueQueue(!dueQueueComplete)
-  if (!dueQueueComplete) void topUpDueQueue()
+  if (!dueQueueComplete) void scheduleDueQueueTopUp()
+  if (detailsRecalled) void ensureReviewDetails()
 }
 const reviewItems = computed(() => reviewKind.value === 'reinforcement' ? reinforcementWords.value : scheduledWords.value)
 // 浏览列表按页读取：首屏只取够填满视口的行数，再由滚动哨兵继续取下一页；
@@ -235,6 +312,8 @@ const countsLoaded = ref(false)
 const listLoaded = ref(false)
 const listLoading = ref(false)
 let listToken = 0
+const listRevision = ref('')
+let vocabularyStatusPromise: Promise<any> | null = null
 // 计数只在这一个入口落地：读到之前界面显示占位符，不显示 0。
 function applyCounts(next: any) {
   if (!next) return
@@ -248,12 +327,74 @@ function listUrl(limitClause: string) {
   const projection = platformRuntime.isAndroid ? '&projection=summary' : ''
   return `/vocabulary?status=${filter.value}&search=${encodeURIComponent(search.value)}${currentBankScope ? '&scope=current' : ''}&${limitClause}${projection}`
 }
+function vocabularyStatusUrl() {
+  return `/vocabulary/status${currentBankScope ? '?scope=current' : ''}`
+}
+function refreshVocabularyStatus(): Promise<any> {
+  vocabularyStatusPromise ||= get(vocabularyStatusUrl())
+    .then(result => {
+      error.value = ''
+      return result
+    })
+    .finally(() => { vocabularyStatusPromise = null })
+  return vocabularyStatusPromise
+}
 function applyLoadedPage(result: any) {
   const rows = result.items || []
   const more = rows.length > PAGE_SIZE
   items.value = more ? rows.slice(0, PAGE_SIZE) : rows
   applyCounts(result.counts)
   hasMore.value = more
+  if (result.revision) listRevision.value = String(result.revision)
+}
+
+function listScopeKey() { return currentBankScope ? 'current' : 'all' }
+function persistListSnapshot() {
+  if (!listRevision.value || !listLoaded.value) return
+  saveVocabularyListSnapshot({
+    revision: listRevision.value,
+    scope: listScopeKey(),
+    filter: String(filter.value),
+    search: search.value,
+    items: items.value,
+    counts: counts.value,
+    hasMore: hasMore.value,
+    selectedId: selected.value?.id ? Number(selected.value.id) : null,
+    selected: selected.value || null,
+    scrollTop: vocabularyScrollElement()?.scrollTop || 0,
+  })
+}
+
+function vocabularyScrollElement(): Element | null {
+  const page = document.querySelector('.vocabulary-page')
+  if (page && page.scrollHeight > page.clientHeight + 1) return page
+  return document.scrollingElement
+}
+
+function restoreListScroll(snapshot: any, token: number) {
+  const wanted = Math.max(0, Number(snapshot?.scrollTop || 0))
+  if (!wanted) return
+  void nextTick().then(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))).then(() => {
+    if (token !== listToken || reviewDisposed) return
+    const scroller = vocabularyScrollElement()
+    if (!scroller || scroller.scrollTop > 2) return
+    scroller.scrollTop = wanted
+  })
+}
+
+function restoreListSnapshot(snapshot: any) {
+  if (!snapshot) return false
+  items.value = Array.isArray(snapshot.items) ? snapshot.items : []
+  counts.value = snapshot.counts || counts.value
+  countsLoaded.value = true
+  hasMore.value = Boolean(snapshot.hasMore)
+  listRevision.value = String(snapshot.revision || '')
+  listLoaded.value = true
+  if (snapshot.selected) {
+    selected.value = snapshot.selected
+    Object.assign(editForm, snapshot.selected)
+  }
+  return true
 }
 const reviewWord = computed(() => reviewItems.value[reviewIndex.value])
 // Keep one displayed answer stable while background enrichment refreshes the list.
@@ -273,6 +414,7 @@ function reviewDetailOf(word: any) {
 function cacheReviewDetail(id: number, detail: any) {
   reviewDetails.value = { ...reviewDetails.value, [String(id)]: detail }
   refreshReviewSnapshot()
+  if (typeof schedulePersistReviewSnapshot === 'function') schedulePersistReviewSnapshot()
 }
 async function loadReviewDetail(word: any, force = false) {
   const id = Number(word?.id)
@@ -292,22 +434,26 @@ async function loadReviewDetail(word: any, force = false) {
     if (session === reviewSessionToken) reviewDetailPending.delete(id)
   }
 }
-// 当前卡片优先，紧随其后预取下一张；翻卡不再付出整队读取的代价。
+// Current and following cards share one bridge window. The current card no
+// longer has to finish before the next-card prefetch can even start.
 async function ensureReviewDetails() {
   if (!reviewMode.value) return
   const list = reviewItems.value
   const current = list[reviewIndex.value]
-  if (current) await loadReviewDetail(current)
   const next = list[reviewIndex.value + 1]
-  if (next && !reviewDisposed && reviewMode.value) await loadReviewDetail(next)
+  await Promise.all([
+    current ? loadReviewDetail(current) : Promise.resolve(),
+    next ? loadReviewDetail(next) : Promise.resolve(),
+  ])
 }
 watch(() => [reviewMode.value, reviewWord.value ? wordKey(reviewWord.value) : '', reviewWord.value?.last_reviewed_at], () => {
   refreshReviewSnapshot()
 }, { immediate:true, flush:'sync' })
 watch(() => [reviewMode.value, reviewWord.value?.id || 0], () => { void ensureReviewDetails() })
 const displayConfig = ref(loadVocabDisplayConfig())
-const reviewDisplayConfig = computed(() => landscape.value
-  ? { ...displayConfig.value, phonetic: false, morphology: false, note: false } : displayConfig.value)
+// 每日一背只显示「常用释义 + 真题原句」：复习卡读服务层的固定契约，设置页的显示项
+// 只作用于单词本首页的单词学习卡片，因此设置里怎么改都不会改变复习卡内容。
+const reviewDisplayConfig = VOCAB_REVIEW_DISPLAY_CONFIG
 const expandedAll = ref(true)
 const expansionToken = ref(0)
 const enrichment = ref<any>(null)
@@ -375,18 +521,37 @@ async function refreshTranslationStatuses() {
   translationRefreshBusy = true
   try {
     const next: any = await get('/vocabulary/translation-status')
+    // 能正常读到最新状态，说明此前由翻译/补缺触发的暂时性错误已经恢复。
+    error.value = ''
     if (platformRuntime.isAndroid) {
       const wasWaiting = enrichment.value?.waiting_configuration
       enrichment.value = await get('/vocabulary/enrichment-status')
       if (wasWaiting && !enrichment.value.waiting_configuration && !enrichment.value.paused) await enrichmentAction('start')
     }
     const previous = translationProgress.value
-    translationProgress.value = next
-    if (!(next.queued > 0 || next.translating > 0 || next.enrichment_queued > 0 || next.enrichment_inflight > 0 || enrichment.value?.waiting_configuration)) {
+    const hasTranslationActivity = next.queued > 0 || next.translating > 0 || next.failed > 0
+    const hasEnrichmentActivity = next.enrichment_queued > 0 || next.enrichment_inflight > 0
+      || enrichment.value?.queued > 0 || enrichment.value?.inflight > 0
+      || enrichment.value?.failed > 0 || enrichment.value?.error
+      || enrichment.value?.waiting_configuration
+    translationProgress.value = hasTranslationActivity ? next : {}
+    if (!hasTranslationActivity && !hasEnrichmentActivity) {
+      // 任务已经结束时清掉旧的顶部状态卡，避免“翻译进度”停留到下一次进入页面。
+      translationProgress.value = {}
+      if (enrichment.value && !enrichment.value.waiting_configuration && !enrichment.value.paused) {
+        enrichment.value = null
+      }
       stopTranslationRefresh()
     }
-    if (editing.value || reviewMode.value) return
     const countsChanged = JSON.stringify(previous || {}) !== JSON.stringify(next)
+    if (reviewMode.value) {
+      if (countsChanged && !reviewSaving.value) {
+        if (reviewKind.value === 'scheduled') await refreshDueQueue()
+        else applyCounts((await refreshVocabularyStatus()).counts)
+      }
+      return
+    }
+    if (editing.value) return
     const selectedPending = selected.value
       && (selected.value.translation_status !== 'ready' || ['queued','inflight'].includes(selected.value.enrichment_status))
     if (!countsChanged && !selectedPending) return
@@ -397,7 +562,9 @@ async function refreshTranslationStatuses() {
       const rows = result.items || []
       hasMore.value = rows.length > items.value.length
       items.value = hasMore.value ? rows.slice(0, items.value.length) : rows
-      counts.value = result.counts || counts.value
+      applyCounts(result.counts || counts.value)
+      if (result.revision) listRevision.value = String(result.revision)
+      persistListSnapshot()
     }
     if (selected.value && selectedPending) {
       selected.value = await get(`/vocabulary/${selected.value.id}`)
@@ -409,7 +576,6 @@ async function refreshTranslationStatuses() {
 }
 
 async function startPendingTranslations() {
-  await load()
   await nextTick()
   await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
   if (reviewDisposed) return
@@ -424,10 +590,27 @@ async function startPendingTranslations() {
   }
 }
 
-async function load(preferredId?: number) {
+async function load(preferredId?: number, knownStatus?: any) {
   const token = ++listToken
-  listLoading.value = true
+  const snapshot = loadVocabularyListSnapshot(listScopeKey(), String(filter.value), search.value)
+  const restored = restoreListSnapshot(snapshot)
+  if (restored) restoreListScroll(snapshot, token)
+  listLoading.value = !restored
   try {
+    if (restored && snapshot?.revision) {
+      try {
+        const current: any = knownStatus || await refreshVocabularyStatus()
+        if (token !== listToken) return
+        applyCounts(current.counts)
+        if (String(current.revision) === String(snapshot.revision)) {
+          persistListSnapshot()
+          listLoading.value = false
+          return
+        }
+      } catch {
+        // 版本接口不可用时继续走完整读取，保证快照不会成为唯一数据源。
+      }
+    }
     let result: any
     try {
       result = await get(listUrl(`limit=${PAGE_SIZE + 1}&offset=0`))
@@ -447,11 +630,32 @@ async function load(preferredId?: number) {
     const target = items.value.find(item => item.id === requested)
     if (target) await select(target.id, false)
     else if (!selected.value && !isNarrowListContext() && items.value[0]) await select(items.value[0].id, false)
+    persistListSnapshot()
   } catch (e) {
     if (token === listToken) error.value = String(e)
   } finally {
     if (token === listToken) listLoading.value = false
   }
+}
+
+function waitForVocabularyIdle(timeout = 1200): Promise<void> {
+  return new Promise(resolve => {
+    if (reviewDisposed) { resolve(); return }
+    const idle = (window as any).requestIdleCallback as ((callback: () => void, options?: { timeout: number }) => number) | undefined
+    if (typeof idle === 'function') {
+      idle(resolve, { timeout })
+    } else {
+      window.setTimeout(resolve, timeout)
+    }
+  })
+}
+
+async function startVocabularyMaintenance() {
+  await waitForVocabularyIdle()
+  if (reviewDisposed || reviewMode.value) return
+  await startPendingTranslations()
+  await waitForVocabularyIdle(1800)
+  if (!reviewDisposed && !reviewMode.value) await initializeEnrichment()
 }
 
 async function loadMore() {
@@ -463,7 +667,10 @@ async function loadMore() {
     const more = rows.length > PAGE_SIZE
     items.value = [...items.value, ...(more ? rows.slice(0, PAGE_SIZE) : rows)]
     applyCounts(result.counts)
+    if (result.revision) listRevision.value = String(result.revision)
     hasMore.value = more
+    error.value = ''
+    persistListSnapshot()
   } catch (cause) { error.value = String(cause) }
   finally { loadingMore.value = false }
 }
@@ -480,6 +687,7 @@ async function select(id: number, toggle = true) {
     Object.assign(editForm, selected.value)
     editing.value = false
     expandedAll.value = true
+    persistListSnapshot()
   } catch (e) {
     error.value = String(e)
   }
@@ -496,7 +704,7 @@ async function saveEdit() {
     manually_frequent: Boolean(editForm.manually_frequent),
   })
   editing.value = false
-  notice.value = '词条已保存'
+  showNotice('词条已保存')
   await load(selected.value.id)
 }
 
@@ -514,12 +722,13 @@ async function removeEntry() {
   if (!confirmed) return
   await del(`/vocabulary/${selected.value.id}`)
   selected.value = null
+  listRevision.value = ''
   await load()
 }
 
 async function retryTranslation() {
   const result: any = await post('/vocabulary/retry-pending')
-  notice.value = '已将整个单词本中等待及失败的词条加入翻译队列'
+  showNotice('已将整个单词本中等待及失败的词条加入翻译队列')
   await load()
   startTranslationRefresh()
 }
@@ -539,44 +748,79 @@ async function rate(rating: string) {
     if (!target || reviewDisposed || !reviewMode.value || targetMode !== reviewKind.value
       || wordKey(target) !== initialKey || reviewRevision(target) !== initialRevision) {
       reveal.value = false
-      notice.value = '复习列表已更新，请查看当前单词后重新评分'
+      clearNotice()
+      reviewCommandId = ''
       return
     }
     const completedKey = wordKey(target)
     const revision = reviewRevision(target)
     if (targetMode === 'scheduled' && revision !== reviewRevision(reviewWord.value)) {
       reveal.value = false
-      notice.value = '复习列表已更新，请查看当前单词后重新评分'
+      clearNotice()
+      reviewCommandId = ''
       return
     }
     try {
-      await post(`/vocabulary/${target.id}/review`, { rating, mode: targetMode, expected_revision: target.review_revision })
+      if (!reviewCommandId) reviewCommandId = newReviewCommandId()
+      const acknowledgement: any = await post(`/vocabulary/${target.id}/review`, { rating, mode: targetMode, expected_revision: target.review_revision, command_id: reviewCommandId })
+      if (targetMode === 'scheduled') {
+        const wasMastered = target.study_status === 'mastered'
+        const isMastered = acknowledgement?.study_status === 'mastered'
+        applyCounts({
+          ...counts.value,
+          review: Math.max(0, Number(counts.value.review || 0) - 1),
+          mastered: Math.max(0, Number(counts.value.mastered || 0) + (isMastered ? 1 : 0) - (wasMastered ? 1 : 0)),
+        })
+      }
     } catch (cause) {
       const status = (cause as { status?: number })?.status
       if (targetMode !== 'scheduled' || ![404, 409].includes(status || 0)) throw cause
       if (reviewDisposed || !reviewMode.value || targetMode !== reviewKind.value
         || initialRevision !== reviewRevision(reviewWord.value)) return
       reveal.value = false
-      await refreshDueQueue()
-      notice.value = '复习列表已更新，请查看当前单词后重新评分'
+      // A cached card beyond the first page may no longer be due. Drop that
+      // rejected version before merging fresh pages, otherwise it survives
+      // every refresh and every subsequent rating receives the same conflict.
+      const rejectedCacheRow = dueQueueWords.get(completedKey)
+      dueQueueWords.delete(completedKey)
+      dueHeadSignature = ''
+      try { await refreshDueQueue() } catch (refreshError) {
+        if (rejectedCacheRow) dueQueueWords.set(completedKey, rejectedCacheRow)
+        throw refreshError
+      }
+      const refreshedIndex = scheduledWords.value.findIndex(word => wordKey(word) === completedKey)
+      if (refreshedIndex >= 0) reviewIndex.value = refreshedIndex
+      if (!scheduledWords.value.length && !dueQueueComplete) await topUpDueQueue(true)
+      if (!scheduledWords.value.length && dueQueueComplete) {
+        reviewMode.value = false
+        reviewIndex.value = 0
+      }
+      reviewCommandId = ''
+      clearNotice()
       return
     }
     if (reviewDisposed || !reviewMode.value || revision !== reviewRevision(reviewWord.value) || targetMode !== reviewKind.value) return
     if (targetMode === 'scheduled') {
+      // Background pagination must not resurrect a successfully rated cache row.
+      dueQueueWords.delete(completedKey)
       dueQueue = completeDueWord(dueQueue, completedKey)
       persistDueQueue()
       scheduledWords.value = scheduledWords.value.filter(word => wordKey(word) !== completedKey)
+      // Restored sessions can start near the tail. Removing the tail must wrap
+      // to remaining due cards instead of incorrectly declaring the queue done.
+      if (reviewIndex.value >= scheduledWords.value.length) reviewIndex.value = 0
       // 评掉一个词会让它后面所有行整体前移一位：不把偏移收回来，后台补全就会
       // 跳过紧跟在它后面的那一行（该词留到下一轮才再出现）。
       dueQueueOffset = Math.max(0, dueQueueOffset - 1)
       reveal.value = false
     }
+    reviewCommandId = ''
     reveal.value = false
     if (targetMode === 'reinforcement') {
       // 巩固评分只新增一条复习记录，词条与列表字段不变，不需要重读列表。
       reviewIndex.value += 1
     }
-    if (targetMode === 'scheduled' && !dueQueueComplete
+      if (targetMode === 'scheduled' && !dueQueueComplete
       && (!reviewItems.value.length || reviewIndex.value >= reviewItems.value.length)) {
       // 队列还没取满时先补齐再判定「今天复习完」：分页只把队首带回界面，
       // 不能把「后台还没读到」当成「没有到期单词」。补齐期间显示骨架卡，
@@ -587,15 +831,18 @@ async function rate(rating: string) {
       // 补齐期间用户可能退出复习或直接开新一轮：这份过期的评分不得改动新会话的
       // 状态（否则新会话刚开就会被判成「已复习完」而立刻关闭）。
       if (reviewDisposed || loadToken !== reviewLoadToken || !reviewMode.value || reviewKind.value !== 'scheduled') return
-    }
+      }
     if (!reviewItems.value.length || reviewIndex.value >= reviewItems.value.length) {
       reviewMode.value = false
       reviewIndex.value = 0
-      notice.value = targetMode === 'scheduled' ? '今天的复习已完成，可继续额外巩固' : '本轮额外巩固已完成'
+      showNotice(targetMode === 'scheduled' ? '今天的复习已完成，可继续额外巩固' : '本轮额外巩固已完成')
       await load()
     }
   } catch (cause) { error.value = String(cause) }
-  finally { reviewSaving.value = false }
+  finally {
+    reviewSaving.value = false
+    if (reviewKind.value === 'scheduled') void scheduleDueQueueTopUp()
+  }
 }
 
 // 复习与巩固共用入口：先进入复习视图并渲染等高骨架卡，清单在后台落地后替换
@@ -610,7 +857,32 @@ async function beginReview(kind: 'scheduled' | 'reinforcement', loader: () => Pr
   reviewDetails.value = {}
   reviewDetailPending.clear()
   reviewMode.value = true
-  reviewLoading.value = true
+  const cachedReview = loadVocabularyReviewSnapshot(listScopeKey(), kind)
+  if (kind === 'scheduled') {
+    // 每次重新进入每日一背都从持久化快照建立一个可立即显示的内存队列。
+    // 后台首屏刷新会在这个队列上合并，不会先清空它。
+    const cachedItems = cachedReview?.items || []
+    dueQueueWords = new Map(cachedItems.map((word: any) => [wordKey(word), word]))
+    dueQueueOffset = 0
+    dueQueueComplete = false
+    dueQueueSaved = cachedReview?.dueQueue || null
+    dueQueueStorageKey = ''
+    dueHeadSignature = ''
+    dueHeadReview = -1
+  }
+  if (cachedReview) {
+    reviewSnapshotRevision = String(cachedReview.revision || '')
+    if (kind === 'scheduled') scheduledWords.value = cachedReview.items || []
+    else reinforcementWords.value = cachedReview.items || []
+    reviewDetails.value = cachedReview.reviewDetails || {}
+    reviewIndex.value = Math.max(0, Math.min(Number(cachedReview.reviewIndex || 0), Math.max(0, (kind === 'scheduled' ? scheduledWords.value : reinforcementWords.value).length - 1)))
+    if (cachedReview.counts) applyCounts(cachedReview.counts)
+  } else if (kind === 'scheduled') {
+    scheduledWords.value = []
+  } else {
+    reinforcementWords.value = []
+  }
+  reviewLoading.value = !cachedReview
   const token = reviewLoadToken + 1
   reviewLoadToken = token
   try {
@@ -619,7 +891,30 @@ async function beginReview(kind: 'scheduled' | 'reinforcement', loader: () => Pr
     error.value = String(cause)
   } finally {
     if (token === reviewLoadToken) reviewLoading.value = false
+    schedulePersistReviewSnapshot()
   }
+}
+
+function persistReviewSnapshot() {
+  if (!reviewMode.value) return
+  const reviewItemsNow = reviewKind.value === 'scheduled' ? scheduledWords.value : reinforcementWords.value
+  saveVocabularyReviewSnapshot({
+    revision: reviewSnapshotRevision || listRevision.value,
+    scope: listScopeKey(),
+    kind: reviewKind.value,
+    items: reviewItemsNow,
+    reviewIndex: reviewIndex.value,
+    reviewDetails: reviewDetails.value,
+    counts: counts.value,
+    dueQueue: reviewKind.value === 'scheduled' ? dueQueue : undefined,
+  })
+}
+function schedulePersistReviewSnapshot() {
+  if (reviewSnapshotTimer) clearTimeout(reviewSnapshotTimer)
+  reviewSnapshotTimer = setTimeout(() => {
+    reviewSnapshotTimer = null
+    persistReviewSnapshot()
+  }, 0)
 }
 
 async function startReview() {
@@ -629,6 +924,7 @@ async function startReview() {
 
 async function closeReview() {
   if (reviewSaving.value) return
+  persistReviewSnapshot()
   reviewMode.value = false
   reviewIndex.value = 0
   await load(selected.value?.id)
@@ -643,9 +939,15 @@ async function loadReinforcement() {
   const probe = Math.min(60, wanted * 3)
   const result: any = await get(`/vocabulary?status=all&limit=${probe}&projection=queue`)
   if (reviewDisposed) return
+  const incomingRevision = String(result.revision || '')
+  // 同上：清单投影不带内嵌详情，版本变化收回旧详情后必须立刻补读当前卡与下一张。
+  const detailsRecalled = Boolean(reviewSnapshotRevision && incomingRevision && reviewSnapshotRevision !== incomingRevision)
+  if (detailsRecalled) reviewDetails.value = {}
+  if (incomingRevision) reviewSnapshotRevision = incomingRevision
   applyCounts(result.counts)
   reinforcementWords.value = (result.items || [])
     .filter((item: any) => item.translation_status === 'ready').slice(0, wanted)
+  if (detailsRecalled) void ensureReviewDetails()
 }
 
 async function startReinforcement(size: number) {
@@ -666,8 +968,23 @@ function onDisplayConfigChanged() {
   displayConfig.value = loadVocabDisplayConfig()
 }
 async function refreshReviewOnForeground() {
-  if (document.visibilityState === 'hidden' || !reviewMode.value || reviewSaving.value || !(reviewKind.value === 'scheduled')) return
-  try { await refreshDueQueue() } catch (cause) { error.value = String(cause) }
+  if (document.visibilityState === 'hidden' || reviewSaving.value) return
+  try {
+    if (reviewMode.value) {
+      if (reviewKind.value === 'scheduled') await refreshDueQueue()
+      else applyCounts((await refreshVocabularyStatus()).counts)
+      return
+    }
+    if (!listLoaded.value) return
+    const current: any = await refreshVocabularyStatus()
+    if (reviewDisposed || reviewMode.value) return
+    applyCounts(current.counts)
+    if (String(current.revision || '') !== String(listRevision.value || '')) {
+      await load(undefined, current)
+    } else {
+      persistListSnapshot()
+    }
+  } catch (cause) { error.value = String(cause) }
 }
 onMounted(() => {
   document.addEventListener('visibilitychange', refreshReviewOnForeground)
@@ -688,13 +1005,17 @@ onBeforeUnmount(() => {
   window.removeEventListener('storage', refreshReviewOnForeground)
   window.removeEventListener('vocab-display-change', onDisplayConfigChanged)
   window.clearTimeout(searchTimer)
+  if (noticeTimer) clearTimeout(noticeTimer)
+  noticeTimer = null
   listObserver?.disconnect()
   listObserver = null
 })
 onMounted(async () => {
   if (route.query.review === 'scheduled') await startReview()
-  else await startPendingTranslations()
-  void initializeEnrichment()
+  else {
+    await load()
+    if (!reviewDisposed && !reviewMode.value) void startVocabularyMaintenance()
+  }
 })
 onBeforeUnmount(stopTranslationRefresh)
 
@@ -759,7 +1080,7 @@ function filterCount(key: string) {
     </div>
 
     <section v-if="!reviewMode" class="vocab-reinforcement card">
-      <div class="vocab-tool-row"><div class="search-field"><Search :size="16" /><input v-model="search" placeholder="搜索单词或释义"></div><button class="vocab-filter-toggle" type="button" :aria-expanded="filtersExpanded" @click="filtersExpanded = !filtersExpanded"><span>筛选：<strong>{{ activeFilterLabel }}</strong> · {{ filterCount(filter) }}</span><ChevronDown :size="16" :class="{ rotated: filtersExpanded }" /></button></div>
+      <div class="vocab-tool-row"><div class="search-field"><Search :size="16" /><input v-model="search" placeholder="搜索单词或释义"></div><div class="vocab-filter-control"><button class="vocab-filter-toggle" type="button" aria-controls="vocabulary-filter-options" :aria-expanded="filtersExpanded" @click="filtersExpanded = !filtersExpanded"><span>筛选：<strong>{{ activeFilterLabel }}</strong> · {{ filterCount(filter) }}</span><ChevronDown :size="16" :class="{ rotated: filtersExpanded }" /></button><div v-if="filtersExpanded" id="vocabulary-filter-options" class="vocab-filter-options" role="group" aria-label="单词本筛选项"><label v-for="item in listFilters" :key="item[0]" class="selection-option" :class="{ active: filter === item[0] }"><input v-model="filter" type="radio" name="vocabulary-filter" :value="item[0]" @change="filtersExpanded = false"><span>{{ item[1] }} · {{ filterCount(item[0]) }}</span></label></div></div></div>
       <div><strong>额外巩固</strong><span>不改变正式复习计划，可反复练习</span></div>
       <div class="vocab-reinforcement-actions">
         <button v-for="size in [5, 10, 20]" :key="size" class="button secondary compact" type="button" @click="startReinforcement(size)">{{ size }} 词</button>
@@ -808,14 +1129,6 @@ function filterCount(key: string) {
 
     <div v-else class="vocabulary-layout">
       <div class="vocab-list-column">
-        <aside class="vocab-filters-inline">
-          <div v-if="filtersExpanded" id="vocabulary-filter-options" class="vocab-filter-options" role="group" aria-label="单词本筛选项">
-            <label v-for="item in listFilters" :key="item[0]" class="selection-option" :class="{ active: filter === item[0] }">
-              <input v-model="filter" type="radio" name="vocabulary-filter" :value="item[0]"><span>{{ item[1] }} · {{ filterCount(item[0]) }}</span>
-            </label>
-          </div>
-        </aside>
-
         <section class="vocab-list card">
           <template v-for="word in items" :key="word.id">
             <button class="vocab-list-item" :class="{active:selected?.id===word.id}" :aria-expanded="selected?.id===word.id" @click="select(word.id)">
@@ -855,7 +1168,7 @@ function filterCount(key: string) {
       <section class="vocab-detail desktop-vocab-detail card" v-if="selected">
         <div class="vocab-detail-head">
           <div><span v-if="selected.is_frequent" class="eyebrow">高频词</span><h2><VocabularyTerm :term="selected.lemma || selected.term" /></h2><p>{{ selected.phonetic }}<span v-if="selected.part_of_speech">{{ selected.phonetic ? ' · ' : '' }}{{ selected.part_of_speech }}</span></p></div>
-          <div class="vocab-tools"><button class="button ghost" @click="expandedAll=true; expansionToken++">展开已启用栏目</button><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" @click="removeEntry"><Trash2 :size="17" /></button></div>
+          <div class="vocab-tools"><button class="button ghost" @click="editing=!editing">编辑</button><button class="button ghost danger-text" @click="removeEntry"><Trash2 :size="17" /></button></div>
         </div>
         <div v-if="!editing && selected.translation_status!=='ready'" class="vocab-pending-panel">
           <RefreshCw :size="22" /><strong>{{ translationStatusText(selected.translation_status, true) }}</strong>
@@ -887,15 +1200,19 @@ function filterCount(key: string) {
 
 <style scoped>
 .vocab-reinforcement {
+  position: relative;
+  z-index: 3;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
-.vocab-tool-row { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.vocab-tool-row { grid-column: 1 / -1; position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
 .vocab-tool-row .search-field { margin: 0; min-width: 0; }
-.vocab-filters-inline { display: contents; }
+.vocab-filter-control { position: relative; z-index: 50; min-width: min(310px, 42vw); }
+.vocab-filter-toggle { width: 100%; justify-content: space-between; }
+.vocab-filter-options { position: absolute; z-index: 45; top: calc(100% + 6px); left: 0; width: 100%; max-height: min(58vh, 410px); overflow-y: auto; padding: 8px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-solid); box-shadow: var(--shadow); }
 
 .vocab-reinforcement > div:first-child {
   display: grid;
@@ -950,6 +1267,7 @@ function filterCount(key: string) {
 @media (max-width: 720px) {
   .vocab-reinforcement { grid-template-columns: 1fr; align-items: stretch; }
   .vocab-tool-row { grid-template-columns: 1fr; }
+  .vocab-filter-control { min-width: 0; width: 100%; }
   .vocab-reinforcement {
     align-items: flex-start;
     flex-direction: column;

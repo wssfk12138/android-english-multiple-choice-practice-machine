@@ -3,7 +3,7 @@ import { vocabularyProfileCondition } from './study-todos'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
 import { executeSet, row, rows, run } from './database'
 import { LocalApiError } from './errors'
-import { occurrenceProjectionColumns, projectVocabulary } from '../../vocabulary-context'
+import { latestSourceOccurrence, occurrenceKey, occurrenceProjectionColumns, projectVocabulary } from '../../vocabulary-context'
 
 type JsonRecord = Record<string, any>
 
@@ -142,10 +142,13 @@ function bumpVocabularyTermPool() {
 
 async function serializeEntry(id: number): Promise<JsonRecord> {
   const entry = await reviewEntry(id)
-  const job = await row<JsonRecord>('SELECT state,error FROM vocabulary_enrichment_jobs WHERE entry_id=?', [id])
+  const [job, occurrences] = await Promise.all([
+    row<JsonRecord>('SELECT state,error FROM vocabulary_enrichment_jobs WHERE entry_id=?', [id]),
+    rows<JsonRecord>('SELECT ' + occurrenceProjectionColumns + ' FROM vocabulary_occurrences WHERE entry_id = ?', [id]),
+  ])
   entry.enrichment_status = job?.state || ''
   entry.enrichment_error = job?.error || ''
-  return serializeDetails(entry)
+  return serializeDetails(entry, occurrences)
 }
 
 // 卡片身份是乐观并发的契约：到期队列清单、评分前的状态读取与单卡详情三处都要
@@ -189,23 +192,38 @@ async function reviewEntry(id: number): Promise<JsonRecord> {
   return entry
 }
 
-async function serializeDetails(entry: JsonRecord): Promise<JsonRecord> {
+async function serializeDetails(entry: JsonRecord, occurrenceRows?: JsonRecord[]): Promise<JsonRecord> {
   const id = Number(entry.id)
   const synonyms = discriminationList(entry.synonyms)
   const antonyms = discriminationList(entry.antonyms)
   const similarForms = discriminationList(entry.similar_forms)
-  const projection = projectVocabulary(entry, await rows(`SELECT ${occurrenceProjectionColumns} FROM vocabulary_occurrences WHERE entry_id = ?`, [id]))
+  const projection = projectVocabulary(entry, occurrenceRows
+    || await rows('SELECT ' + occurrenceProjectionColumns + ' FROM vocabulary_occurrences WHERE entry_id = ?', [id]))
   return {
     ...projection,
     synonyms,
     antonyms,
     similar_forms: similarForms,
-    local_similar: await localSimilarMatches(
-      Number(entry.id),
-      similarForms.map(item => item.word),
-    ),
+    local_similar: await localSimilarMatches(Number(entry.id), similarForms.map(item => item.word)),
     is_frequent: Boolean(entry.manually_frequent) || Number(entry.encounter_count) >= 2,
     occurrences: projection.occurrences,
+  }
+}
+
+// 复习卡（每日一背、额外巩固）的详情投影：这两个入口在设置里没有开关，界面固定只显示
+// 「常用释义 + 真题原句」，所以同义词、形近词、词形变化、模型例句、记忆提示、笔记
+// （以及需要整本词库扫描的 local_similar）在复习链路上没有任何读取方。整行投影把它们
+// 一起搬过 SQLite→JS 桥，每张首屏卡都为从不显示的字段付费，所以复习卡走这份裁剪投影。
+// projectVocabulary 仍服务浏览列表与单卡详情：那里有 11 个显示开关，展开内容必须带到。
+function reviewCardDetail(entry: JsonRecord, occurrenceRows: JsonRecord[]): JsonRecord {
+  const latest = latestSourceOccurrence(occurrenceRows)
+  const contextKey = latest ? occurrenceKey(latest) : ''
+  return {
+    common_meaning: entry.common_meaning || '',
+    // 语境释义只在它绑定的那次出现仍是最近有效来源时才回传，守卫与 projectVocabulary 一致。
+    contextual_meaning: contextKey && entry.contextual_occurrence_key === contextKey ? entry.contextual_meaning || '' : '',
+    latest_sentence: latest?.context_sentence || '',
+    occurrences: latest ? [latest] : [],
   }
 }
 
@@ -292,6 +310,40 @@ const queueEntryColumns = [
   'translation_status', 'last_result',
   'next_review_at', 'last_reviewed_at', 'created_at',
 ].join(', ')
+// 复习卡内嵌详情只取 reviewCardDetail 真正要用的列：一个含义列、一个绑定键，加上整条
+// 队列投影。同义词、形近词、词形变化、模型例句、记忆提示、笔记、词性、原形和复习阶段
+// 这些列在复习链路上没有任何读取方（设置项也不作用于复习卡），留着就是每张首屏卡的
+// 桥载荷。is_frequent 仍由 SELECT 里的 CASE 现算，不需要回传 encounter_count。
+const reviewCardColumns = [
+  queueEntryColumns, 'common_meaning', 'contextual_meaning', 'contextual_occurrence_key',
+].join(', ')
+
+function queueProjection(entry: JsonRecord): JsonRecord {
+  return {
+    ...Object.fromEntries(queueEntryColumns.split(', ').map(key => [key, entry[key]])),
+    review_count: Number(entry.review_count || 0),
+    review_revision: reviewRevision(entry),
+    // Keep the existing API shape. SQLite returns this computed flag as 0/1,
+    // and callers/tests compare the lightweight queue with the full record.
+    is_frequent: entry.is_frequent,
+  }
+}
+
+async function vocabularyCounts(profileOnly: boolean, profileId: number | null, dueNow = new Date().toISOString()): Promise<JsonRecord> {
+  return await row<JsonRecord>(
+    `SELECT COUNT(*) AS total,
+       COALESCE(SUM(CASE WHEN encounter_count >= 2 OR manually_frequent = 1 THEN 1 ELSE 0 END), 0) AS frequent,
+       COALESCE(SUM(CASE WHEN study_status = 'mastered' THEN 1 ELSE 0 END), 0) AS mastered,
+       COALESCE(SUM(CASE WHEN translation_status != 'ready' THEN 1 ELSE 0 END), 0) AS pending,
+       COALESCE(SUM(CASE WHEN translation_status = 'ready'
+         AND (next_review_at IS NULL OR next_review_at <= ?)
+       THEN 1 ELSE 0 END), 0) AS review,
+       (SELECT value FROM app_settings WHERE key = 'vocabulary_revision') AS content_revision
+     FROM vocabulary_entries
+     WHERE ${profileOnly ? vocabularyProfileCondition : '1 = 1'}`,
+    profileOnly ? [dueNow, profileId] : [dueNow],
+  ) || { total: 0, frequent: 0, mastered: 0, pending: 0, review: 0, content_revision: '0' }
+}
 
 export async function listVocabulary(searchParams: URLSearchParams): Promise<JsonRecord> {
   const status = searchParams.get('status') || 'all'
@@ -305,6 +357,9 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
   const summary = !limitAll && searchParams.get('projection') === 'summary'
   // 到期队列（limit=all）与巩固候选（limit=<n>）都走清单投影。
   const queue = searchParams.get('projection') === 'queue'
+  // 首页复习队列额外内嵌轻量卡片详情（只含常用释义与真题原句）。只覆盖 12 张首屏卡，
+  // 省掉当前卡、下一卡各自的多次桥读取；后续分页仍保持极小 queue 投影。
+  const reviewCards = searchParams.get('projection') === 'review'
   const limit = limitAll ? 0 : Math.max(1, Math.min(Number(searchParams.get('limit')) || 100, 500))
   const offset = limitAll ? 0 : Math.max(0, Number(searchParams.get('offset')) || 0)
   const dueNow = new Date().toISOString()
@@ -328,7 +383,7 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
   }
   const itemColumns = summary
     ? 'id, term, lemma, common_meaning, contextual_meaning, contextual_occurrence_key, part_of_speech, encounter_count, study_status, translation_status'
-    : queue ? queueEntryColumns : '*'
+    : queue ? queueEntryColumns : reviewCards ? reviewCardColumns : '*'
   // 到期队列（status=review）在 SQL 侧按客户端 reconcileDueQueue 的排序键排好：
   // 队列要分页（limit/offset）取队首，只有两侧顺序逐项一致，第一页才是真正的
   // 队首那一页，续读页也不会跳词。键依次是：未复习的在前、上次复习时间、到期
@@ -352,22 +407,11 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
   )
   // The due comparison uses the same ISO format the app writes, so the counts
   // aggregate and the list filter always agree.
-  const counts = await row<JsonRecord>(
-    `SELECT COUNT(*) AS total,
-       COALESCE(SUM(CASE WHEN encounter_count >= 2 OR manually_frequent = 1 THEN 1 ELSE 0 END), 0) AS frequent,
-       COALESCE(SUM(CASE WHEN study_status = 'mastered' THEN 1 ELSE 0 END), 0) AS mastered,
-       COALESCE(SUM(CASE WHEN translation_status != 'ready' THEN 1 ELSE 0 END), 0) AS pending,
-       COALESCE(SUM(CASE WHEN translation_status = 'ready'
-         AND (next_review_at IS NULL OR next_review_at <= ?)
-       THEN 1 ELSE 0 END), 0) AS review
-     FROM vocabulary_entries
-     WHERE ${profileOnly ? vocabularyProfileCondition : '1 = 1'}`,
-    profileOnly ? [dueNow, values[0]] : [dueNow],
-  )
+  const counts = await vocabularyCounts(profileOnly, profileOnly ? Number(values[0]) : null, dueNow)
   const byEntry = new Map<number, JsonRecord[]>()
   // 清单只回传词条本身；出现记录的批量读取只服务于完整投影
   // （完整列表，以及 summary 里回落到语境释义所需的有效来源校验）。
-  const itemIds = (queue ? [] : items.filter(item => !summary || (!item.common_meaning && item.contextual_meaning)))
+  const itemIds = (queue ? [] : items.filter(item => reviewCards || !summary || (!item.common_meaning && item.contextual_meaning)))
     .map(item => Number(item.id)).filter(Number.isInteger)
   for (let offset = 0; offset < itemIds.length; offset += 500) {
     const batch = itemIds.slice(offset, offset + 500)
@@ -383,13 +427,47 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
       byEntry.set(Number(occurrence.entry_id), history)
     }
   }
-  return { items: items.map(item => {
-    if (queue) return { ...item, review_revision: reviewRevision(item) }
+  const serializedItems = await Promise.all(items.map(async item => {
+    if (queue) return queueProjection(item)
+    if (reviewCards) {
+      return { ...queueProjection(item), review_detail: reviewCardDetail(item, byEntry.get(Number(item.id)) || []) }
+    }
     if (!summary) return projectVocabulary({...item, review_revision: reviewRevision(item)}, byEntry.get(Number(item.id)) || [])
     const contextual = !item.common_meaning && item.contextual_meaning
       ? projectVocabulary(item, byEntry.get(Number(item.id)) || []).contextual_meaning : ''
     return { ...item, contextual_meaning: contextual, is_frequent: Boolean(item.is_frequent) }
-  }), counts, scope_key: profileOnly ? `profile:${values[0]}` : 'all' }
+  }))
+  const revision = `v2:${String(counts?.content_revision || '0')}`
+  if (counts) delete counts.content_revision
+  return { items: serializedItems, counts, scope_key: profileOnly ? `profile:${values[0]}` : 'all', revision }
+}
+
+export async function vocabularyStatus(searchParams: URLSearchParams = new URLSearchParams()): Promise<JsonRecord> {
+  const profileOnly = searchParams.get('scope') === 'current'
+  const profileId = profileOnly ? await activeQuestionBankProfileId() : null
+  const measuredAt = new Date().toISOString()
+  const counts = await vocabularyCounts(profileOnly, profileId, measuredAt)
+  const revision = `v2:${String(counts.content_revision || '0')}`
+  delete counts.content_revision
+  return {
+    scope_key: profileOnly ? `profile:${profileId}` : 'all',
+    revision,
+    counts,
+    measured_at: measuredAt,
+  }
+}
+
+export async function vocabularyRevision(searchParams: URLSearchParams = new URLSearchParams()): Promise<{ revision: string; scope_key: string }> {
+  const profileOnly = searchParams.get('scope') === 'current'
+  const profileId = profileOnly ? await activeQuestionBankProfileId() : null
+  const revision = await row<{ value: string }>(
+    "SELECT value FROM app_settings WHERE key = 'vocabulary_revision'",
+  )
+  const scopeKey = profileOnly ? `profile:${profileId}` : 'all'
+  return {
+    scope_key: scopeKey,
+    revision: `v2:${String(revision?.value || '0')}`,
+  }
 }
 
 export async function homeVocabulary(limit: number): Promise<JsonRecord> {
@@ -459,17 +537,33 @@ export async function retryVocabulary(_id: number): Promise<{ ok: true }> {
   return { ok: true }
 }
 
-export async function reviewVocabulary(id: number, rating: string, mode = 'scheduled', expectedRevision?: string): Promise<JsonRecord> {
+export async function reviewVocabulary(id: number, rating: string, mode = 'scheduled', expectedRevision?: string, commandId?: string): Promise<JsonRecord> {
+  if (commandId && !/^[a-f0-9]{32}$/i.test(commandId)) throw new LocalApiError(400, '无效的复习命令')
+  // A retry after a bridge timeout must be safe. The command id is stored in
+  // vocabulary_reviews.sync_id, so a repeated request returns the original
+  // acknowledgement instead of advancing the schedule twice.
+  if (commandId) {
+    const prior = await row<JsonRecord>(
+      `SELECT entry_id, rating, mode FROM vocabulary_reviews WHERE sync_id = ? ORDER BY id DESC LIMIT 1`,
+      [commandId],
+    )
+    if (prior) {
+      if (Number(prior.entry_id) !== id || String(prior.rating) !== rating || String(prior.mode) !== mode) {
+        throw new LocalApiError(409, '复习命令已用于其他评价')
+      }
+      return reviewAckOf(await reviewState(id))
+    }
+  }
   // 集合内取不到 SELECT 结果，所以并发校验在写库之前单独读一次；写库本身
   // （更新词条 + 记账）合并成一次桥调用、一个原生事务，失败整组回滚。
   const current = await reviewState(id)
   if (expectedRevision !== undefined && expectedRevision !== reviewRevision(current)) {
     throw new LocalApiError(409, '复习记录已更新，请刷新当前单词后重新评分')
   }
-  return applyVocabularyReview(id, rating, mode, current)
+  return applyVocabularyReview(id, rating, mode, current, commandId)
 }
 
-async function applyVocabularyReview(id: number, rating: string, mode = 'scheduled', current?: JsonRecord): Promise<JsonRecord> {
+async function applyVocabularyReview(id: number, rating: string, mode = 'scheduled', current?: JsonRecord, commandId?: string): Promise<JsonRecord> {
   if (!['again', 'hard', 'know', 'fluent'].includes(rating)) throw new LocalApiError(400, '无效的复习评价')
   if (!['scheduled', 'reinforcement'].includes(mode)) throw new LocalApiError(400, '无效的复习模式')
   const entry = current || await reviewState(id)
@@ -488,11 +582,23 @@ async function applyVocabularyReview(id: number, rating: string, mode = 'schedul
     })
   }
   set.push({
-    statement: `INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, '${mode}', ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
-    values: [id, rating, nextReviewAt],
+    statement: `INSERT INTO vocabulary_reviews (entry_id, rating, mode, next_review_at, sync_id, updated_at) VALUES (?, ?, '${mode}', ?, COALESCE(?, lower(hex(randomblob(16)))), CURRENT_TIMESTAMP)`,
+    values: [id, rating, nextReviewAt, commandId || null],
   })
   await executeSet(set)
-  return reviewAckOf(await reviewState(id))
+  // The transaction has already written every field used by the card. Build
+  // the acknowledgement from the validated state instead of issuing a third
+  // bridge read immediately after the write. A later queue refresh can still
+  // reconcile the full row in the background.
+  return reviewAckOf({
+    ...entry,
+    id,
+    next_review_at: nextReviewAt,
+    last_reviewed_at: mode === 'scheduled' ? now.toISOString() : entry.last_reviewed_at,
+    review_stage: mode === 'scheduled' ? Number(set[0]?.values?.[0] ?? entry.review_stage ?? 0) : entry.review_stage,
+    study_status: mode === 'scheduled' ? (rating === 'fluent' ? 'mastered' : 'learning') : entry.study_status,
+    review_count: Number(entry.review_count || 0) + 1,
+  })
 }
 
 export async function queueTranslations(entryIds: number[]): Promise<JsonRecord> {

@@ -81,9 +81,11 @@ try {
     page.on('pageerror', error => errors.push(error.message))
     await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort())
     await page.goto(server.resolvedUrls.local[0] + '__s6')
+    await page.evaluate(() => { document.documentElement.dataset.orientation = innerWidth > innerHeight ? 'landscape' : 'portrait' })
     await page.locator('.named-keys').waitFor()
     assert.equal(await page.getByRole('textbox',{name:'新密钥名称',exact:true}).count(),0)
-    await page.getByRole('button',{name:'管理密钥',exact:true}).click()
+    if (android && width > height) await page.getByRole('button',{name:'添加',exact:true}).click()
+    else await page.getByRole('button',{name:'管理密钥',exact:true}).click()
     if (android) for (const selector of ['.sync-connection']) {
       const panel=page.locator(selector)
       assert.equal(await panel.evaluate(el=>el.open),false)
@@ -134,7 +136,13 @@ try {
     await page.getByRole('textbox',{name:'新密钥名称',exact:true}).fill('Test addition')
     await page.getByLabel('新 API 密钥',{exact:true}).fill('synthetic-value-not-a-secret')
     await page.getByRole('button',{name:'添加密钥',exact:true}).click()
+    if (android && width > height) {
+      assert.equal(await page.locator('.key-select').count(), 0)
+      assert.equal(await page.locator('.key-heading').count(), 1)
+    }
     await page.waitForFunction(()=>document.querySelectorAll('.key-row').length===2)
+    if (android && width > height) assert.equal(await page.getByRole('button',{name:'添加',exact:true}).getAttribute('aria-expanded'), 'false')
+    assert.equal(await page.getByRole('radio', {name: '选用 Test addition', exact: true}).count(), 1)
     assert.deepEqual(errors,[])
     const label=[width+'x'+height,dark?'dark':'light','font-'+scale].join('-')
     if(output) await page.screenshot({path:join(output,label+'.png'),fullPage:true})

@@ -638,6 +638,7 @@ h2, h3 { margin: 0; }
 .label-editor>footer { display:flex; justify-content:space-between; align-items:center; gap:14px; }
 .label-editor>footer small { color:var(--muted); font-size:10px; }
 .api-profile-card { overflow:hidden; border:1px solid var(--line); border-radius:20px; background:var(--surface); box-shadow:var(--shadow-sm); backdrop-filter:blur(12px); }
+.api-profile-card-overlay-open { position:relative; z-index:20; overflow:visible; }
 .api-profile-card.new-profile { margin-bottom:16px; border-color:color-mix(in srgb,var(--primary) 30%,var(--line)); }
 .api-profile-heading { min-height:72px; padding:16px 20px; display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--line); background:var(--primary-faint); }
 .api-profile-heading h2 { margin:3px 0 0; font-size:18px; }
@@ -6957,3 +6958,12 @@ html[data-platform=android] .vocab-detail-head > div:first-child { min-width:0; 
 .vocab-enrichment-status { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:12px; border:1px solid var(--line); border-radius:12px; margin-bottom:12px; overflow-wrap:anywhere; }
 .vocab-enrichment-status small { color:var(--muted); }
 .vocab-enrichment-status .error { flex-basis:100%; margin:0; }
+
+/* 程序更新卡片：结果面板排在按钮上方、末行整体贴到卡片底部。
+   这里用到 :has()，scoped 样式经 @vue/compiler-sfc 处理会失效，因此放在全局样式末尾。 */
+[data-update-section='update']:not(:has(> .update-result)) { grid-template-rows:min-content 1fr; }
+[data-update-section='update']:not(:has(> .update-result)) > .button,
+[data-update-section='update']:not(:has(> .update-result)) > .update-community { grid-row:2; }
+[data-update-section='update'] .update-result:has(> .button) { background:var(--primary-soft); }
+[data-update-section='update'] .update-result:has(> .button) strong { color:var(--primary); }
+[data-update-section='update'] .update-result:not(:has(> .button)) strong { color:var(--success); }

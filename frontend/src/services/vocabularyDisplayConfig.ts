@@ -22,12 +22,12 @@ export const VOCAB_DISPLAY_OPTIONS: VocabDisplayOption[] = [
   { key: 'phonetic', label: '音标' },
   { key: 'part_of_speech', label: '词性' },
   { key: 'source_sentence', label: '真题原句' },
-  { key: 'model_sentence', label: '模型例句' },
+  { key: 'model_sentence', label: 'AI 生成例句' },
   { key: 'memory_hint', label: '记忆提示' },
   { key: 'synonyms', label: '同义词辨析' },
   { key: 'antonyms', label: '反义词辨析' },
   { key: 'similar_forms', label: '形近词辨析' },
-  { key: 'morphology', label: '显示单词词形' },
+  { key: 'morphology', label: '词形变化' },
   { key: 'note', label: '我的笔记' },
 ]
 
@@ -46,6 +46,23 @@ export const VOCAB_DISPLAY_DEFAULTS: Record<VocabDisplayKey, boolean> = {
 }
 
 export type VocabDisplayConfig = Record<VocabDisplayKey, boolean>
+
+// 复习卡契约：每日一背与额外巩固只显示「常用释义 + 真题原句」。
+// 这是与用户设置并列的另一份权威值，设置页的开关（含以后新增的栏目）不参与复习卡；
+// 复习入口必须读这里，不得传 loadVocabDisplayConfig() 的结果。
+export const VOCAB_REVIEW_DISPLAY_CONFIG: Readonly<VocabDisplayConfig> = Object.freeze({
+  common_meaning: true,
+  phonetic: false,
+  part_of_speech: false,
+  source_sentence: true,
+  model_sentence: false,
+  memory_hint: false,
+  synonyms: false,
+  antonyms: false,
+  similar_forms: false,
+  morphology: false,
+  note: false,
+})
 
 export function loadVocabDisplayConfig(): VocabDisplayConfig {
   try {

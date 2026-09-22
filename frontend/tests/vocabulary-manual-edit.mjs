@@ -85,9 +85,24 @@ function loadModule(path, modules) {
   return context.exports
 }
 
+// 列表与详情 SQL 直接内插 occurrenceProjectionColumns。下面的投影桩只替换
+// projectVocabulary，列名必须取自真实模块——写死或漏给都会退化成 `SELECT undefined`，
+// 让「单词列表读取失败」看起来像一次网络或存储故障。
+const contextHelper = { exports: {} }
+vm.runInNewContext(compile(read('vocabulary-context.ts')), contextHelper)
+const realContext = contextHelper.exports
+
 async function fixture(orientation, initialStatus, { existing = {}, second = false } = {}) {
   const sqlite = new DatabaseSync(':memory:')
   sqlite.exec(schema)
+  // Runtime 在基础 schema 之后逐表补齐 LAN 列（database.ts 的 sync_id/updated_at 循环，
+  // lan-sync-versions.ts 的 _sync_* 三元组）。列表与详情现在按列名读取出现记录，
+  // 这里必须同样镜像，否则测试会失败在生产环境中并不存在的列上。
+  for (const table of ['vocabulary_occurrences', 'vocabulary_reviews', 'vocabulary_entries']) {
+    for (const [name, definition] of [['sync_id', 'TEXT'], ['updated_at', 'TEXT'], ['_sync_seq', 'INTEGER NOT NULL DEFAULT 0'], ['_sync_rev', 'INTEGER NOT NULL DEFAULT 0'], ['_sync_origin', "TEXT NOT NULL DEFAULT ''"]]) {
+      if (!sqlite.prepare(`PRAGMA table_info(${table})`).all().some(column => column.name === name)) sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`)
+    }
+  }
   sqlite.prepare('INSERT INTO vocabulary_entries(id, term, normalized_term, translation_status) VALUES (1, ?, ?, ?)')
     .run('synthetic', 'synthetic', initialStatus)
   if (second) sqlite.prepare('INSERT INTO vocabulary_entries(id, term, normalized_term, translation_status, encounter_count) VALUES (2, ?, ?, ?, 3)')
@@ -108,7 +123,7 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
     './errors': errors,
     './study-todos': { vocabularyProfileCondition: '1 = 1' },
     './question-bank-profiles': { activeQuestionBankProfileId: async () => 1 },
-    '../../vocabulary-context': { projectVocabulary: (entry) => entry },
+    '../../vocabulary-context': { ...realContext, projectVocabulary: (entry) => entry },
     './vocabulary-enrichment-runner': { queueVocabularyEnrichment: async () => {} },
   })
   const ai = loadModule('ai', {
@@ -147,11 +162,12 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
     async del() { assert.fail('Deletion is outside this test') },
   }
   const context = {
-    exports: {}, document: { documentElement: { dataset: { platform: 'android', orientation } }, visibilityState: 'visible', addEventListener() {}, removeEventListener() {} },
+    exports: {}, requestAnimationFrame: callback => setTimeout(callback, 0), setTimeout, clearTimeout, document: { documentElement: { dataset: { platform: 'android', orientation } }, visibilityState: 'visible', addEventListener() {}, removeEventListener() {} },
     localStorage: { getItem: () => null },
     window: { setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {}, addEventListener() {}, removeEventListener() {} },
     require(name) {
       if (name === 'vue') return vue
+      if (name === '../composables/useAndroidLandscape') return { useAndroidLandscape: () => vue.ref(orientation === 'landscape') }
       if (name === 'vue-router') return { useRoute: () => ({ query: {} }) }
       if (name === 'lucide-vue-next') {
         const icon = name => ({ name, setup() { return () => vue.h('span', { 'data-icon': name }) } })
@@ -176,6 +192,12 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
           common_meaning: true, contextual: true, sentence: true, memory_hint: true,
           synonyms: true, antonyms: true, similar_forms: true, morphology: true,
         }),
+      }
+      if (name === '../services/vocabularySnapshots') return {
+        loadVocabularyListSnapshot: () => null,
+        loadVocabularyReviewSnapshot: () => null,
+        saveVocabularyListSnapshot() {},
+        saveVocabularyReviewSnapshot() {},
       }
       assert.equal(name, '../api')
       return api

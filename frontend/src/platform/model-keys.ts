@@ -33,6 +33,14 @@ export function mergeConflict(local: { adapter: string }[], incoming: string): s
   return ""
 }
 
+// 只用于界面识别：保留首尾各四位，中间固定四位掩码，避免明文离开安全存储。
+export function maskApiKey(value: string): string {
+  const text = String(value || "")
+  if (!text) return ""
+  if (text.length <= 8) return "****"
+  return text.slice(0, 4) + "****" + text.slice(-4)
+}
+
 export function keySummary(state: KeySet) {
-  return { keys: state.keys.map(({ id, name }) => ({ id, name })), selected_key_id: state.selected, has_api_key: state.keys.some(key => key.id === state.selected) }
+  return { keys: state.keys.map(({ id, name, value }) => ({ id, name, mask: maskApiKey(value) })), selected_key_id: state.selected, has_api_key: state.keys.some(key => key.id === state.selected) }
 }

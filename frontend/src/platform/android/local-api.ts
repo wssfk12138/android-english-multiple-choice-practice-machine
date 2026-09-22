@@ -6,7 +6,7 @@ import { LocalApiError } from './errors'
 import { chooseSnapshot } from './practice-snapshots'
 import { abandonIfEmpty, archiveWrongUnits, createSession, dashboard, getSession, listWrong, saveAnswer, submitSession, submitUnit } from './practice'
 import { createEsqImport, listEsqImports, listPapers, publishEsqImport, readEsqImport, sweepEmptyPaperSessions } from './question-bank'
-import { addVocabulary, deleteVocabulary, homeVocabulary, listVocabulary, reviewVocabulary, retryVocabulary, serializeEntry, updateVocabulary } from './vocabulary'
+import { addVocabulary, deleteVocabulary, homeVocabulary, listVocabulary, reviewVocabulary, retryVocabulary, serializeEntry, updateVocabulary, vocabularyRevision, vocabularyStatus } from './vocabulary'
 import { checkAppUpdate, checkQuestionBankCatalog, downloadQuestionBankPackage, installAppUpdate, readUpdateSettings, updateSettings } from './app-update'
 import {
   createDocumentImport,
@@ -58,25 +58,41 @@ function match(pathname: string, pattern: RegExp): RegExpMatchArray | null {
   return pathname.match(pattern)
 }
 
+let emptyPaperSweepStarted = false
+function scheduleEmptyPaperSweep() {
+  if (emptyPaperSweepStarted) return
+  emptyPaperSweepStarted = true
+  const run = () => void sweepEmptyPaperSessions().catch(() => {
+    // A failed cleanup is safe to retry on the next app process. It must not
+    // turn a foreground read into a visible error or a retry storm.
+  })
+  const idle = (globalThis as any).requestIdleCallback as ((callback: () => void, options?: { timeout: number }) => number) | undefined
+  const delay = (globalThis as any).setTimeout as ((callback: () => void, timeout: number) => number) | undefined
+  if (typeof idle === 'function') idle(run, { timeout: 1500 })
+  else if (typeof delay === 'function') delay(run, 1000)
+  else run()
+}
+
 export async function androidLocalApi<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const { ensureContentRemediation } = await import('./content-remediation')
-  // First-screen reads, vocabulary, AI, settings and sync stay responsive while
-  // content repair runs in the background. Content repair only rewrites packaged
-  // units once per revision and is transactional, and the question-bank import
-  // paths await the same promise before they write.
-  const independent = /^\/(?:vocabulary|ai|android|settings|models|startup|papers|wrong|study-todos|question-bank-profiles|trash)(?:[/?]|$)/.test(path)
-  if (independent) {
-    void ensureContentRemediation().catch(() => {})
-  } else {
-    await ensureContentRemediation()
-  }
-  // 每次启动只做一次的空会话清扫挂在这里，而不是挂在 /papers 里：读取路径保持
-  // 只读，清扫自己一次失败也只影响这一次维护，不会拖垮任何界面首屏。
-  void sweepEmptyPaperSessions().catch(() => {})
   const method = String(options.method || 'GET').toUpperCase()
   const url = new URL(path, 'https://local.english-practice.invalid')
   const pathname = url.pathname
   const body = options.body instanceof FormData ? null : bodyJson(options)
+
+  // The startup coordinator owns one-time content repair. Reads must not start
+  // that repair on every request: the first home/review screen and the repair
+  // would otherwise contend for the same SQLite connection. Mutation paths that
+  // create practice snapshots or publish imported content still await the gate.
+  const contentSensitiveWrite = method !== 'GET'
+    && /^\/(?:question-banks|imports|practice\/sessions)(?:[/?]|$)/.test(pathname)
+  if (contentSensitiveWrite) {
+    const { ensureContentRemediation } = await import('./content-remediation')
+    await ensureContentRemediation()
+  }
+
+  // Empty-session cleanup is process-wide maintenance. Re-triggering it from
+  // every local API call created needless bridge traffic during first screen.
+  scheduleEmptyPaperSweep()
   let params: RegExpMatchArray | null
 
   if (method === 'GET' && pathname === '/study-todos') return await studyTodos() as T
@@ -183,6 +199,12 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (pathname === '/vocabulary' && method === 'GET') {
     return await listVocabulary(url.searchParams) as T
   }
+  if (pathname === '/vocabulary/revision' && method === 'GET') {
+    return await vocabularyRevision(url.searchParams) as T
+  }
+  if (pathname === '/vocabulary/status' && method === 'GET') {
+    return await vocabularyStatus(url.searchParams) as T
+  }
   if (pathname === '/vocabulary' && method === 'POST') {
     const result = await addVocabulary(body!)
     notifyLocalChange()
@@ -275,7 +297,7 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   }
   params = match(pathname, /^\/vocabulary\/(\d+)\/review$/)
   if (params && method === 'POST') {
-    const result = await reviewVocabulary(Number(params[1]), body?.rating, body?.mode, body?.expected_revision)
+    const result = await reviewVocabulary(Number(params[1]), body?.rating, body?.mode, body?.expected_revision, body?.command_id)
     notifyLocalChange()
     return result as T
   }

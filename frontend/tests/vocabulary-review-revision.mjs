@@ -110,9 +110,9 @@ db.exec('ROLLBACK TO summary_cases; RELEASE summary_cases')
 const handlesBefore=handleCalls
 const transactionsBefore=transactionCalls
 const ack=await api.reviewVocabulary(1,'hard','scheduled',old)
-// 评分只跨三次桥调用：读状态（乐观并发校验）→ 一次 executeSet 写入 → 读回执。
+// 评分跨两次桥调用：读状态（乐观并发校验）→ 一次 executeSet 写入。
 // 旧的 transaction() 外壳还要额外付两次 isTransactionActive 与 BEGIN/COMMIT。
-assert.equal(handleCalls-handlesBefore,3,'评分只允许读状态、一次 executeSet、读回执三次桥调用')
+assert.equal(handleCalls-handlesBefore,2,'评分只允许读状态、一次 executeSet 两次桥调用')
 assert.equal(transactionCalls-transactionsBefore,0,'评分不得再包 transaction() 外壳')
 assert.deepEqual(setStatements.map(sql=>sql.trim().split(/\s+/)[0]),['UPDATE','INSERT'],'评分写入顺序：先改词条（顺位/到期）再记账')
 assert.equal(ack.id,1)
@@ -137,5 +137,16 @@ db.exec('DROP TRIGGER reject_review')
 db.exec("UPDATE vocabulary_entries SET next_review_at='2030-01-01' WHERE id=1")
 await assert.rejects(api.reviewVocabulary(1,'again','scheduled',fresh),error=>error.status===409)
 assert.equal(db.prepare('SELECT next_review_at FROM vocabulary_entries').get().next_review_at,'2030-01-01')
+db.exec("UPDATE vocabulary_entries SET review_stage=3 WHERE id=1")
+const beforeRetry=(await api.serializeEntry(1)).review_revision
+const command='0123456789abcdef0123456789abcdef'
+const first=await api.reviewVocabulary(1,'again','scheduled',beforeRetry,command)
+assert.equal(first.review_stage,0,'stage zero is preserved in acknowledgment')
+assert.equal(first.review_revision,(await api.serializeEntry(1)).review_revision)
+const writes=setStatements.length
+await api.reviewVocabulary(1,'again','scheduled',beforeRetry,command)
+assert.equal(setStatements.length,writes,'retry after lost acknowledgment must not write twice')
+await assert.rejects(api.reviewVocabulary(1,'hard','scheduled',beforeRetry,command),e=>e.status===409)
+await assert.rejects(api.reviewVocabulary(1,'again','scheduled',beforeRetry,'invalid'),e=>e.status===400)
 db.close()
 console.log('PASS review revision: stale submit, external change, ledger rollback')
