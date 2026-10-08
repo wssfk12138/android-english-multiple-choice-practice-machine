@@ -16,7 +16,7 @@ Android 独立产品，Vue/TypeScript/Capacitor/SQLite/Java。本仓为开发权
 | 路径/版本/同步/发布 | [MAP](docs/context/MAP.md) |
 | 运行/构建/验收步骤 | [RUNBOOK](docs/context/RUNBOOK.md) |
 | 设计冲突/相关高风险操作 | [决策](docs/context/DECISIONS.md)、[风险](docs/context/RISKS.md) |
-| 每日一学、练习计时与翻译队列综合开发 | 先读[分步执行单](docs/context/2026-10-integrated-execution.md)，按步骤定位[2026-10-08 修订方案](docs/context/2026-10-integrated-development-plan.md)；[审查依据](docs/context/history/2026-10-08-integrated-plan-review.md)。[阶段回执](docs/context/2026-10-integrated-progress.md)：翻译前端回退及 S1 后台保护保留；S2/S3 代码、定向自动化、浏览器/原生传输单测和 Debug APK 构建通过，全量 89 过/2 个既有失败；未安装、未验真实供应商或真机，S4/S5 未启动 |
+| 每日一学、练习计时与翻译队列综合开发 | 先读[分步执行单](docs/context/2026-10-integrated-execution.md)，按步骤定位[修订方案](docs/context/2026-10-integrated-development-plan.md)；[阶段回执](docs/context/2026-10-integrated-progress.md)：S1 后台保护保留，S2/S3 代码完成；[S4 每日一学](docs/context/2026-10-s4-verification.md)代码、定向/浏览器回归与前端构建通过，分段本地提交。历史全量 89 过/2 个既有失败；安装、真机、真实供应商及联合验收留到 S5 |
 | 当前平板横屏整改 | [最后预览与最终方案](docs/design-review-2026-09-16/selected-revision/README.md)、[实施核对记录](docs/context/history/2026-09-16-landscape-remediation-implementation.md)：7 区域源码及加载读取修复完成，本地验证通过，真机待验；当前状态与授权见 NOW |
 | 09-09 至 09-12 旧整改追溯 | [历史方案](docs/context/remediation-plan-2026-09.md)、[历史续接清单](docs/context/remediation-followup-2026-09-11.md)，不作为 R3 待办或授权 |
 | 备选功能评估 | [做题记录计划](docs/context/practice-history-plan.md)，未因此授权开发 |
