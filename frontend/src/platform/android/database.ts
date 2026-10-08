@@ -449,6 +449,18 @@ INSERT OR IGNORE INTO app_settings(key, value)
 VALUES ('active_question_bank_profile_id', '1');
 INSERT OR IGNORE INTO app_settings(key, value)
 VALUES ('vocabulary_revision', '0');
+INSERT OR IGNORE INTO app_settings(key, value)
+VALUES ('daily_study_database_id', lower(hex(randomblob(16))));
+CREATE TABLE IF NOT EXISTS daily_study_bank_identity (
+  profile_id INTEGER PRIMARY KEY REFERENCES question_bank_profiles(id) ON DELETE CASCADE,
+  identity TEXT NOT NULL DEFAULT (lower(hex(randomblob(16))))
+);
+INSERT OR IGNORE INTO daily_study_bank_identity(profile_id) SELECT id FROM question_bank_profiles;
+CREATE TRIGGER IF NOT EXISTS trg_daily_study_bank_identity_insert
+AFTER INSERT ON question_bank_profiles
+BEGIN
+  INSERT INTO daily_study_bank_identity(profile_id) VALUES (NEW.id);
+END;
 CREATE TRIGGER IF NOT EXISTS trg_vocabulary_entries_revision_insert
 AFTER INSERT ON vocabulary_entries
 BEGIN

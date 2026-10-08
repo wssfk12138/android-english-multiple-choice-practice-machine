@@ -1,7 +1,7 @@
 import { queueVocabularyEnrichment } from './vocabulary-enrichment-runner'
 import { vocabularyProfileCondition } from './study-todos'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
-import { executeSet, row, rows, run } from './database'
+import { dbExecutor, executeSet, row, rows, run, transaction } from './database'
 import { LocalApiError } from './errors'
 import { latestSourceOccurrence, occurrenceKey, occurrenceProjectionColumns, projectVocabulary } from '../../vocabulary-context'
 
@@ -345,9 +345,69 @@ async function vocabularyCounts(profileOnly: boolean, profileId: number | null, 
   ) || { total: 0, frequent: 0, mastered: 0, pending: 0, review: 0, content_revision: '0' }
 }
 
+function vocabularySelection(searchParams: URLSearchParams, profileId: number | null, dueNow: string) {
+  const status = searchParams.get('status') || 'all'
+  const search = (searchParams.get('search') || '').trim()
+  const conditions = ['1 = 1']
+  const values: unknown[] = []
+  if (profileId !== null) {
+    conditions.push(vocabularyProfileCondition)
+    values.push(profileId)
+  }
+  if (status === 'frequent') conditions.push('(encounter_count >= 2 OR manually_frequent = 1)')
+  else if (status === 'review') {
+    conditions.push("(next_review_at IS NULL OR next_review_at <= ?)")
+    conditions.push("translation_status = 'ready'")
+    values.push(dueNow)
+  } else if (status === 'learning') conditions.push("study_status = 'learning'")
+  else if (status === 'mastered') conditions.push("study_status = 'mastered'")
+  else if (status === 'pending') conditions.push("translation_status != 'ready'")
+  if (search) {
+    conditions.push('(term LIKE ? OR lemma LIKE ? OR contextual_meaning LIKE ? OR common_meaning LIKE ?)')
+    values.push(...Array(4).fill('%' + search + '%'))
+  }
+  const orderBy = status === 'review'
+    ? "CASE WHEN last_reviewed_at IS NULL OR last_reviewed_at = '' THEN 0 ELSE 1 END, datetime(NULLIF(last_reviewed_at, '')), datetime(COALESCE(NULLIF(next_review_at, ''), NULLIF(created_at, ''))), lower(COALESCE(NULLIF(normalized_term, ''), term)), id"
+    : "CASE WHEN datetime(last_seen_at) >= datetime('now', '-7 days') THEN 0 ELSE 1 END, CASE WHEN encounter_count >= 2 OR manually_frequent = 1 THEN 1 ELSE 0 END DESC, encounter_count DESC, last_seen_at DESC, id"
+  return { conditions, values, orderBy, status, search }
+}
+
+async function dailyStudyMetadata(executor: ReturnType<typeof dbExecutor>, searchParams: URLSearchParams, profileId: number | null) {
+  const metadata = await executor.row<JsonRecord>(
+    "SELECT (SELECT value FROM app_settings WHERE key='daily_study_database_id') AS database_id, (SELECT value FROM app_settings WHERE key='vocabulary_revision') AS revision, (SELECT identity FROM daily_study_bank_identity WHERE profile_id=?) AS bank_id",
+    [profileId],
+  )
+  if (!metadata?.database_id || (profileId !== null && !metadata.bank_id)) throw new LocalApiError(409, '题库已变化，请返回单词本重新打开')
+  const selection = vocabularySelection(searchParams, profileId, new Date().toISOString())
+  return {
+    scope_key: JSON.stringify(['daily-study', 1, metadata.database_id, profileId === null ? 'all' : [profileId, metadata.bank_id], selection.status, selection.search, 'browse-order-v1']),
+    revision: 'v2:' + String(metadata.revision || '0'),
+  }
+}
+
+export async function dailyStudyCatalog(searchParams: URLSearchParams): Promise<JsonRecord> {
+  const profileId = searchParams.get('scope') === 'current' ? await activeQuestionBankProfileId() : null
+  // Freeze the entire lightweight membership in one short, exclusive read transaction.
+  // No offset paging, occurrences, full details or network work crosses this boundary.
+  return transaction(async db => {
+    const executor = dbExecutor(db)
+    const selection = vocabularySelection(searchParams, profileId, new Date().toISOString())
+    const metadata = await dailyStudyMetadata(executor, searchParams, profileId)
+    const items = await executor.rows<JsonRecord>(
+      'SELECT id, term, sync_id AS identity FROM vocabulary_entries WHERE ' + selection.conditions.join(' AND ') + ' ORDER BY ' + selection.orderBy,
+      selection.values,
+    )
+    return { ...metadata, items }
+  }, { exclusive: true })
+}
+
+export async function dailyStudyStatus(searchParams: URLSearchParams): Promise<JsonRecord> {
+  const profileId = searchParams.get('scope') === 'current' ? await activeQuestionBankProfileId() : null
+  return dailyStudyMetadata(dbExecutor(), searchParams, profileId)
+}
+
 export async function listVocabulary(searchParams: URLSearchParams): Promise<JsonRecord> {
   const status = searchParams.get('status') || 'all'
-  const search = searchParams.get('search') || ''
   const profileOnly = searchParams.get('scope') === 'current'
   // Review flows (due queue, reinforcement) must see the complete due set, so
   // they pass limit=all; the browsing list pages instead. The response shape
@@ -363,39 +423,10 @@ export async function listVocabulary(searchParams: URLSearchParams): Promise<Jso
   const limit = limitAll ? 0 : Math.max(1, Math.min(Number(searchParams.get('limit')) || 100, 500))
   const offset = limitAll ? 0 : Math.max(0, Number(searchParams.get('offset')) || 0)
   const dueNow = new Date().toISOString()
-  const conditions = ['1 = 1']
-  const values: unknown[] = []
-  if (profileOnly) {
-    conditions.push(vocabularyProfileCondition)
-    values.push(await activeQuestionBankProfileId())
-  }
-  if (status === 'frequent') conditions.push('(encounter_count >= 2 OR manually_frequent = 1)')
-  else if (status === 'review') {
-    conditions.push("(next_review_at IS NULL OR next_review_at <= ?)")
-    conditions.push("translation_status = 'ready'")
-    values.push(dueNow)
-  } else if (status === 'learning') conditions.push("study_status = 'learning'")
-  else if (status === 'mastered') conditions.push("study_status = 'mastered'")
-  else if (status === 'pending') conditions.push("translation_status != 'ready'")
-  if (search.trim()) {
-    conditions.push('(term LIKE ? OR lemma LIKE ? OR contextual_meaning LIKE ? OR common_meaning LIKE ?)')
-    values.push(...Array(4).fill(`%${search.trim()}%`))
-  }
+  const { conditions, values, orderBy } = vocabularySelection(searchParams, profileOnly ? await activeQuestionBankProfileId() : null, dueNow)
   const itemColumns = summary
     ? 'id, term, lemma, common_meaning, contextual_meaning, contextual_occurrence_key, part_of_speech, encounter_count, study_status, translation_status'
     : queue ? queueEntryColumns : reviewCards ? reviewCardColumns : '*'
-  // 到期队列（status=review）在 SQL 侧按客户端 reconcileDueQueue 的排序键排好：
-  // 队列要分页（limit/offset）取队首，只有两侧顺序逐项一致，第一页才是真正的
-  // 队首那一页，续读页也不会跳词。键依次是：未复习的在前、上次复习时间、到期
-  // 时间（缺省回落到创建时间）、词形键（与 wordKey 的 normalized_term 口径一致）。
-  // 浏览顺序（其余筛选）保持原样，它服务的是单词本列表界面。
-  const orderBy = status === 'review'
-    ? `CASE WHEN last_reviewed_at IS NULL OR last_reviewed_at = '' THEN 0 ELSE 1 END,
-       datetime(NULLIF(last_reviewed_at, '')),
-       datetime(COALESCE(NULLIF(next_review_at, ''), NULLIF(created_at, ''))),
-       lower(COALESCE(NULLIF(normalized_term, ''), term))`
-    : `CASE WHEN datetime(last_seen_at) >= datetime('now', '-7 days') THEN 0 ELSE 1 END,
-       is_frequent DESC, encounter_count DESC, last_seen_at DESC`
   const items = await rows<JsonRecord>(
     `SELECT ${itemColumns}${summary ? '' : ', (SELECT COUNT(*) FROM vocabulary_reviews WHERE entry_id=vocabulary_entries.id) AS review_count'},
        CASE WHEN encounter_count >= 2 OR manually_frequent = 1 THEN 1 ELSE 0 END AS is_frequent
