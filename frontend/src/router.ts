@@ -6,6 +6,7 @@ import LibraryView from './views/LibraryView.vue'
 import PracticeView from './views/PracticeView.vue'
 import SettingsView from './views/SettingsView.vue'
 import WrongView from './views/WrongView.vue'
+import WrongAnalysisView from './views/WrongAnalysisView.vue'
 import VocabularyView from './views/VocabularyView.vue'
 import AndroidVocabularyDisplayView from './views/AndroidVocabularyDisplayView.vue'
 import TrashView from './views/TrashView.vue'
@@ -24,6 +25,7 @@ const router = createRouter({
     { path: '/library', component: LibraryView },
     { path: '/practice/:id', component: PracticeView },
     { path: '/wrong', component: WrongView },
+    { path: '/wrong/analysis/:unitId', component: WrongAnalysisView },
     { path: '/vocabulary', component: VocabularyView },
     { path: '/android-vocabulary-display', component: AndroidVocabularyDisplayView },
     { path: '/imports', component: ImportView },

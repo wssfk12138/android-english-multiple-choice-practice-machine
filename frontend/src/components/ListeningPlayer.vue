@@ -23,6 +23,7 @@ const props = withDefaults(defineProps<{
   tracks?: AudioTrack[]
   seekable?: boolean
   timerPaused?: boolean
+  resumeOnTimerContinue?: boolean
   currentQuestionNumber?: number | null
   answeredCount?: number
   questionCount?: number
@@ -30,6 +31,7 @@ const props = withDefaults(defineProps<{
   tracks: () => [],
   seekable: true,
   timerPaused: false,
+  resumeOnTimerContinue: true,
   currentQuestionNumber: null,
   answeredCount: 0,
   questionCount: 0,
@@ -86,7 +88,7 @@ async function loadSelectedTrack(autoPlay = false) {
   playing.value = false
   loading.value = Boolean(selectedTrack.value)
   failed.value = false
-  pendingAutoplay.value = autoPlay && Boolean(selectedTrack.value)
+  pendingAutoplay.value = autoPlay && !props.timerPaused && Boolean(selectedTrack.value)
   currentTime.value = 0
   duration.value = 0
   lastAllowedTime.value = 0
@@ -96,7 +98,7 @@ async function loadSelectedTrack(autoPlay = false) {
 
 async function togglePlayback() {
   const player = audio.value
-  if (!player || failed.value) return
+  if (!player || failed.value || props.timerPaused) return
   if (!player.paused) {
     resumeAfterTimerPause.value = false
     player.pause()
@@ -110,8 +112,9 @@ async function togglePlayback() {
   }
 }
 
-function pause() {
-  resumeAfterTimerPause.value = playing.value
+function pause(resumeOnContinue = false) {
+  resumeAfterTimerPause.value = resumeOnContinue && playing.value
+  pendingAutoplay.value = false
   audio.value?.pause()
 }
 
@@ -181,6 +184,7 @@ function onTimeUpdate() {
 }
 
 function onPlay() {
+  if (props.timerPaused) { pause(false); return }
   playing.value = true
   failed.value = false
   emit('playbackStart')
@@ -201,7 +205,7 @@ function preventTimedSeeking() {
 
 watch(trackSignature, (next, previous) => {
   if (next === previous) return
-  const shouldAutoplay = Boolean(previous && next)
+  const shouldAutoplay = !props.timerPaused && Boolean(previous && next)
   if (selectedIndex.value !== 0) {
     pendingAutoplay.value = shouldAutoplay
     selectedIndex.value = 0
@@ -213,7 +217,8 @@ watch(trackSignature, (next, previous) => {
 watch(selectedIndex, () => void loadSelectedTrack(true))
 watch(() => props.timerPaused, paused => {
   if (paused) {
-    if (playing.value) resumeAfterTimerPause.value = true
+    resumeAfterTimerPause.value = props.resumeOnTimerContinue && (playing.value || resumeAfterTimerPause.value)
+    pendingAutoplay.value = false
     audio.value?.pause()
     return
   }

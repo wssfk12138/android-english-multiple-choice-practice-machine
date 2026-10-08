@@ -82,6 +82,16 @@ export function vocabularyEnhancements(value: RecordValue, hasSource: boolean) {
 }
 
 /** Reject incomplete responses before marking a paid translation successful. */
+export function validGeneratedVocabularyExample(value: RecordValue, term: string): boolean {
+  if (typeof value.sentence !== 'string' || typeof value.translation !== 'string') return false
+  const sentence = value.sentence.trim()
+  if (!sentence || sentence.length > 500 || !value.translation.trim() || value.translation.length > 500
+    || !/[.!?]["'”’)]*$/.test(sentence) || /^(?:directions|section|part [ab])\b/i.test(sentence)) return false
+  const words = sentence.toLowerCase().replaceAll('’', "'").match(/[a-z]+(?:['-][a-z]+)*/g) || []
+  const target = term.trim().toLowerCase().replaceAll('’', "'")
+  return Boolean(target) && (' ' + words.join(' ') + ' ').includes(' ' + target + ' ')
+}
+
 export function validVocabularyEnhancements(value: RecordValue, term: string, hasSource: boolean): boolean {
   const raw = safeObject(value.morphology)
   if (typeof raw.lemma !== 'string' || !raw.lemma.trim() || typeof raw.currentForm !== 'string' || !raw.currentForm.trim()
@@ -91,12 +101,13 @@ export function validVocabularyEnhancements(value: RecordValue, term: string, ha
   const { morphology, generatedExample } = vocabularyEnhancements(value, hasSource)
   if (!morphology.lemma || !morphology.currentForm || (morphology.ambiguous && !morphology.note)) return false
   if (!generatedExample.translation || !generatedExample.sentence) return false
-  return validSourceSentence({ surface_form: term, context_sentence: generatedExample.sentence })
+  return validGeneratedVocabularyExample(safeObject(value.generatedExample || value.generated_example), term)
 }
 
 /** Guard values as well as timestamps: two edits may share a SQLite second. */
 export function vocabularyWriteGuard(entry: RecordValue) {
   const fields = ['term', 'user_edited', 'lemma', 'phonetic', 'part_of_speech', 'common_meaning', 'memory_hint', 'synonyms', 'antonyms', 'similar_forms', 'contextual_meaning', 'morphology', 'generated_example', 'contextual_occurrence_key']
+  if ('sync_id' in entry) fields.push('sync_id')
   return { sql: fields.map(field => field + ' IS ?').join(' AND '), values: fields.map(field => entry[field] ?? null) }
 }
 

@@ -1,25 +1,34 @@
-param(
+﻿param(
     [int]$VersionCode = 100,
     [string]$VersionName = '0.1.0-beta.1',
-    [string]$DesktopDirectory = ''
+    [string]$ApplicationLabel = '公测·英语刷题机',
+    [Alias('DesktopDirectory')]
+    [string]$OutputDirectory = ''
 )
 
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-if ([string]::IsNullOrWhiteSpace($DesktopDirectory)) {
-    $DesktopDirectory = [Environment]::GetFolderPath('Desktop')
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $OutputDirectory = Join-Path $projectRoot 'outputs\public-beta'
+} elseif (-not [IO.Path]::IsPathFullyQualified($OutputDirectory)) {
+    $OutputDirectory = Join-Path $projectRoot $OutputDirectory
 }
-$DesktopDirectory = (Resolve-Path -LiteralPath $DesktopDirectory).Path
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $frontendRoot = Join-Path $projectRoot 'frontend'
 $androidRoot = Join-Path $frontendRoot 'android'
 $signingProperties = Join-Path $androidRoot 'signing.properties'
 $englishOneTarget = Join-Path $frontendRoot 'public\internal-question-bank.esq'
 $englishTwoTarget = Join-Path $frontendRoot 'public\internal-question-bank-english-two.esq'
 $apk = Join-Path $androidRoot 'app\build\outputs\apk\release\app-release.apk'
+$applicationId = 'com.wssfk.englishpracticemachine.publictest'
 
 if ($VersionCode -lt 1) { throw 'VersionCode must be a positive integer.' }
 if ([string]::IsNullOrWhiteSpace($VersionName)) { throw 'VersionName cannot be empty.' }
+if ([string]::IsNullOrWhiteSpace($ApplicationLabel)) { throw 'ApplicationLabel cannot be empty.' }
+if ($VersionName.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) {
+    throw 'VersionName contains characters that cannot be used in an APK filename.'
+}
 if (-not (Test-Path -LiteralPath $signingProperties)) { throw "Fixed signing is not configured: $signingProperties" }
 foreach ($bank in @($englishOneTarget, $englishTwoTarget)) {
     if (-not (Test-Path -LiteralPath $bank)) { throw "Bundled public ESQ is missing: $bank" }
@@ -61,7 +70,14 @@ try {
     } finally { Pop-Location }
     Push-Location $androidRoot
     try {
-        Invoke-Checked { .\gradlew.bat assembleRelease "-PappVersionCode=$VersionCode" "-PappVersionName=$VersionName" } 'Gradle release build'
+        Invoke-Checked {
+            .\gradlew.bat assembleRelease `
+                "-PappVersionCode=$VersionCode" `
+                "-PappVersionName=$VersionName" `
+                "-PappApplicationId=$applicationId" `
+                "-PappApplicationLabel=$($ApplicationLabel.Trim())" `
+                "-PappIconName=ic_launcher_public"
+        } 'Gradle release build'
     } finally { Pop-Location }
 } finally {
     $env:VITE_BUNDLED_QUESTION_BANK = $previousBank
@@ -69,8 +85,8 @@ try {
 }
 
 if (-not (Test-Path -LiteralPath $apk)) { throw 'Gradle finished without producing the release APK.' }
-New-Item -ItemType Directory -Path $DesktopDirectory -Force | Out-Null
-$target = Join-Path $DesktopDirectory "英语刷题机-Android-$VersionName-公测版.apk"
+New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+$target = Join-Path $OutputDirectory "english-practice-machine-android-$VersionName-public-beta.apk"
 Copy-Item -LiteralPath $apk -Destination $target -Force
 $hash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
 $size = (Get-Item -LiteralPath $target).Length

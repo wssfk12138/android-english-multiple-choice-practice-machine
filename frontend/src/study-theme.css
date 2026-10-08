@@ -130,14 +130,6 @@ html:root.dark body {
     margin-top: 16px;
   }
 
-  /* Keep the desktop recall spacing until the answer is revealed. */
-  html:root[data-platform="android"] .vocabulary-review-card:has(.reveal-button) {
-    min-height: min(480px, 100%);
-  }
-
-  html:root[data-platform="android"] .vocabulary-review-card:has(.reveal-button) .review-content {
-    padding-block: 64px 48px;
-  }
 
   html:root[data-platform="android"] .vocabulary-review-card .review-answer small {
     display: block;
@@ -188,3 +180,20 @@ html:root.dark body {
     border: 0;
   }
 }
+
+/* Final landscape review: reserve the real answer before revealing it. */
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card { width:min(680px,100%); min-height:min(432.67px,100%); padding:20px; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-content { position:relative; flex:1 1 auto; padding:8px 0; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .reveal-button { position:absolute; top:110px; left:50%; transform:translateX(-50%); margin:0; z-index:1; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-answer { margin-top:8px; display:block; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .answer-reserved { visibility:hidden; pointer-events:none; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-meaning-block { margin:8px 0; text-align:center; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-meaning-heading { justify-content:center; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .memory-layer { text-align:left; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .memory-layer-static { border-top:0; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .memory-layer-static p { padding:10px 16px; border-left:3px solid var(--primary); background:var(--primary-faint); border-radius:0 8px 8px 0; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-actions { width:100%; max-width:488px; display:grid; grid-template-columns:repeat(3,minmax(0,156px)); gap:10px; justify-content:center; border-top:1px solid var(--line); padding-top:12px; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .memory-layer-static h4 { margin:8px 0; font-size:13px; font-weight:400; color:var(--muted); }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-part-of-speech { display:inline; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-close { width:auto; padding:0 6px; border:0; background:transparent; color:var(--ink); font-size:14px; }
+html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-meaning-heading { display:flex; gap:8px; }

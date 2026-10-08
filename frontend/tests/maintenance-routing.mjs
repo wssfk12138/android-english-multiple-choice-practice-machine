@@ -22,7 +22,7 @@ const api={exports:{},URL,FormData,require:id=>{
  if(id==='./content-remediation')return {ensureContentRemediation:async()=>{}}
  if(id==='./lan-sync')return {updateLanSyncSettings:async body=>{saved=body;return {configured:true}}}
  if(id==='./sync-scheduler')return {refreshSyncState:async()=>({})}
- // local-api 在每个请求边界触发一次空会话清扫并自行兜底失败。
+ // local-api 在进程内只调度一次空会话清扫，并自行兜底失败。
  if(id==='./question-bank')return {sweepEmptyPaperSessions:async()=>{}}
  return {}
 }}

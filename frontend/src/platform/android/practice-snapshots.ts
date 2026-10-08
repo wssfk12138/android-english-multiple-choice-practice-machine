@@ -1,4 +1,5 @@
-import { row, run } from './database'
+import { row, rows, run, dbExecutor } from './database'
+import type { SQLiteDBConnection } from '@capacitor-community/sqlite'
 
 type RecordValue = Record<string, any>
 
@@ -44,12 +45,28 @@ export function snapshotsEquivalent(left: RecordValue, right: RecordValue): bool
   return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right))
 }
 
+// A replace-style import rewrites paper content in place. Every active session
+// on the paper must keep its pre-replace scoring material, so capture the same
+// snapshot the content-remediation flow uses — before the first question row
+// changes, inside the import transaction. Sessions that already carry a
+// snapshot keep theirs (captureSession is idempotent).
+// db 必须是事务回调收到的原始连接：独占事务持有屏障期间，全局助手会循环等待。
+export async function capturePaperSessionSnapshots(db: SQLiteDBConnection, paperId: number, revision: string): Promise<number> {
+  if (!revision) return 0
+  const { rows } = dbExecutor(db)
+  const sessions = await rows<RecordValue>(
+    'SELECT id FROM practice_sessions WHERE paper_id = ? AND status = ? ORDER BY id', [paperId, 'active'])
+  for (const session of sessions) await captureSession(db, Number(session.id), revision)
+  return sessions.length
+}
+
 // Invoke in the content-upgrade transaction before changing any question.
-export async function captureSession(sessionId: number, revision: string): Promise<void> {
+export async function captureSession(db: SQLiteDBConnection, sessionId: number, revision: string): Promise<void> {
+  const { row, run } = dbExecutor(db)
   const session = await row<RecordValue>('SELECT * FROM practice_sessions WHERE id=?', [sessionId])
   if (Object.keys(readSnapshot(session!.content_snapshot)).length) return
   const { getSession } = await import('./practice')
-  const response = await getSession(sessionId)
+  const response = await getSession(sessionId, db)
   const units = []
   for (const unit of response.units) {
     const original = await row<RecordValue>('SELECT external_key FROM units WHERE id=?', [unit.id])
@@ -66,8 +83,9 @@ export async function captureSession(sessionId: number, revision: string): Promi
     [JSON.stringify({version: 1, revision, units}), sessionId])
 }
 
-export async function restoreUnit(snapshot: RecordValue, unitId: number): Promise<RecordValue | null> {
+export async function restoreUnit(snapshot: RecordValue, unitId: number, dbx?: SQLiteDBConnection): Promise<RecordValue | null> {
   if (!Object.keys(snapshot).length) return null
+  const { row } = dbExecutor(dbx)
   const unit = await row<RecordValue>('SELECT external_key,paper_id FROM units WHERE id=?', [unitId])
   const saved = snapshot.units.find((item: RecordValue) => item.unit_key === unit!.external_key)
   if (!saved) throw new Error('练习内容快照缺少篇目，无法安全恢复')
@@ -164,7 +182,37 @@ export function requireSnapshotChoice(session: RecordValue): void {
   if (snapshotChoiceRequired(session)) throw new Error('题库内容已修正，请先选择继续旧内容或用修正版重开')
 }
 
-export async function chooseSnapshot(sessionId: number, choice: string): Promise<{id: number}> {
+// Stable JSON text for material comparison: object keys sorted, arrays in order.
+function stableText(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(item => stableText(item)).join(',') + ']'
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value as RecordValue).sort()
+      .map(key => JSON.stringify(key) + ':' + stableText((value as RecordValue)[key])).join(',') + '}'
+  }
+  return JSON.stringify(value ?? null)
+}
+
+// A carried selection is only sound when the question material AND its answer
+// are identical between the captured snapshot and the live content: same
+// stem/options/score/answer key. Display labels and option order are
+// runtime-generated (options aligned by stable_key, order excluded on
+// purpose — the carried row keeps the order the user originally saw).
+function snapshotQuestionUnchanged(saved: RecordValue, current: RecordValue, currentAnswer: unknown): boolean {
+  const material = (payload: RecordValue) => stableText({
+    number: payload.number ?? null,
+    stem: payload.stem ?? '',
+    question_type: payload.question_type ?? '',
+    score: payload.score ?? null,
+    metadata: payload.metadata ?? {},
+    options: ((payload.options || []) as RecordValue[]).map(option => ({
+      key: option.stable_key, content: option.content ?? '', metadata: option.metadata ?? {},
+    })).sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0),
+  })
+  return material(saved.payload) === material(current)
+    && stableText(saved.answer ?? '') === stableText(currentAnswer ?? '')
+}
+
+export async function chooseSnapshot(sessionId: number, choice: string): Promise<{ id: number; carried?: number; reset?: number; carriedSubmissions?: number }> {
   if (!['continue', 'restart'].includes(choice)) throw new Error('请选择有效的续练方式')
   const {transaction, rows} = await import('./database')
   const {serializeUnit} = await import('./practice')
@@ -182,25 +230,72 @@ export async function chooseSnapshot(sessionId: number, choice: string): Promise
     // A missing id must fail loudly: a silent 0 would insert an orphan session.
     if (!Number.isInteger(newId) || newId <= 0) throw new Error('练习会话创建失败，请重试')
     await run('UPDATE practice_sessions SET content_revisions=? WHERE id=?',[await currentContentRevisions(JSON.parse(session.unit_ids)),newId])
+    // 转移口径（仅 paper 模式）：已提交篇目整体原样带入——成绩是历史事实，
+    // 不因迁移重判；未提交篇目逐题比对快照材料与当前内容，未修正的题保留
+    // 旧选择（判分键一致，结果不变），被修正的题重置给用户重做。
+    const transfer = session.mode === 'paper'
+    const submittedUnits = new Set(transfer
+      ? (await rows<RecordValue>('SELECT unit_id FROM practice_unit_submissions WHERE session_id=?',[sessionId])).map(item => Number(item.unit_id))
+      : [])
+    let carried = 0
+    let reset = 0
     for (const unitId of JSON.parse(session.unit_ids)) {
-      const selected = await rows<RecordValue>('SELECT a.question_id FROM practice_answers a JOIN questions q ON q.id=a.question_id WHERE a.session_id=? AND q.unit_id=?',[sessionId,unitId])
-      const unit = await serializeUnit(unitId,{shuffleOptions:Boolean(session.shuffle_options),onlyQuestionIds:new Set(selected.map(item=>Number(item.question_id)))})
+      const oldAnswers = await rows<RecordValue>(
+        'SELECT a.question_id, a.user_answer, a.option_order, a.is_correct, q.external_key, q.answer AS current_answer FROM practice_answers a JOIN questions q ON q.id=a.question_id WHERE a.session_id=? AND q.unit_id=?',
+        [sessionId,unitId])
+      const oldByQuestion = new Map(oldAnswers.map(item => [Number(item.question_id), item]))
+      const unit = await serializeUnit(unitId,{shuffleOptions:Boolean(session.shuffle_options),onlyQuestionIds:new Set(oldByQuestion.keys())})
+      const unitKey = (await row<RecordValue>('SELECT external_key FROM units WHERE id=?',[unitId]))!.external_key
+      const savedUnit = snapshot.units.find((item: RecordValue) => item.unit_key === unitKey)
+      const carryWholeUnit = submittedUnits.has(Number(unitId))
+      const carriedRows: unknown[][] = []
+      const emptyRows: unknown[][] = []
+      for (const question of unit.questions) {
+        const old = oldByQuestion.get(Number(question.id))
+        const hasAnswer = Boolean(old && String(old.user_answer ?? '').trim())
+        const saved = savedUnit?.questions.find((item: RecordValue) => item.question_key === old?.external_key)
+        if (transfer && old && (carryWholeUnit || (hasAnswer && saved && snapshotQuestionUnchanged(saved, question, old?.current_answer)))) {
+          carriedRows.push([
+            newId, question.id, String(old.user_answer ?? ''), String(old.option_order ?? '[]'),
+            carryWholeUnit ? (old.is_correct ?? null) : null,
+          ])
+        } else {
+          emptyRows.push([newId, question.id, JSON.stringify(question.option_order)])
+          // 只有原本作答过、因修正被清掉的题才计入“需重做”；建会话时就存在的空行不算。
+          if (hasAnswer) reset++
+        }
+      }
       // 50 rows per multi-row statement keeps the bridge round trips bounded;
       // plain INSERT (no OR IGNORE) so an unexpected duplicate question fails
       // loudly instead of being silently skipped.
-      const questions: RecordValue[] = unit.questions
-      for (let offset = 0; offset < questions.length; offset += 50) {
-        const batch = questions.slice(offset, offset + 50)
+      if (carriedRows.length) {
         const values: unknown[] = []
-        const rowsSql = batch.map(question => {
-          values.push(newId, question.id, JSON.stringify(question.option_order))
+        const rowsSql = carriedRows.map(row => {
+          values.push(...row)
+          return '(?,?,?,?,?,lower(hex(randomblob(16))),CURRENT_TIMESTAMP)'
+        }).join(',')
+        await run(`INSERT INTO practice_answers(session_id,question_id,user_answer,option_order,is_correct,sync_id,updated_at) VALUES ${rowsSql}`, values)
+      }
+      for (let offset = 0; offset < emptyRows.length; offset += 50) {
+        const batch = emptyRows.slice(offset, offset + 50)
+        const values: unknown[] = []
+        const rowsSql = batch.map(row => {
+          values.push(...row)
           return "(?,?,'',?,lower(hex(randomblob(16))),CURRENT_TIMESTAMP)"
         }).join(',')
         await run(`INSERT INTO practice_answers(session_id,question_id,user_answer,option_order,sync_id,updated_at) VALUES ${rowsSql}`, values)
       }
+      carried += carriedRows.length
+    }
+    let carriedSubmissions = 0
+    for (const submission of await rows<RecordValue>('SELECT unit_id, submitted_at, score, max_score FROM practice_unit_submissions WHERE session_id=?',[sessionId])) {
+      await run(
+        'INSERT INTO practice_unit_submissions(session_id,unit_id,submitted_at,score,max_score,sync_id,updated_at) VALUES (?,?,?,?,?,lower(hex(randomblob(16))),CURRENT_TIMESTAMP)',
+        [newId, submission.unit_id, submission.submitted_at, submission.score, submission.max_score])
+      carriedSubmissions++
     }
     await run("UPDATE practice_sessions SET status='abandoned',updated_at=CURRENT_TIMESTAMP WHERE id=?",[sessionId])
-    return {id:newId}
+    return {id:newId, carried, reset, carriedSubmissions}
   })
 }
 

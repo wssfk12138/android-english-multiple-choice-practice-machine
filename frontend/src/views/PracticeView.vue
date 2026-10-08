@@ -16,8 +16,11 @@ import {
   Send,
   X,
 } from 'lucide-vue-next'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
+import { App as CapacitorApp } from '@capacitor/app'
+import type { PluginListenerHandle } from '@capacitor/core'
+import { createTimer, elapsedTimer, checkpointTimer, pauseTimerState, resumeTimerState, finishTimerState, timerSnapshot, restoreTimer, type PracticeTimerState, type TimerPauseReason } from '../services/practiceTimer'
 import { get, post, put } from '../api'
 import PracticeContentChoice from '../components/PracticeContentChoice.vue'
 import ContentBlocks from '../components/ContentBlocks.vue'
@@ -52,16 +55,27 @@ type VocabularyTranslationTrigger = 'unit_submit' | 'session_submit' | 'practice
 type PendingVocabularyRecord = { entryId: number, unitId: number | null }
 const pendingVocabulary = ref<PendingVocabularyRecord[]>([])
 let practiceExitTranslation: Promise<void> | null = null
-type TimerMode = 'off' | 'running' | 'paused' | 'finished'
-type PracticeTimerState = {
-  mode: TimerMode
-  elapsedMs: number
-  startedAt: number | null
-}
 const timerState = ref<PracticeTimerState | null>(null)
 const timerPromptVisible = ref(false)
-const timerNow = ref(Date.now())
+const timerNow = ref(performance.now())
+const timerNotice = ref('')
+const timerSaveError = ref('')
+const pageForeground = ref(document.visibilityState === 'visible')
+const nativeForeground = ref<boolean | null>(document.documentElement.dataset.platform === 'android' ? null : true)
+const pageLeaving = ref(false)
+const timerLoading = ref(true)
+const submissionBusy = ref(false)
+let pageAlive = true
+let loadGeneration = 0
+let nativeEventGeneration = 0
+let loadedSessionId: number | null = null
+let timerBackupBlocked = false
+let timerListeners: PluginListenerHandle[] = []
+let checkpointAt = performance.now()
 let timerTicker: number | null = null
+const timerReady = computed(() => pageAlive && !pageLeaving.value && !timerLoading.value && !submissionBusy.value
+  && pageForeground.value && nativeForeground.value === true && contentChoiceSessionId.value === null
+  && Number(route.params.id) === loadedSessionId && session.value?.id === loadedSessionId && session.value?.status !== 'submitted')
 const activeUnit = computed(() => session.value?.units?.[activeUnitIndex.value])
 const activeContentBlocks = computed(() => activeUnit.value?.content_blocks || [])
 const clozeBlankNumbers = computed<number[]>(() => activeUnit.value?.unit_type === 'cloze'
@@ -112,14 +126,7 @@ const orderingFixedSlots = computed(() => {
   const slots = activeUnit.value?.shared_data?.fixed_slots
   return Array.isArray(slots) ? slots : []
 })
-const timerElapsedMs = computed(() => {
-  const state = timerState.value
-  if (!state) return 0
-  if (state.mode === 'running' && state.startedAt) {
-    return state.elapsedMs + Math.max(0, timerNow.value - state.startedAt)
-  }
-  return state.elapsedMs
-})
+const timerElapsedMs = computed(() => elapsedTimer(timerState.value, timerNow.value))
 const timerText = computed(() => formatDuration(timerElapsedMs.value))
 const timerEnabled = computed(() =>
   Boolean(timerState.value && timerState.value.mode !== 'off'),
@@ -306,11 +313,14 @@ function formatScore(value: unknown) {
 }
 
 function persistTimer() {
-  if (!session.value?.id || !timerState.value) return
-  localStorage.setItem(
-    timerStorageKey(session.value.id),
-    JSON.stringify(timerState.value),
-  )
+  if (loadedSessionId === null || session.value?.id !== loadedSessionId || !timerState.value) return
+  if (timerBackupBlocked) return
+  try {
+    localStorage.setItem(timerStorageKey(loadedSessionId), JSON.stringify(timerSnapshot(timerState.value, performance.now())))
+    timerSaveError.value = ''
+  } catch {
+    timerSaveError.value = '计时保存失败；异常关闭可能丢失尚未保存的用时，请保持页面打开并检查设备存储。'
+  }
 }
 
 function vocabularyQueueKey(sessionId: number) {
@@ -391,6 +401,8 @@ async function flushVocabularyTranslations(
 }
 
 function flushVocabularyOnPageHide() {
+  pageForeground.value = false
+  pausePracticeAutomatically()
   if (document.documentElement.dataset.platform === 'android') {
     void flushVocabularyOnPracticeExit()
     return
@@ -416,79 +428,59 @@ function flushVocabularyOnPracticeExit(): Promise<void> {
 }
 
 function flushVocabularyOnVisibilityChange() {
-  if (document.visibilityState === 'hidden') {
+  pageForeground.value = document.visibilityState === 'visible'
+  if (!pageForeground.value) {
+    pausePracticeAutomatically()
     void flushVocabularyOnPracticeExit()
   } else {
     // The user may return to the same practice session and add more words.
     practiceExitTranslation = null
-  }
-}
-
-function readTimer(sessionId: number): PracticeTimerState | null {
-  try {
-    const raw = localStorage.getItem(timerStorageKey(sessionId))
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!['off', 'running', 'paused', 'finished'].includes(parsed.mode)) return null
-    return {
-      mode: parsed.mode,
-      elapsedMs: Math.max(0, Number(parsed.elapsedMs) || 0),
-      startedAt: Number.isFinite(Number(parsed.startedAt))
-        ? Number(parsed.startedAt)
-        : null,
-    }
-  } catch {
-    return null
+    resumeAutomaticTimer()
   }
 }
 
 function initializeTimer() {
-  if (!session.value) return
-  const saved = readTimer(session.value.id)
+  if (!session.value || loadedSessionId !== session.value.id) return
+  timerNotice.value = ''
+  timerSaveError.value = ''
+  timerBackupBlocked = false
+  let raw: string | null = null
+  try { raw = localStorage.getItem(timerStorageKey(session.value.id)) }
+  catch { timerSaveError.value = '计时记录读取失败，无法恢复上次用时。' }
+  const saved = restoreTimer(raw, session.value.status === 'submitted')
+  timerNotice.value = saved.notice
+  if (saved.backup && raw !== null) {
+    try {
+      const key = timerStorageKey(session.value.id) + '-legacy-backup'
+      if (localStorage.getItem(key) === null) localStorage.setItem(key, raw.slice(0, 16384))
+    } catch { timerBackupBlocked = true; timerSaveError.value = '旧计时记录备份失败；原记录未覆盖，本次计时暂不能保存。'; timerState.value = saved.state; timerPromptVisible.value = !saved.state && session.value.status !== 'submitted'; return }
+  }
+  timerState.value = saved.state
   if (session.value.status === 'submitted') {
     timerPromptVisible.value = false
-    if (!saved) return
-    if (saved.mode === 'running' && saved.startedAt) {
-      const submittedAt = session.value.submitted_at
-        ? Date.parse(`${String(session.value.submitted_at).replace(' ', 'T')}Z`)
-        : Date.now()
-      saved.elapsedMs += Math.max(0, submittedAt - saved.startedAt)
-      saved.startedAt = null
-      saved.mode = 'finished'
-      timerState.value = saved
-      persistTimer()
-      return
-    }
-    timerState.value = saved
-    return
-  }
-  if (saved) {
-    timerState.value = saved
+  } else if (saved.state) {
     timerPromptVisible.value = false
-  } else if (session.value.units?.some((unit: any) => unit.submission?.submitted)) {
-    timerState.value = { mode: 'off', elapsedMs: 0, startedAt: null }
+  } else if (raw === null && session.value.units?.some((unit: any) => unit.submission?.submitted)) {
+    timerState.value = { ...createTimer(), mode: 'off', pauseReason: null }
     timerPromptVisible.value = false
-    persistTimer()
   } else {
-    timerState.value = null
     timerPromptVisible.value = true
   }
+  // Unknown/corrupt snapshots stay intact until the user chooses a new timer.
+  if (timerState.value) persistTimer()
 }
 
 function startTimedPractice() {
-  timerNow.value = Date.now()
-  timerState.value = {
-    mode: 'running',
-    elapsedMs: 0,
-    startedAt: timerNow.value,
-  }
+  timerNow.value = performance.now()
+  timerState.value = resumeTimerState(createTimer(), timerNow.value, timerReady.value, true)
   timerPromptVisible.value = false
+  checkpointAt = timerNow.value
   persistTimer()
   resetPracticeScroll()
 }
 
 function startWithoutTimer() {
-  timerState.value = { mode: 'off', elapsedMs: 0, startedAt: null }
+  timerState.value = { ...createTimer(), mode: 'off', pauseReason: null }
   timerPromptVisible.value = false
   persistTimer()
   resetPracticeScroll()
@@ -500,59 +492,93 @@ function resetPracticeScroll() {
   document.documentElement.scrollTop = 0
 }
 
-function pauseTimer() {
-  const state = timerState.value
-  if (!state || state.mode !== 'running' || !state.startedAt) return
-  const now = Date.now()
-  state.elapsedMs += Math.max(0, now - state.startedAt)
-  state.startedAt = null
-  state.mode = 'paused'
-  timerNow.value = now
-  listeningPlayer.value?.pause()
+function pausePracticeTimer(reason: TimerPauseReason) {
+  timerNow.value = performance.now()
+  if (timerState.value) timerState.value = pauseTimerState(timerState.value, timerNow.value, reason)
+  listeningPlayer.value?.pause(reason === 'manual')
   persistTimer()
 }
-
+function pausePracticeAutomatically() { pausePracticeTimer('automatic') }
+function pauseTimer() { pausePracticeTimer('manual') }
+function resumeAutomaticTimer() {
+  if (!timerState.value) return
+  timerNow.value = performance.now()
+  const next = resumeTimerState(timerState.value, timerNow.value, timerReady.value)
+  if (next !== timerState.value) { timerState.value = next; persistTimer() }
+}
 function resumeTimer() {
-  const state = timerState.value
-  if (!state || state.mode !== 'paused') return
-  const now = Date.now()
-  state.startedAt = now
-  state.mode = 'running'
-  timerNow.value = now
+  if (!timerState.value || submissionBusy.value) return
+  timerNow.value = performance.now()
+  timerState.value = resumeTimerState(timerState.value, timerNow.value, timerReady.value, true)
+  persistTimer()
+}
+function finishTimer() {
+  if (timerState.value) timerState.value = finishTimerState(timerState.value, performance.now())
   persistTimer()
 }
 
-function finishTimer() {
-  const state = timerState.value
-  if (!state || state.mode === 'off' || state.mode === 'finished') return
-  if (state.mode === 'running' && state.startedAt) {
-    const now = Date.now()
-    state.elapsedMs += Math.max(0, now - state.startedAt)
-    timerNow.value = now
+async function registerTimerLifecycle() {
+  if (document.documentElement.dataset.platform !== 'android') return
+  const stateChanged = (active: boolean) => {
+    if (!pageAlive) return
+    nativeEventGeneration++
+    nativeForeground.value = active
+    if (!active) {
+      pausePracticeAutomatically()
+      void flushVocabularyOnPracticeExit()
+    } else { practiceExitTranslation = null; resumeAutomaticTimer() }
   }
-  state.startedAt = null
-  state.mode = 'finished'
-  persistTimer()
+  try {
+    // Register before querying. A newer event always wins over an old getState result.
+    for (const register of [
+      () => CapacitorApp.addListener('appStateChange', ({ isActive }) => stateChanged(isActive)),
+      () => CapacitorApp.addListener('pause', () => stateChanged(false)),
+      () => CapacitorApp.addListener('resume', () => stateChanged(true)),
+    ]) {
+      const handle = await register()
+      if (!pageAlive) { await handle.remove(); return }
+      timerListeners.push(handle)
+    }
+    const generation = nativeEventGeneration
+    const state = await CapacitorApp.getState()
+    if (pageAlive && generation === nativeEventGeneration) stateChanged(state.isActive)
+  } catch {
+    if (pageAlive) { nativeForeground.value = null; pausePracticeAutomatically(); timerNotice.value = '无法确认应用前台状态，计时已暂停。请重新进入练习。' }
+  }
 }
 
 const contentChoiceSessionId = ref<number | null>(null)
 const contentChoiceBusy = ref(false)
 const contentChoiceError = ref('')
+const contentTransferNotice = ref('')
 async function chooseContent(choice: 'continue' | 'restart') {
   if (contentChoiceBusy.value || contentChoiceSessionId.value === null) return
   contentChoiceBusy.value = true
   contentChoiceError.value = ''
+  const generation = loadGeneration
+  const sid = Number(route.params.id)
   try {
     const result: any = await post('/practice/sessions/' + contentChoiceSessionId.value + '/content-choice', {choice})
-    if (Number(route.params.id) !== Number(result.id)) await router.replace('/practice/' + result.id)
-    await load()
-  } catch (e) { contentChoiceError.value = String(e) }
+    if (!pageAlive || pageLeaving.value || generation !== loadGeneration || Number(route.params.id) !== sid) return
+    contentTransferNotice.value = typeof result.carried === 'number'
+      ? `已保留 ${result.carried} 题作答`
+        + (result.reset ? `，${result.reset} 题因内容修正需重新作答` : '')
+        + (result.carriedSubmissions ? `；${result.carriedSubmissions} 篇已提交成绩原样带入` : '')
+      : ''
+    if (sid !== Number(result.id)) await router.replace('/practice/' + result.id)
+    else await load()
+  } catch (e) { if (pageAlive && Number(route.params.id) === sid) contentChoiceError.value = String(e) }
   finally { contentChoiceBusy.value = false }
 }
 
 async function load() {
+  const generation = ++loadGeneration
+  const sid = Number(route.params.id)
+  timerLoading.value = true
+  const current = () => pageAlive && !pageLeaving.value && generation === loadGeneration && Number(route.params.id) === sid
   try {
-    const loaded: any = await get('/practice/sessions/' + route.params.id)
+    const loaded: any = await get('/practice/sessions/' + sid)
+    if (!current()) return
     if (loaded.content_choice_required) {
       session.value = null
       contentChoiceSessionId.value = Number(loaded.id)
@@ -560,30 +586,70 @@ async function load() {
     }
     contentChoiceSessionId.value = null
     session.value = loaded
+    loadedSessionId = sid
     loadPendingVocabulary(session.value.id)
     initializeTimer()
     syncCurrentQuestionTargets()
   }
-  catch (e) { error.value = String(e) }
+  catch (e) { if (current()) error.value = String(e) }
+  finally { if (current()) { timerLoading.value = false; resumeAutomaticTimer() } }
 }
+watch(() => route.params.id, () => {
+  pausePracticeAutomatically()
+  pageLeaving.value = false
+  session.value = null
+  loadedSessionId = null
+  timerState.value = null
+  timerPromptVisible.value = false
+  activeUnitIndex.value = 0
+  submissionBusy.value = false
+  practiceExitTranslation = null
+  void load()
+})
+function handlePageShow() { pageForeground.value = document.visibilityState === 'visible'; resumeAutomaticTimer() }
+const removeAfterNavigation = router.afterEach((_to, _from, failure) => {
+  if (failure && pageAlive && Number(route.params.id) === loadedSessionId) {
+    pageLeaving.value = false
+    practiceExitTranslation = null
+    resumeAutomaticTimer()
+    if (timerLoading.value) void load()
+  }
+})
 onMounted(() => {
   restorePortraitPaneRatio()
   timerTicker = window.setInterval(() => {
-    timerNow.value = Date.now()
+    timerNow.value = performance.now()
+    if (timerState.value?.mode === 'running' && timerNow.value - checkpointAt >= 5000) {
+      timerState.value = checkpointTimer(timerState.value, timerNow.value)
+      persistTimer()
+      checkpointAt = timerNow.value
+    }
   }, 500)
   window.addEventListener('keydown', handleWindowKeydown)
   window.addEventListener('pagehide', flushVocabularyOnPageHide)
+  window.addEventListener('pageshow', handlePageShow)
   document.addEventListener('visibilitychange', flushVocabularyOnVisibilityChange)
-  load()
+  void registerTimerLifecycle()
+  void load()
 })
 onBeforeUnmount(() => {
+  pausePracticeAutomatically()
+  pageAlive = false
+  loadGeneration++
+  nativeEventGeneration++
+  removeAfterNavigation()
+  for (const handle of timerListeners) void handle.remove()
+  timerListeners = []
   if (timerTicker !== null) window.clearInterval(timerTicker)
   window.removeEventListener('keydown', handleWindowKeydown)
   window.removeEventListener('pagehide', flushVocabularyOnPageHide)
+  window.removeEventListener('pageshow', handlePageShow)
   document.removeEventListener('visibilitychange', flushVocabularyOnVisibilityChange)
   void flushVocabularyOnPracticeExit()
 })
 onBeforeRouteLeave(async () => {
+  pageLeaving.value = true
+  pausePracticeAutomatically()
   await flushVocabularyOnPracticeExit()
   const current = session.value
   if (current && current.mode === 'paper' && current.status === 'active') {
@@ -595,6 +661,11 @@ onBeforeRouteLeave(async () => {
       // 离开练习时的清理失败不阻塞导航；空会话由周期清扫兜底。
     }
   }
+})
+onBeforeRouteUpdate(async () => {
+  pageLeaving.value = true
+  pausePracticeAutomatically()
+  await flushVocabularyOnPracticeExit()
 })
 
 function handleWindowKeydown(event: KeyboardEvent) {
@@ -736,7 +807,11 @@ async function focusUnanswered(unitIndex: number, question: any) {
 async function handleIncompleteSubmission(errorValue: any) {
   const detail = errorValue?.detail
   if (detail?.code !== 'incomplete_submission') return false
-  session.value = await get(`/practice/sessions/${session.value.id}`)
+  const sid = loadedSessionId
+  const generation = loadGeneration
+  const loaded = await get(`/practice/sessions/${sid}`)
+  if (!pageAlive || pageLeaving.value || generation !== loadGeneration || sid !== loadedSessionId) return true
+  session.value = loaded
   const unitIndex = session.value.units.findIndex((unit: any) => unit.id === detail.unit_id)
   if (unitIndex < 0) return false
   const question = session.value.units[unitIndex].questions.find(
@@ -757,17 +832,37 @@ async function submitCurrentUnit() {
 }
 
 async function confirmCurrentUnitSubmission() {
+  if (submissionBusy.value || !session.value || pageLeaving.value) return
+  const sid = loadedSessionId
+  const generation = loadGeneration
+  const wasRunning = timerState.value?.mode === 'running'
+  submissionBusy.value = true
+  pausePracticeTimer('submitting')
   const submittedUnitId = activeUnit.value.id
   try {
-    session.value = await post(
-      `/practice/sessions/${session.value.id}/units/${submittedUnitId}/submit`,
+    const result = await post(
+      `/practice/sessions/${sid}/units/${submittedUnitId}/submit`,
     )
+    if (!pageAlive || pageLeaving.value || generation !== loadGeneration || sid !== loadedSessionId) return
+    session.value = result
     unansweredNotice.value = ''
     showUnitResult(submittedUnitId)
   } catch (e) {
+    if (!pageAlive || pageLeaving.value || generation !== loadGeneration || sid !== loadedSessionId) return
     if (await handleIncompleteSubmission(e)) return
     error.value = String(e)
+  } finally {
+    releaseSubmissionTimer(sid, generation, wasRunning)
   }
+}
+function releaseSubmissionTimer(sid: number | null, generation: number, wasRunning: boolean) {
+  if (!pageAlive || generation !== loadGeneration || sid !== loadedSessionId) return
+  submissionBusy.value = false
+  if (wasRunning && timerState.value?.mode === 'paused') {
+    timerState.value = pauseTimerState(timerState.value, performance.now(), 'automatic')
+    resumeAutomaticTimer()
+  }
+  persistTimer()
 }
 
 async function submitSession() {
@@ -780,14 +875,25 @@ async function submitSession() {
 }
 
 async function confirmSessionSubmission() {
+  if (submissionBusy.value || !session.value || pageLeaving.value) return
+  const sid = loadedSessionId
+  const generation = loadGeneration
+  const wasRunning = timerState.value?.mode === 'running'
+  submissionBusy.value = true
+  pausePracticeTimer('submitting')
   try {
-    session.value = await post(`/practice/sessions/${session.value.id}/submit`)
+    const result = await post(`/practice/sessions/${sid}/submit`)
+    if (!pageAlive || generation !== loadGeneration || sid !== loadedSessionId) return
+    session.value = result
     finishTimer()
     showSessionResult()
   }
   catch (e) {
+    if (!pageAlive || pageLeaving.value || generation !== loadGeneration || sid !== loadedSessionId) return
     if (await handleIncompleteSubmission(e)) return
     error.value = String(e)
+  } finally {
+    releaseSubmissionTimer(sid, generation, wasRunning)
   }
 }
 
@@ -1067,6 +1173,14 @@ async function copySelectedTerm() {
       </div>
     </header>
     <div v-if="error" class="warning" style="margin:15px">{{ error }}</div>
+    <div
+      v-if="contentTransferNotice"
+      class="unanswered-banner"
+      role="status"
+      style="color:var(--success);cursor:pointer"
+      title="点击关闭"
+      @click="contentTransferNotice=''"
+    ><CheckCircle2 :size="18" />{{ contentTransferNotice }}</div>
     <div v-if="unansweredNotice" class="unanswered-banner" role="alert">
       <AlertCircle :size="18" />{{ unansweredNotice }}
     </div>
@@ -1092,7 +1206,8 @@ async function copySelectedTerm() {
           ref="listeningPlayer"
           :tracks="audioTracks"
           :seekable="audioSeekable"
-          :timer-paused="timerState?.mode === 'paused'"
+          :timer-paused="timerState?.mode === 'paused' || !pageForeground || nativeForeground !== true || pageLeaving"
+          :resume-on-timer-continue="timerState?.pauseReason === 'manual'"
           :current-question-number="currentListeningQuestionNumber"
           :answered-count="listeningAnsweredCount"
           :question-count="activeUnit.questions.length"
@@ -1259,6 +1374,10 @@ async function copySelectedTerm() {
       <button @click="addSelectedVocabulary">加入单词本</button>
       <button @click="copySelectedTerm">复制所选内容</button>
     </div>
+    <aside v-if="timerNotice || timerSaveError" class="timer-status-notice" role="status">
+      <span>{{ timerSaveError || timerNotice }}</span>
+      <button v-if="!timerSaveError" type="button" aria-label="关闭计时提示" @click="timerNotice=''"><X :size="18" /></button>
+    </aside>
     <div v-if="vocabularyToast" class="toast vocabulary-toast">{{ vocabularyToast }}</div>
     <section v-if="answerCardVisible && session" class="answer-card-overlay" role="dialog" aria-modal="true" aria-labelledby="answer-card-title">
       <div class="answer-card-drawer">
@@ -1442,7 +1561,7 @@ async function copySelectedTerm() {
         <small>本次选择只对当前练习生效。</small>
       </div>
     </section>
-    <section v-if="timerState?.mode === 'paused' && session?.status === 'active'" class="timer-overlay timer-pause-overlay" role="dialog" aria-modal="true" aria-labelledby="timer-pause-title" @click.self.prevent>
+    <section v-if="timerState?.mode === 'paused' && timerState.pauseReason === 'manual' && session?.status === 'active'" class="timer-overlay timer-pause-overlay" role="dialog" aria-modal="true" aria-labelledby="timer-pause-title" @click.self.prevent>
       <div class="timer-dialog pause-dialog card" @click.stop>
         <span class="timer-dialog-icon rest"><Coffee :size="30" /></span>
         <h2 id="timer-pause-title">计时已暂停</h2>
@@ -1456,3 +1575,40 @@ async function copySelectedTerm() {
     </section>
   </div>
 </template>
+
+<style scoped>
+.timer-status-notice {
+  position: fixed;
+  bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 35;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: min(560px, calc(100vw - 32px));
+  max-height: 30vh;
+  overflow-y: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-solid);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.timer-status-notice span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.timer-status-notice button {
+  flex: 0 0 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.timer-status-notice button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+</style>

@@ -726,12 +726,21 @@ async function removeEntry() {
   await load()
 }
 
-async function retryTranslation() {
-  const result: any = await post('/vocabulary/retry-pending')
-  showNotice('已将整个单词本中等待及失败的词条加入翻译队列')
-  await load()
-  startTranslationRefresh()
+async function retryTranslation(task = 'translation') {
+  if (!selected.value || translationRetryBusy.value) return
+  translationRetryBusy.value = true
+  try {
+    if (platformRuntime.isAndroid) await post('/vocabulary/request-runs', {
+      action: 'retry', task, entry_ids: [selected.value.id], command_id: crypto.randomUUID(),
+    })
+    else await post('/vocabulary/' + selected.value.id + '/retry')
+    showNotice('已申请仅重试当前词的' + (task === 'translation' ? '翻译' : '补缺'))
+    await load()
+    startTranslationRefresh()
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '重试失败，请稍后重试或检查模型配置' }
+  finally { translationRetryBusy.value = false }
 }
+const translationRetryBusy = ref(false)
 
 async function rate(rating: string) {
   if (!reviewWord.value || reviewSaving.value) return
@@ -1145,12 +1154,12 @@ function filterCount(key: string) {
               <div v-if="!editing && selected.translation_status!=='ready'" class="vocab-pending-panel">
                 <RefreshCw :size="22" /><strong>{{ translationStatusText(selected.translation_status, true) }}</strong>
                 <p>单词和真题原句已经安全保存。</p>
-                <button v-if="selected.translation_status==='failed' || selected.translation_status==='pending'" class="button secondary" @click="retryTranslation">重试全部待翻译</button>
+                <button v-if="selected.translation_status==='failed' || selected.translation_status==='pending' || selected.translation_status==='queued'" class="button secondary" @click="retryTranslation()">仅重试当前词翻译</button>
               </div>
               <template v-if="!editing && hasSelectedContent">
                 <VocabularyMemoryContent :entry="selected" :config="displayConfig" :expanded="expandedAll" :expansion-token="expansionToken" />
                 <p v-if="selected.enrichment_status === 'failed'" class="error vocab-enrich-error">补全失败：{{ selected.enrichment_error }}</p>
-                <button v-if="selected.enrichment_status === 'failed'" class="button secondary" @click="retryTranslation">重试失败任务</button>
+                <button v-if="selected.enrichment_status === 'failed'" class="button secondary" @click="retryTranslation('enrichment')">仅重试当前词补缺</button>
                 <div class="detail-actions"><button class="button secondary" @click="put(`/vocabulary/${selected.id}`,{manually_frequent:!selected.manually_frequent}).then(()=>load())"><Star :size="16" />{{ selected.manually_frequent ? '取消重点' : '标记重点' }}</button><button class="button" @click="put(`/vocabulary/${selected.id}`,{study_status:selected.study_status==='mastered'?'learning':'mastered'}).then(()=>load())"><Check :size="16" />{{ selected.study_status === 'mastered' ? '恢复学习' : '标记已掌握' }}</button></div>
               </template>
               <div v-else-if="editing" class="vocab-edit"><label>音标<input v-model="editForm.phonetic"></label><label>词性<input v-model="editForm.part_of_speech"></label><label>常用释义<textarea rows="3" v-model="editForm.common_meaning"></textarea></label><label>我的笔记<textarea rows="4" v-model="editForm.note"></textarea></label><div><button class="button" @click="saveEdit">保存修改</button><button class="button ghost" @click="editing=false">取消</button></div></div>
@@ -1173,12 +1182,12 @@ function filterCount(key: string) {
         <div v-if="!editing && selected.translation_status!=='ready'" class="vocab-pending-panel">
           <RefreshCw :size="22" /><strong>{{ translationStatusText(selected.translation_status, true) }}</strong>
           <p>单词和真题原句已经安全保存。</p>
-          <button v-if="selected.translation_status==='failed' || selected.translation_status==='pending'" class="button secondary" @click="retryTranslation">重试全部待翻译</button>
+          <button v-if="selected.translation_status==='failed' || selected.translation_status==='pending' || selected.translation_status==='queued'" class="button secondary" @click="retryTranslation()">仅重试当前词翻译</button>
         </div>
         <template v-if="!editing && hasSelectedContent">
                 <VocabularyMemoryContent :entry="selected" :config="displayConfig" :expanded="expandedAll" :expansion-token="expansionToken" />
                 <p v-if="selected.enrichment_status === 'failed'" class="error vocab-enrich-error">补全失败：{{ selected.enrichment_error }}</p>
-                <button v-if="selected.enrichment_status === 'failed'" class="button secondary" @click="retryTranslation">重试失败任务</button>
+                <button v-if="selected.enrichment_status === 'failed'" class="button secondary" @click="retryTranslation('enrichment')">仅重试当前词补缺</button>
           <div class="detail-actions">
             <button class="button secondary" @click="put(`/vocabulary/${selected.id}`,{manually_frequent:!selected.manually_frequent}).then(()=>load())"><Star :size="16" />{{ selected.manually_frequent ? '取消重点' : '标记重点' }}</button>
             <button class="button" @click="put(`/vocabulary/${selected.id}`,{study_status:selected.study_status==='mastered'?'learning':'mastered'}).then(()=>load())"><Check :size="16" />{{ selected.study_status === 'mastered' ? '恢复学习' : '标记已掌握' }}</button>

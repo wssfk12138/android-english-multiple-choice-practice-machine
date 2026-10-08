@@ -11,10 +11,17 @@ import org.json.JSONObject;
 public class LanSyncPlugin extends Plugin {
     private LanDiscovery discovery;
     private boolean destroyed;
+    private final LanNetworkExecutor network = new LanNetworkExecutor();
+
+    private void executeNetwork(PluginCall call, Runnable operation) {
+        if (!network.submit(operation)) {
+            call.reject("局域网同步已停止", "LAN_NETWORK_ERROR");
+        }
+    }
 
     @PluginMethod
     public void discover(PluginCall call) {
-        getBridge().execute(() -> {
+        executeNetwork(call, () -> {
             LanDiscovery search = null;
             try {
                 search = new LanDiscovery((android.net.nsd.NsdManager) getContext()
@@ -48,12 +55,13 @@ public class LanSyncPlugin extends Plugin {
             discovery = null;
         }
         if (search != null) search.close();
+        network.close();
         super.handleOnDestroy();
     }
 
     @PluginMethod
     public void post(PluginCall call) {
-        getBridge().execute(() -> {
+        executeNetwork(call, () -> {
             try {
                 String url = call.getString("url", "");
                 JSObject data = call.getObject("data");

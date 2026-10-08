@@ -6,6 +6,7 @@ import {
 import { createSerialQueue } from './serial-queue'
 import { ensureSyncVersions } from './lan-sync-versions'
 import { orderingFixedSlotsForPaperUnit } from './ordering-fixed-slots'
+import { recoverVocabularyRequests } from './vocabulary-request-recovery'
 import {
   LEARNING_HISTORY_REBIND_MIGRATION,
   LEARNING_HISTORY_REBIND_V2_MIGRATION,
@@ -245,6 +246,55 @@ CREATE TABLE IF NOT EXISTS vocabulary_enrichment_jobs (
   error TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- Device-local scheduler state: excluded from LAN/ESQ learning serialization.
+CREATE TABLE IF NOT EXISTS vocabulary_request_gate (
+  id INTEGER PRIMARY KEY CHECK(id=1),
+  reason TEXT NOT NULL DEFAULT '',
+  allowed_run TEXT,
+  used INTEGER NOT NULL DEFAULT 0,
+  started_at INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO vocabulary_request_gate(id) VALUES(1);
+CREATE TABLE IF NOT EXISTS vocabulary_request_runs (
+  id TEXT PRIMARY KEY,
+  command_id TEXT UNIQUE NOT NULL,
+  command_signature TEXT NOT NULL,
+  task TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'running',
+  config_hash TEXT NOT NULL,
+  config_summary TEXT NOT NULL,
+  source TEXT NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  explicit INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS vocabulary_request_members (
+  run_id TEXT NOT NULL REFERENCES vocabulary_request_runs(id),
+  entry_id INTEGER NOT NULL,
+  state TEXT NOT NULL DEFAULT 'queued',
+  PRIMARY KEY(run_id,entry_id)
+);
+CREATE TABLE IF NOT EXISTS vocabulary_request_attempts (
+  id TEXT PRIMARY KEY,
+  run_id TEXT,
+  task TEXT NOT NULL,
+  state TEXT NOT NULL,
+  ids TEXT NOT NULL,
+  fingerprints TEXT NOT NULL DEFAULT '{}',
+  result TEXT,
+  category TEXT,
+  created_at INTEGER NOT NULL,
+  finished_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS vocabulary_request_heads (
+  task TEXT NOT NULL,
+  entry_id INTEGER NOT NULL,
+  attempt_id TEXT NOT NULL,
+  PRIMARY KEY(task,entry_id)
+);
+CREATE INDEX IF NOT EXISTS idx_vocabulary_request_members ON vocabulary_request_members(state,run_id);
+CREATE INDEX IF NOT EXISTS idx_vocabulary_request_attempts ON vocabulary_request_attempts(state);
 CREATE TABLE IF NOT EXISTS vocabulary_occurrences (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   entry_id INTEGER NOT NULL,
@@ -397,6 +447,71 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 INSERT OR IGNORE INTO app_settings(key, value)
 VALUES ('active_question_bank_profile_id', '1');
+INSERT OR IGNORE INTO app_settings(key, value)
+VALUES ('vocabulary_revision', '0');
+CREATE TRIGGER IF NOT EXISTS trg_vocabulary_entries_revision_insert
+AFTER INSERT ON vocabulary_entries
+BEGIN
+  UPDATE app_settings
+  SET value = CAST(COALESCE(NULLIF(value, ''), '0') AS INTEGER) + 1
+  WHERE key = 'vocabulary_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS trg_vocabulary_entries_revision_update
+AFTER UPDATE ON vocabulary_entries
+BEGIN
+  UPDATE app_settings
+  SET value = CAST(COALESCE(NULLIF(value, ''), '0') AS INTEGER) + 1
+  WHERE key = 'vocabulary_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS trg_vocabulary_entries_revision_delete
+AFTER DELETE ON vocabulary_entries
+BEGIN
+  UPDATE app_settings
+  SET value = CAST(COALESCE(NULLIF(value, ''), '0') AS INTEGER) + 1
+  WHERE key = 'vocabulary_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS trg_vocabulary_occurrences_revision_insert
+AFTER INSERT ON vocabulary_occurrences
+BEGIN
+  UPDATE app_settings
+  SET value = CAST(COALESCE(NULLIF(value, ''), '0') AS INTEGER) + 1
+  WHERE key = 'vocabulary_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS trg_vocabulary_occurrences_revision_update
+AFTER UPDATE ON vocabulary_occurrences
+BEGIN
+  UPDATE app_settings
+  SET value = CAST(COALESCE(NULLIF(value, ''), '0') AS INTEGER) + 1
+  WHERE key = 'vocabulary_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS trg_vocabulary_occurrences_revision_delete
+AFTER DELETE ON vocabulary_occurrences
+BEGIN
+  UPDATE app_settings
+  SET value = CAST(COALESCE(NULLIF(value, ''), '0') AS INTEGER) + 1
+  WHERE key = 'vocabulary_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS trg_vocabulary_reviews_revision_insert
+AFTER INSERT ON vocabulary_reviews
+BEGIN
+  UPDATE app_settings
+  SET value = CAST(COALESCE(NULLIF(value, ''), '0') AS INTEGER) + 1
+  WHERE key = 'vocabulary_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS trg_vocabulary_reviews_revision_update
+AFTER UPDATE ON vocabulary_reviews
+BEGIN
+  UPDATE app_settings
+  SET value = CAST(COALESCE(NULLIF(value, ''), '0') AS INTEGER) + 1
+  WHERE key = 'vocabulary_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS trg_vocabulary_reviews_revision_delete
+AFTER DELETE ON vocabulary_reviews
+BEGIN
+  UPDATE app_settings
+  SET value = CAST(COALESCE(NULLIF(value, ''), '0') AS INTEGER) + 1
+  WHERE key = 'vocabulary_revision';
+END;
 CREATE TABLE IF NOT EXISTS trash_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   deletion_batch_id TEXT NOT NULL,
@@ -1190,14 +1305,13 @@ async function pruneLegacyQuestionBankRecords(db: SQLiteDBConnection) {
     })
   }
   const jobs = await db.query(`
-    SELECT id, profile_id, package_data FROM esq_import_jobs
+    SELECT id, profile_id, json_extract(package_data, '$.manifest') AS manifest_data FROM esq_import_jobs
     WHERE deleted_at IS NULL AND status = 'published'
   `)
   for (const job of jobs.values || []) {
     let manifest: Record<string, unknown> = {}
     try {
-      const parsed = JSON.parse(String(job.package_data || '{}')) as { manifest?: Record<string, unknown> }
-      manifest = parsed.manifest || {}
+      manifest = JSON.parse(String(job.manifest_data || '{}'))
     } catch {
       continue
     }
@@ -1319,7 +1433,7 @@ async function runOrderingFixedSlotsBackfill(db: SQLiteDBConnection) {
   }
 }
 
-export async function androidDatabase(): Promise<SQLiteDBConnection> {
+async function rawAndroidDatabase(): Promise<SQLiteDBConnection> {
   if (!connectionPromise) {
     connectionPromise = (async () => {
       invalidateCatalogues()
@@ -1544,22 +1658,7 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
           false,
         )
       }
-      // A new database connection has no surviving in-process translation worker.
-      const stalledTranslations = await db.query(
-        "SELECT 1 FROM vocabulary_entries WHERE user_edited = 0 AND translation_status = 'translating' LIMIT 1",
-      )
-      if ((stalledTranslations.values || []).length) {
-        await db.run(
-          "UPDATE vocabulary_entries SET translation_status = 'queued', translation_error = '' WHERE user_edited = 0 AND translation_status = 'translating'",
-          [], false,
-        )
-      }
-      const stalledEnrichment = await db.query(
-        "SELECT 1 FROM vocabulary_enrichment_jobs WHERE state = 'inflight' LIMIT 1",
-      )
-      if ((stalledEnrichment.values || []).length) {
-        await db.run("UPDATE vocabulary_enrichment_jobs SET state='queued' WHERE state='inflight'", [], false)
-      }
+      await recoverVocabularyRequests(db)
       await ensureSyncVersions(db)
       // These gates run inside the connection bootstrap, so they cannot call the
       // `isMigrationApplied` export: that awaits the very promise still pending
@@ -1579,6 +1678,30 @@ export async function androidDatabase(): Promise<SQLiteDBConnection> {
     })()
   }
   return connectionPromise
+}
+
+// Only the import transaction uses the raw connection while this barrier is held.
+// Ordinary callers (including background workers and diagnostics) await it.
+let exclusiveBarrier: Promise<void> | undefined
+let databaseFailure: Error | undefined
+const pendingDatabaseCalls = new Set<Promise<unknown>>()
+let guardedConnection: SQLiteDBConnection | undefined
+export async function androidDatabase(): Promise<SQLiteDBConnection> {
+  const db = await rawAndroidDatabase()
+  guardedConnection ||= new Proxy(db, {
+    get(target, property) {
+      const value = Reflect.get(target, property)
+      if (typeof value !== 'function') return value
+      return async (...args: unknown[]) => {
+        while (exclusiveBarrier) await exclusiveBarrier
+        if (databaseFailure) throw databaseFailure
+        const pending = Promise.resolve(value.apply(target, args))
+        pendingDatabaseCalls.add(pending)
+        try { return await pending } finally { pendingDatabaseCalls.delete(pending) }
+      }
+    },
+  })
+  return guardedConnection
 }
 
 export async function rows<T = Record<string, unknown>>(
@@ -1622,11 +1745,48 @@ export async function executeSet(set: { statement: string; values?: unknown[] }[
   )
 }
 
+// exclusive 事务持有屏障期间，经过 androidDatabase() 代理的调用都会等待屏障，
+// 事务回调内部再走全局助手就形成“屏障等提交、提交等调用”的循环等待。
+// 事务回调内必须改用回调收到的原始连接；dbExecutor 让既有代码以最小的改动
+// 在“全局连接”与“事务内原始连接”之间切换。
+export function dbExecutor(db?: SQLiteDBConnection) {
+  if (!db) return { row, rows, run }
+  return {
+    row: <T = Record<string, unknown>>(statement: string, values: unknown[] = []) => rowOn<T>(db, statement, values),
+    rows: <T = Record<string, unknown>>(statement: string, values: unknown[] = []) => rowsOn<T>(db, statement, values),
+    run: (statement: string, values: unknown[] = []) => runOn(db, statement, values),
+  }
+}
+
+export async function rowOn<T = Record<string, unknown>>(db: SQLiteDBConnection, statement: string, values: unknown[] = []): Promise<T | null> {
+  return ((await db.query(statement, values)).values || [])[0] || null
+}
+
+export async function rowsOn<T = Record<string, unknown>>(db: SQLiteDBConnection, statement: string, values: unknown[] = []): Promise<T[]> {
+  return ((await db.query(statement, values)).values || []) as T[]
+}
+
+export async function runOn(db: SQLiteDBConnection, statement: string, values: unknown[] = []): Promise<{ changes: number; lastId?: number }> {
+  // 与全局 run 相同：显式事务由 transaction() 管理，禁用插件的自动事务。
+  const result = await db.run(statement, values, false)
+  return {
+    changes: Number(result.changes?.changes || 0),
+    lastId: result.changes?.lastId,
+  }
+}
+
 const runTransactionSerially = createSerialQueue()
 
-export async function transaction<T>(operation: (db: SQLiteDBConnection) => Promise<T>): Promise<T> {
+export async function transaction<T>(operation: (db: SQLiteDBConnection) => Promise<T>, options: { exclusive?: boolean } = {}): Promise<T> {
   return runTransactionSerially(async () => {
-    const db = await androidDatabase()
+    if (typeof databaseFailure !== 'undefined' && databaseFailure) throw databaseFailure
+    const db = await rawAndroidDatabase()
+    let release: (() => void) | undefined
+    if (options.exclusive) {
+      exclusiveBarrier = new Promise<void>(resolve => { release = resolve })
+      await Promise.allSettled([...pendingDatabaseCalls])
+    }
+    try {
     const active = await db.isTransactionActive()
     if (active.result) {
       throw new Error('检测到未清理的 SQLite 活动事务，已拒绝嵌套写入')
@@ -1645,10 +1805,15 @@ export async function transaction<T>(operation: (db: SQLiteDBConnection) => Prom
     } catch (error) {
       try {
         if (started && (await db.isTransactionActive()).result) await db.rollbackTransaction()
-      } catch {
-        // Preserve the original operation error.
+      } catch (rollbackError) {
+        // Never let waiting writers join a transaction whose rollback failed.
+        // Reopening the app lets SQLite recover its durable journal.
+        databaseFailure = new Error('SQLite 回滚失败，请重新启动应用后重试', { cause: rollbackError })
       }
       throw error
+    }
+    } finally {
+      if (release) { exclusiveBarrier = undefined; release() }
     }
   })
 }

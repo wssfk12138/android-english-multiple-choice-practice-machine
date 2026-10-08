@@ -8,14 +8,14 @@ const assistant = await readFile(new URL('../src/components/AiAssistant.vue', im
 const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
 
 assert.match(practice, /practiceExitTranslation\s*=\s*flushVocabularyTranslations\('practice_exit'\)/)
-assert.match(practice, /onBeforeRouteLeave\(async \(\) => \{\s*await flushVocabularyOnPracticeExit\(\)/s)
+assert.match(practice, /onBeforeRouteLeave\(async \(\) => \{\s*pageLeaving.value = true\s*pausePracticeAutomatically\(\)\s*await flushVocabularyOnPracticeExit\(\)/s)
 assert.match(practice, /onBeforeUnmount\(\(\) => \{[\s\S]*void flushVocabularyOnPracticeExit\(\)/)
 assert.match(vocabulary, /trigger:\s*'vocabulary_open'/)
 // 2026-09-12 performance repair: the translation polling interval moved from
 // 2500 ms to 5000 ms; the polling contract itself is unchanged.
 assert.match(vocabulary, /setInterval\(refreshTranslationStatuses, 5000\)/)
-assert.match(localApi, /trigger === 'practice_exit' \|\| trigger === 'vocabulary_open'/)
-assert.match(localApi, /queueAndStartVocabularyTranslations\(\[id\]\)/)
+assert.match(localApi, /queueAndStartVocabularyTranslations\(ids, trigger\)/)
+assert.match(localApi, /await retryVocabulary\(id\)/)
 assert.match(assistant, /class="ai-history-dismiss-area"/)
 assert.match(styles, /html\[data-platform="android"\] \.ai-history-dismiss-area/)
 

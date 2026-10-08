@@ -6,7 +6,7 @@ import { LocalApiError } from './errors'
 import { fetchQuestionBankCatalogFromSources, fetchUpdateManifest, validateQuestionBankRemoteUrl } from '../updates'
 import { createEsqImportFromNativePackage } from './question-bank'
 import { resolveUpdateSetting } from './update-settings'
-import { officialDownloadSources, withOfficialDownloadFallback } from '../official-download-sources'
+import { OFFICIAL_CATALOG, OFFICIAL_CATALOG_FALLBACKS, officialDownloadSources, withOfficialDownloadFallback } from '../official-download-sources'
 
 type JsonRecord = Record<string, any>
 
@@ -16,12 +16,12 @@ const BUILD_OVERRIDES: Record<string, string> = {
 }
 
 const FALLBACK_DEFAULTS: Record<string, string> = {
-  app_update_manifest_url: 'https://raw.githubusercontent.com/wssfk12138/android-english-multiple-choice-practice-machine/main/android-update.json',
+  // 仓库 main 分支没有该文件（会 404）；正式 Release 的资产才是可读地址。
+  app_update_manifest_url: 'https://github.com/wssfk12138/android-english-multiple-choice-practice-machine/releases/latest/download/android-update.json',
   question_bank_catalog_url: '',
 }
 
-const OFFICIAL_QUESTION_BANK_CATALOG_URL =
-  'https://github.com/wssfk12138/english-multiple-choice-practice-machine/releases/download/question-banks-v1.2.0/question-bank-catalog.json'
+const OFFICIAL_QUESTION_BANK_CATALOG_URL = OFFICIAL_CATALOG
 const OFFICIAL_QUESTION_BANK_MIRRORS = String(
   import.meta.env.VITE_QUESTION_BANK_CATALOG_MIRROR_URLS || '',
 ).split(/[\r\n,]+/).map(item => item.trim()).filter(Boolean)
@@ -34,8 +34,11 @@ async function questionBankCatalog() {
     ? fetchQuestionBankCatalogFromSources([thirdPartyUrl])
     : fetchQuestionBankCatalogFromSources([
       OFFICIAL_QUESTION_BANK_CATALOG_URL,
-      ...OFFICIAL_QUESTION_BANK_MIRRORS,
+      // 代理紧随规范地址：现场实测平板直连 github.com 会 10 秒连接超时，
+      // 把两个 Release 备用入口排到代理后面，避免默认路径白等两轮超时。
       ...officialDownloadSources(OFFICIAL_QUESTION_BANK_CATALOG_URL, true).slice(1),
+      ...OFFICIAL_CATALOG_FALLBACKS,
+      ...OFFICIAL_QUESTION_BANK_MIRRORS,
     ]))
   return { ...catalog, publicProxyFallback: !thirdPartyUrl }
 }

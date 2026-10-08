@@ -12,9 +12,26 @@ document.documentElement.dataset.platform = androidUiPreview ? 'android' : platf
 document.documentElement.classList.toggle('native-app', platformRuntime.isNative)
 
 let startupChanged = false
+let startupRequiresHomeRefresh = false
+
+function waitForFirstScreen(): Promise<void> {
+  return new Promise(resolve => {
+    const schedule = () => window.setTimeout(resolve, 250)
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(schedule))
+    } else {
+      schedule()
+    }
+  })
+}
+
 async function runAndroidStartupPreparation() {
   await platformRuntime.ready()
   if (platformRuntime.isAndroid) {
+    // Let the first route open and issue its minimal reads before one-time
+    // content repair, trash cleanup, or bundled-bank installation competes
+    // for the same SQLite connection and Capacitor bridge.
+    await waitForFirstScreen()
     const { ensureContentRemediation } = await import('./platform/android/content-remediation')
     startupChanged = await ensureContentRemediation()
     const { purgeExpiredTrash } = await import('./platform/android/question-bank-profiles')
@@ -24,11 +41,15 @@ async function runAndroidStartupPreparation() {
       const result = await installBundledQuestionBanks()
       if (Array.isArray(result.results) && result.results.some(item => item.installed === true)) {
         startupChanged = true
+        startupRequiresHomeRefresh = true
       }
     } else if (import.meta.env.VITE_BUNDLED_QUESTION_BANK === '1') {
       const { installBundledQuestionBank } = await import('./platform/android/question-bank')
       const result = await installBundledQuestionBank()
-      if (result.installed === true) startupChanged = true
+      if (result.installed === true) {
+        startupChanged = true
+        startupRequiresHomeRefresh = true
+      }
     }
   }
 }
@@ -49,5 +70,7 @@ void runAndroidStartupPreparation().catch(error => {
   }
 }).finally(() => {
   ;(window as any).__LINJIAN_ANDROID_STARTUP_PREPARED__ = true
-  window.dispatchEvent(new CustomEvent('android-startup-prepared', { detail: { changed: startupChanged } }))
+  window.dispatchEvent(new CustomEvent('android-startup-prepared', {
+    detail: { changed: startupChanged, needsHomeRefresh: startupRequiresHomeRefresh },
+  }))
 })

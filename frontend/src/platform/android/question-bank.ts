@@ -4,13 +4,22 @@ import { esqFormatName, paperExamMetadata, validateEsqManifest } from './esq-for
 import { LocalApiError } from './errors'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
 import { saveImportDraft } from './import-destination'
+import { createSerialQueue } from './serial-queue'
 import { orderingFixedSlotsForPaperUnit, validateOrderingFixedSlots } from './ordering-fixed-slots'
 import { MAX_ESQ_BYTES, MAX_ESQ_ENTRIES, MAX_ESQ_MIB, MAX_SINGLE_JSON_BYTES, MAX_TOTAL_JSON_BYTES, MAX_ZIP_COMPRESSION_RATIO } from '../question-bank-limits.ts'
 import { rebindLearningHistory } from './learning-history-rebind'
 
 type JsonRecord = Record<string, any>
+let esqDraftQueue: ReturnType<typeof createSerialQueue> | undefined
+function serializeEsqDrafts<T>(operation: () => Promise<T>): Promise<T> {
+  esqDraftQueue ||= createSerialQueue()
+  return esqDraftQueue(operation)
+}
 
 type ImportedPackage = {
+  legacyJobId?: number
+  stageId?: string
+  stageVersion?: number
   manifest: JsonRecord
   assets?: Array<{
     assetId: string
@@ -26,6 +35,8 @@ type ImportedPackage = {
     paper: JsonRecord
     answers: JsonRecord
     labels: JsonRecord | null
+    unitCount?: number
+    questionCount?: number
   }>
 }
 
@@ -182,8 +193,8 @@ async function buildPreview(pkg: ImportedPackage, profileId: number): Promise<Js
   let units = 0
   let questions = 0
   for (const item of pkg.papers) {
-    units += item.paper.units.length
-    questions += item.paper.units.reduce(
+    units += item.unitCount ?? item.paper.units.length
+    questions += item.questionCount ?? item.paper.units.reduce(
       (total: number, unit: JsonRecord) => total + (unit.questions?.length || 0),
       0,
     )
@@ -192,11 +203,16 @@ async function buildPreview(pkg: ImportedPackage, profileId: number): Promise<Js
        WHERE profile_id = ? AND external_key = ? AND deleted_at IS NULL LIMIT 1`,
       [profileId, item.paper.paperKey],
     )
+    const activeSessions = existing ? await row<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM practice_sessions WHERE paper_id = ? AND status = 'active'`,
+      [Number(existing.id)],
+    ) : null
     conflicts.push({
       paperKey: item.paper.paperKey,
       year: item.paper.year,
       title: item.paper.title,
       existing: existing || null,
+      active_sessions: Number(activeSessions?.n || 0),
     })
   }
   return {
@@ -208,29 +224,27 @@ async function buildPreview(pkg: ImportedPackage, profileId: number): Promise<Js
   }
 }
 
-function bytesToBase64(data: Uint8Array): string {
-  let binary = ''
-  const chunk = 0x8000
-  for (let index = 0; index < data.length; index += chunk) {
-    binary += String.fromCharCode(...data.subarray(index, index + chunk))
-  }
-  return btoa(binary)
-}
-
 async function createParsedEsqImport(
   filename: string,
   pkg: ImportedPackage,
-  rawData: Uint8Array | null,
+  _rawData: Uint8Array | null,
   profileId: number,
   newProfileName?: string,
 ): Promise<JsonRecord> {
   const preview = await buildPreview(pkg, profileId)
-  return saveImportDraft(profileId || undefined, newProfileName, async (db, targetId) => {
+  const saved = await saveImportDraft(profileId || undefined, newProfileName, async (db, targetId) => {
+    if (pkg.stageId) {
+      const existing = await db.query(
+        "SELECT id FROM esq_import_jobs WHERE profile_id = ? AND json_extract(package_data, '$.stageId') = ? AND deleted_at IS NULL AND status = 'draft' LIMIT 1",
+        [targetId, pkg.stageId],
+      )
+      if (existing.values?.length) return { id: Number(existing.values[0].id), profile_id: targetId, filename, format: esqFormatName(pkg.manifest), preview, warnings: [] }
+    }
     const created = await db.run(
       `INSERT INTO esq_import_jobs
         (profile_id, filename, package_data, raw_file_base64, preview_data, status)
        VALUES (?, ?, ?, ?, ?, 'draft')`,
-      [targetId, filename, JSON.stringify(pkg), rawData ? bytesToBase64(rawData) : '', JSON.stringify(preview)], false,
+      [targetId, filename, JSON.stringify(pkg), '', JSON.stringify(preview)], false,
     )
     return {
       id: Number(created.changes?.lastId),
@@ -241,17 +255,22 @@ async function createParsedEsqImport(
       warnings: [],
     }
   })
+  if (pkg.stageId) {
+    const { nativeEsqStage } = await import('./esq-stage')
+    // A failed receipt acknowledgement must not misreport a committed draft as lost.
+    await nativeEsqStage.acknowledge({ stageId: pkg.stageId }).catch(() => {})
+  }
+  return saved
 }
 
 export async function createEsqImport(file: File, profileId?: number, newProfileName?: string): Promise<JsonRecord> {
-  const data = new Uint8Array(await file.arrayBuffer())
-  return createParsedEsqImport(
-    file.name,
-    await parseEsqBytes(data),
-    data,
-    profileId || (newProfileName !== undefined ? 0 : await activeQuestionBankProfileId()),
-    newProfileName,
-  )
+  return serializeEsqDrafts(async () => {
+  if (file.size < 1 || file.size > MAX_ESQ_BYTES) throw new LocalApiError(422, `ESQ 文件不能超过 ${MAX_ESQ_MIB} MiB`)
+  const { nativeEsqStage } = await import('./esq-stage')
+  const targetId = profileId || (newProfileName !== undefined ? undefined : await activeQuestionBankProfileId())
+  const staged = await nativeEsqStage.stageSelected({ name: file.name, size: file.size, profileId: targetId, newProfileName })
+  return saveNativeEsqPackage(file.name, staged, targetId, newProfileName)
+  })
 }
 
 export async function createEsqImportFromBytes(
@@ -268,23 +287,34 @@ export async function createEsqImportFromBytes(
 }
 
 export async function createEsqImportFromNativePackage(
+  filename: string, value: JsonRecord, profileId?: number, newProfileName?: string,
+): Promise<JsonRecord> {
+  return serializeEsqDrafts(() => saveNativeEsqPackage(filename, value, profileId, newProfileName))
+}
+
+async function saveNativeEsqPackage(
   filename: string,
   value: JsonRecord,
   profileId?: number,
   newProfileName?: string,
 ): Promise<JsonRecord> {
   const pkg = value as ImportedPackage
+  if (pkg.stageId && (!/^[a-f0-9]{64}$/.test(pkg.stageId) || pkg.stageVersion !== 1)) throw new LocalApiError(422, '暂存任务版本无效')
   validateManifest(pkg.manifest)
   if (!Array.isArray(pkg.papers) || !Array.isArray(pkg.assets)) {
     throw new LocalApiError(422, '原生题库数据缺少试卷或资产清单')
   }
   for (const item of pkg.papers) {
-    if (!item?.descriptor?.paperKey || !item?.paper || !item?.answers) {
+    if (!item?.descriptor?.paperKey || !item?.paper || (!pkg.stageId && !item?.answers)) {
       throw new LocalApiError(422, '原生题库数据包含无效试卷')
     }
     if (item.paper.paperKey !== item.descriptor.paperKey
-      || item.answers.paperKey !== item.descriptor.paperKey) {
+      || (!pkg.stageId && item.answers.paperKey !== item.descriptor.paperKey)) {
       throw new LocalApiError(422, `${item.descriptor.paperKey} 的正文与答案标识不一致`)
+    }
+    if (!Number.isInteger(item.paper.year) || (pkg.stageId &&
+      (![item.unitCount, item.questionCount].every(value => Number.isSafeInteger(value) && Number(value) >= 0)))) {
+      throw new LocalApiError(422, '原生题库年份或计数无效')
     }
     try {
       paperExamMetadata(item.descriptor, item.paper)
@@ -373,24 +403,126 @@ export async function installBundledQuestionBanks(): Promise<JsonRecord> {
   return { available: results.some(item => item.available), results }
 }
 
+let recoverPendingPromise: Promise<void> | undefined
+// 暂存解析是在原生侧把整包读进内存：四六级包 429/845 MiB，很容易把应用内存吃穿。
+// 因此只自动重试"小包、且没失败过"的任务；失败过的任务 ready.json 永远写不成，
+// 每次打开导入页都自动重试就会变成"一进导入页就闪退"的循环。
+const AUTO_RESUME_STAGE_BYTES = 32 * 1024 * 1024
+const STALE_STAGE_TASK_MS = 7 * 24 * 60 * 60 * 1000
+
+async function stagedTaskDraftId(task: JsonRecord): Promise<number> {
+  const existing = await row<JsonRecord>(
+    `SELECT j.id FROM esq_import_jobs j JOIN question_bank_profiles p ON p.id = j.profile_id
+     WHERE json_extract(j.package_data, '$.stageId') = ?
+       AND ((? IS NOT NULL AND j.profile_id = ?) OR (? IS NOT NULL AND p.name = ? COLLATE NOCASE)) LIMIT 1`,
+    [task.stageId, task.profileId ?? null, task.profileId ?? null, task.newProfileName ?? null, task.newProfileName ?? null],
+  )
+  return Number(existing?.id || 0)
+}
+
+/**
+ * 整理原生暂存区，返回"还没有对应草稿"的任务。
+ * 只做登记与清理，不解析任何压缩包，因此可以在启动阶段安全调用。
+ */
+async function sweepStagedEsqTasks(): Promise<JsonRecord[]> {
+  const { nativeEsqStage } = await import('./esq-stage')
+  const { tasks } = await nativeEsqStage.pending()
+  const unresolved: JsonRecord[] = []
+  const now = Date.now()
+  for (const task of tasks) {
+    if (await stagedTaskDraftId(task)) {
+      try { await nativeEsqStage.acknowledge({ stageId: task.stageId }) } catch { /* 记录清理失败不影响主流程 */ }
+      continue
+    }
+    const stagedAt = Number(task.stagedAt || 0)
+    const abandoned = stagedAt > 0 && now - stagedAt > STALE_STAGE_TASK_MS
+    const destinationGone = Boolean(task.profileId)
+      && !await row('SELECT id FROM question_bank_profiles WHERE id = ? AND deleted_at IS NULL', [task.profileId])
+    // 失败的任务既占着几百 MiB 的副本、又永远解析不成，过期后清掉；目标配置已删除的同样无法落地。
+    if (abandoned && (task.phase === 'failed' || destinationGone)) {
+      try { await nativeEsqStage.discard({ stageId: task.stageId }) } catch { /* 清理失败下次启动再试 */ }
+      continue
+    }
+    unresolved.push(task)
+  }
+  return unresolved
+}
+
+async function recoverPendingImports(): Promise<void> {
+  const { nativeEsqStage } = await import('./esq-stage')
+  for (const task of await sweepStagedEsqTasks()) {
+    // 已解析过、解析失败过、或体积过大的任务都交给导入页的显式入口处理。
+    if (task.ready || task.phase === 'failed') continue
+    if (Number(task.archiveBytes || 0) > AUTO_RESUME_STAGE_BYTES) continue
+    // Keep the original destination; a deleted destination is not silently replaced.
+    if (task.profileId && !await row('SELECT id FROM question_bank_profiles WHERE id = ? AND deleted_at IS NULL', [task.profileId])) continue
+    try {
+      const summary = await nativeEsqStage.resume({ stageId: task.stageId })
+      await saveNativeEsqPackage(task.filename, summary, task.profileId, task.newProfileName)
+    } catch { /* 保留任务，交给导入页的“继续解析 / 删除”入口 */ }
+  }
+}
+
+/** 未完成的暂存任务（还没有草稿行）；只读，不解析压缩包。 */
+export async function listStagedEsqTasks(): Promise<JsonRecord[]> {
+  return (await sweepStagedEsqTasks()).map(task => ({
+    stage_id: String(task.stageId || ''),
+    filename: String(task.filename || ''),
+    profile_id: task.profileId ?? null,
+    new_profile_name: task.newProfileName ?? null,
+    phase: String(task.phase || 'unknown'),
+    ready: Boolean(task.ready),
+    archive_bytes: Number(task.archiveBytes || 0),
+    staged_at: Number(task.stagedAt || 0),
+  }))
+}
+
+/** 显式继续解析一个暂存任务（大包只允许走这条路，避免自动重试造成崩溃循环）。 */
+export async function resumeStagedEsqTask(stageId: string): Promise<JsonRecord> {
+  const id = String(stageId || '').trim()
+  if (!/^[a-f0-9]{64}$/.test(id)) throw new LocalApiError(400, '暂存任务标识无效')
+  const task = (await sweepStagedEsqTasks()).find(item => String(item.stageId) === id)
+  if (!task) throw new LocalApiError(404, '该暂存任务已不存在，请刷新后重试')
+  const { nativeEsqStage } = await import('./esq-stage')
+  const summary = await nativeEsqStage.resume({ stageId: id })
+  const created = await saveNativeEsqPackage(String(task.filename || ''), summary, task.profileId, task.newProfileName)
+  recoverPendingPromise = undefined
+  return created
+}
+
+/** 删除一个暂存任务（含保留的源包）。 */
+export async function discardStagedEsqTask(stageId: string): Promise<JsonRecord> {
+  const id = String(stageId || '').trim()
+  if (!/^[a-f0-9]{64}$/.test(id)) throw new LocalApiError(400, '暂存任务标识无效')
+  const { nativeEsqStage } = await import('./esq-stage')
+  await nativeEsqStage.discard({ stageId: id })
+  recoverPendingPromise = undefined
+  return { discarded: true }
+}
+
 export async function listEsqImports(): Promise<JsonRecord[]> {
+  recoverPendingPromise ||= serializeEsqDrafts(recoverPendingImports).catch(() => { recoverPendingPromise = undefined })
+  await recoverPendingPromise
   const profileId = await activeQuestionBankProfileId()
   const jobs = await rows<JsonRecord>(
-    `SELECT id, profile_id, filename, package_data, status, created_at, updated_at
+    `SELECT id, profile_id, filename,
+       json_extract(package_data, '$.manifest') AS manifest_data,
+       json_extract(package_data, '$.papers[0].paper.year') AS detected_year,
+       status, created_at, updated_at
      FROM esq_import_jobs
      WHERE profile_id = ? AND deleted_at IS NULL
      ORDER BY id DESC`,
     [profileId],
   )
   return jobs.map(job => {
-    const pkg = JSON.parse(job.package_data || '{}') as ImportedPackage
+    const manifest = JSON.parse(job.manifest_data || '{}')
     return {
       id: job.id,
       profile_id: job.profile_id,
       filename: job.filename,
-      display_name: pkg.manifest?.title || job.filename,
-      detected_year: pkg.papers?.[0]?.paper?.year ?? null,
-      detected_format: esqFormatName(pkg.manifest),
+      display_name: manifest.title || job.filename,
+      detected_year: job.detected_year ?? null,
+      detected_format: esqFormatName(manifest),
       status: job.status,
       warnings: [],
       created_at: job.created_at,
@@ -401,22 +533,25 @@ export async function listEsqImports(): Promise<JsonRecord[]> {
 
 export async function readEsqImport(id: number): Promise<JsonRecord> {
   const job = await row<JsonRecord>(
-    'SELECT * FROM esq_import_jobs WHERE id = ? AND deleted_at IS NULL',
+    `SELECT id, profile_id, filename, status, preview_data,
+       json_extract(package_data, '$.manifest') AS manifest_data,
+       json_extract(package_data, '$.papers[0].paper.year') AS detected_year
+     FROM esq_import_jobs WHERE id = ? AND deleted_at IS NULL`,
     [id],
   )
   if (!job) throw new LocalApiError(404, '题库导入记录不存在')
-  const pkg = JSON.parse(job.package_data || '{}') as ImportedPackage
+  const manifest = JSON.parse(job.manifest_data || '{}')
   const preview = JSON.parse(job.preview_data || '{}') as JsonRecord
   await refreshPreviewConflicts(preview, job.profile_id)
   return {
     id: job.id,
     profile_id: job.profile_id,
     filename: job.filename,
-    detected_year: pkg.papers?.[0]?.paper?.year ?? null,
-    detected_format: esqFormatName(pkg.manifest),
+    detected_year: job.detected_year ?? null,
+    detected_format: esqFormatName(manifest),
     status: job.status,
     warnings: [],
-    draft_data: { manifest: pkg.manifest },
+    draft_data: { manifest },
     preview,
   }
 }
@@ -433,10 +568,82 @@ async function refreshPreviewConflicts(preview: JsonRecord, profileId: unknown):
     [Number(profileId), ...keys],
   )
   const existingByKey = new Map(existingRows.map(item => [item.external_key, item]))
+  const countsByPaper = new Map<number, number>()
+  if (existingRows.length) {
+    const paperIds = existingRows.map(item => Number(item.id))
+    const counts = await rows<{ paper_id: number; n: number }>(
+      `SELECT paper_id, COUNT(*) AS n FROM practice_sessions
+       WHERE status = 'active' AND paper_id IN (${paperIds.map(() => '?').join(',')}) GROUP BY paper_id`,
+      paperIds,
+    )
+    for (const item of counts) countsByPaper.set(Number(item.paper_id), Number(item.n))
+  }
   for (const conflict of conflicts) {
     const found = existingByKey.get(String(conflict.paperKey || ''))
     conflict.existing = found ? { id: found.id, year: found.year, title: found.title } : null
+    conflict.active_sessions = found ? (countsByPaper.get(Number(found.id)) || 0) : 0
   }
+}
+
+// Older drafts stay in SQLite: project one bounded record at a time over the bridge.
+async function legacyPackageSummary(id: number, job: JsonRecord): Promise<ImportedPackage> {
+  const pkg: ImportedPackage = { legacyJobId: id, manifest: JSON.parse(job.manifest_data), assets: JSON.parse(job.assets_data || '[]'), papers: [] }
+  validateManifest(pkg.manifest)
+  for (let p = 0; p < Number(job.paper_count); p++) {
+    const path = `$.papers[${p}]`
+    const record = await row<JsonRecord>(
+      `SELECT json_extract(package_data, ?) AS descriptor,
+         json_remove(json_extract(package_data, ?), '$.units') AS paper,
+         json_array_length(package_data, ?) AS unit_count
+       FROM esq_import_jobs WHERE id = ?`,
+      [`${path}.descriptor`, `${path}.paper`, `${path}.paper.units`, id],
+    )
+    const count = await row<JsonRecord>(
+      `SELECT COALESCE(SUM(json_array_length(value, '$.questions')), 0) AS count
+       FROM esq_import_jobs, json_each(package_data, ?) WHERE esq_import_jobs.id = ?`,
+      [`${path}.paper.units`, id],
+    )
+    pkg.papers.push({ descriptor: JSON.parse(record!.descriptor), paper: JSON.parse(record!.paper),
+      unitCount: Number(record!.unit_count), questionCount: Number(count!.count), answers: {}, labels: null })
+  }
+  return pkg
+}
+
+async function readLegacyRecord(
+  db: Awaited<ReturnType<typeof androidDatabase>>, id: number,
+  location: { paper: number; unit: number; question?: number },
+): Promise<JsonRecord> {
+  const paperPath = `$.papers[${location.paper}]`
+  const unitPath = `${paperPath}.paper.units[${location.unit}]`
+  const result = await db.query(
+    `SELECT ${location.question === undefined ? "json_remove(json_extract(package_data, ?), '$.questions')" : 'json_extract(package_data, ?)'} AS data
+     FROM esq_import_jobs WHERE id = ?`,
+    [location.question === undefined ? unitPath : `${unitPath}.questions[${location.question}]`, id],
+  )
+  const value = JSON.parse(result.values![0].data)
+  if (location.question === undefined) {
+    const questions = await db.query(
+      `SELECT json_extract(value, '$.questionKey') AS questionKey, json_extract(value, '$.number') AS number
+       FROM esq_import_jobs, json_each(package_data, ?) WHERE esq_import_jobs.id = ?`,
+      [`${unitPath}.questions`, id],
+    )
+    value.questions = questions.values || []
+    const audio = await db.query(
+      `SELECT DISTINCT json_extract(block.value, '$.assetId') AS assetId
+       FROM esq_import_jobs AS job, json_tree(job.package_data, ?) AS block
+       WHERE job.id = ? AND block.type = 'object'
+         AND json_extract(block.value, '$.type') = 'audio'`,
+      [`${unitPath}.questions`, id],
+    )
+    value.questionAudioBlocks = (audio.values || []).map(block => ({ type: 'audio', assetId: block.assetId }))
+    return value
+  }
+  const key = JSON.stringify(value.questionKey)
+  const related = await db.query(
+    'SELECT json_extract(package_data, ?) AS answer, json_extract(package_data, ?) AS label FROM esq_import_jobs WHERE id = ?',
+    [`${paperPath}.answers.answers.${key}`, `${paperPath}.labels.labels.${key}`, id],
+  )
+  return { question: value, answer: JSON.parse(related.values![0].answer || 'null'), label: JSON.parse(related.values![0].label || 'null') }
 }
 
 async function upsertPaper(
@@ -445,9 +652,9 @@ async function upsertPaper(
   item: ImportedPackage['papers'][number],
   profileId: number,
   existingPaperId = 0,
+  stagedPaperIndex = -1,
 ): Promise<number> {
   const paper = item.paper
-  for (const unit of paper.units) validateOrderingFixedSlots(unit)
   const manifest = pkg.manifest
   const exam = paperExamMetadata(item.descriptor, paper)
   let paperId = existingPaperId
@@ -497,10 +704,17 @@ async function upsertPaper(
   }
   const {loadBundledContentManifest} = await import('./content-remediation')
   const contentManifest = await loadBundledContentManifest()
-  const answers = item.answers.answers || {}
+  const answers = item.answers?.answers || {}
   const assets = new Map((pkg.assets || []).map(asset => [asset.assetId, asset]))
-  for (let unitIndex = 0; unitIndex < paper.units.length; unitIndex++) {
-    const unit = paper.units[unitIndex]
+  const staged = pkg.stageId ? (await import('./esq-stage')).nativeEsqStage
+    : pkg.legacyJobId ? { read: (location: { paper: number; unit: number; question?: number }) => readLegacyRecord(db, pkg.legacyJobId!, location) } : null
+  for (let unitIndex = 0; unitIndex < (item.unitCount ?? paper.units.length); unitIndex++) {
+    const unit = staged
+      ? await staged.read({ stageId: pkg.stageId!, paper: stagedPaperIndex, unit: unitIndex })
+      : paper.units[unitIndex]
+    validateOrderingFixedSlots(unit)
+    const { validateRemediatedImport } = await import('./content-remediation')
+    await validateRemediatedImport({ ...paper, units: [unit] }, answers, Boolean(staged))
     const blocks = unit.passage?.blocks || []
     const fixedSlots = orderingFixedSlotsForPaperUnit(paper, unit)
     const existingUnit = await db.query(
@@ -512,6 +726,7 @@ async function upsertPaper(
     let unitId = Number(existingUnit.values?.[0]?.id || 0)
     const contentBlocks = [
       ...blocks,
+      ...(unit.questionAudioBlocks || []),
       ...(unit.questions || []).flatMap((question: JsonRecord) => [
         ...(question.stemBlocks || []),
         ...(question.options || []).flatMap((option: JsonRecord) => option.contentBlocks || []),
@@ -579,13 +794,16 @@ async function upsertPaper(
       unitId = Number(insertedUnit.changes?.lastId)
     }
     for (let questionIndex = 0; questionIndex < (unit.questions || []).length; questionIndex++) {
-      const question = unit.questions[questionIndex]
-      const answer = answers[question.questionKey]
+      const record = staged ? await staged.read({ stageId: pkg.stageId!, paper: stagedPaperIndex, unit: unitIndex, question: questionIndex }) : null
+      const question = record ? record.question : unit.questions[questionIndex]
+      const answer = record ? record.answer : answers[question.questionKey]
       if (!answer?.correctOption) {
         throw new LocalApiError(422, `${paper.year} 年第 ${question.number} 题缺少标准答案`)
       }
       const stemBlocks = question.stemBlocks || []
       const contentHash = await questionContentHash(unit, question, answer)
+      const reviewed = contentManifest?.units.find(change => change.unitKey === unit.unitKey)
+      if (reviewed && reviewed.questionHashes[question.questionKey] !== contentHash) throw new LocalApiError(422, '此题库包含已修正的旧题目，请使用新版题库包；现有学习记录未修改')
       const existingQuestion = await db.query(
         `SELECT id, content_hash FROM questions
          WHERE unit_id = ? AND (external_key = ? OR number = ?)
@@ -668,7 +886,7 @@ async function upsertPaper(
           false,
         )
       }
-      const label = item.labels?.labels?.[question.questionKey]
+      const label = record ? record.label : item.labels?.labels?.[question.questionKey]
       if (label?.questionContentHash === contentHash) {
         await db.run(
           `INSERT OR REPLACE INTO question_ai_labels
@@ -701,23 +919,34 @@ export async function publishEsqImport(
   body: { resolutions?: Array<{ paper_key: string; action: string }> },
 ): Promise<JsonRecord> {
   const job = await row<JsonRecord>(
-    'SELECT * FROM esq_import_jobs WHERE id = ? AND deleted_at IS NULL',
+    `SELECT id, profile_id, status,
+       json_extract(package_data, '$.stageId') AS stage_id,
+       json_extract(package_data, '$.manifest') AS manifest_data,
+       json_extract(package_data, '$.assets') AS assets_data,
+       json_array_length(package_data, '$.papers') AS paper_count
+     FROM esq_import_jobs WHERE id = ? AND deleted_at IS NULL`,
     [id],
   )
   if (!job) throw new LocalApiError(404, '题库导入记录不存在')
-  const pkg = JSON.parse(job.package_data || '{}') as ImportedPackage
-  const { ensureContentRemediation, validateRemediatedImport } = await import('./content-remediation')
+  const pkg = job.stage_id
+    ? await (await import('./esq-stage')).nativeEsqStage.resume({ stageId: job.stage_id }) as ImportedPackage
+    : await legacyPackageSummary(id, job)
+  const { ensureContentRemediation } = await import('./content-remediation')
   await ensureContentRemediation()
-  for (const item of pkg.papers) await validateRemediatedImport(item.paper, item.answers.answers || {})
   const profileId = Number(job.profile_id)
   const resolutions = new Map(
     (body.resolutions || []).map(item => [item.paper_key, item.action]),
   )
   const publishedPaperIds: number[] = []
+  const preview = await buildPreview(pkg, profileId)
   await transaction(async db => {
-    for (const item of pkg.papers) {
+    const current = await db.query('SELECT status FROM esq_import_jobs WHERE id = ? AND deleted_at IS NULL', [id])
+    if (!current.values?.length) throw new LocalApiError(404, '题库导入记录不存在')
+    if (current.values[0].status === 'published') throw new LocalApiError(409, '此题库已完成入库')
+    for (let paperIndex = 0; paperIndex < pkg.papers.length; paperIndex++) {
+      const item = pkg.papers[paperIndex]
       const matches = await db.query(
-        `SELECT id, deleted_at FROM papers
+        `SELECT id, deleted_at, content_version FROM papers
          WHERE profile_id = ? AND external_key = ?
          ORDER BY deleted_at IS NULL DESC, id`,
         [profileId, item.paper.paperKey],
@@ -730,7 +959,8 @@ export async function publishEsqImport(
       if (!activeMatches.length && deletedMatches.length > 1) {
         throw new LocalApiError(409, `${item.paper.year} 年题库存在多个已删除版本，无法确定应复用哪一个`)
       }
-      const existingId = Number(activeMatches[0]?.id || deletedMatches[0]?.id || 0)
+      const existingRow = activeMatches[0] || deletedMatches[0]
+      const existingId = Number(existingRow?.id || 0)
       const reusingDeleted = !activeMatches.length && deletedMatches.length === 1
       if (existingId) {
         if (!reusingDeleted) {
@@ -742,8 +972,16 @@ export async function publishEsqImport(
           }
           if (action !== 'replace_with_imported') throw new LocalApiError(422, '未知的题库冲突处理方式')
         }
+        // Replacing rewrites question rows in place: active sessions must keep
+        // their pre-replace scoring material before the first row changes.
+        // db 是独占事务的原始连接；快照捕获必须走它，全局助手会等待本事务的屏障。
+        if (String(existingRow?.content_version || '') !== String(pkg.manifest.contentVersion || '')) {
+          const { capturePaperSessionSnapshots } = await import('./practice-snapshots')
+          await capturePaperSessionSnapshots(
+            db, existingId, String(pkg.manifest.contentRevision || pkg.manifest.contentVersion || ''))
+        }
       }
-      publishedPaperIds.push(await upsertPaper(db, pkg, item, profileId, existingId))
+      publishedPaperIds.push(await upsertPaper(db, pkg, item, profileId, existingId, paperIndex))
       if (reusingDeleted) {
         await db.run(
           `UPDATE trash_entries SET restored_at = CURRENT_TIMESTAMP
@@ -769,14 +1007,13 @@ export async function publishEsqImport(
       ],
       false,
     )
-  })
-  const preview = await buildPreview(pkg, profileId)
-  await run(
+    await db.run(
     `UPDATE esq_import_jobs
      SET status = 'published', preview_data = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
-    [JSON.stringify(preview), id],
-  )
+      [JSON.stringify(preview), id], false,
+    )
+  }, { exclusive: true })
   return {
     published: true,
     packageId: pkg.manifest.packageId,

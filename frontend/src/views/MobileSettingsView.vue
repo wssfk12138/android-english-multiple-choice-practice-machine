@@ -13,13 +13,22 @@ import {
   Settings2,
   Trash2,
 } from 'lucide-vue-next'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { useAndroidLandscape } from '../composables/useAndroidLandscape'
+import { useThemeState } from '../composables/useThemeState'
 import '../settings-hub.css'
 import {
   VOCAB_DISPLAY_OPTIONS,
   loadVocabDisplayConfig,
 } from '../services/vocabularyDisplayConfig'
 
+const landscape = useAndroidLandscape()
+const dark = useThemeState()
+function toggleTheme() {
+  dark.value = !document.documentElement.classList.contains('dark')
+  document.documentElement.classList.toggle('dark', dark.value)
+  localStorage.setItem('linjian-theme', dark.value ? 'dark' : 'light')
+}
 // 每个设置入口对应独立页面。
 const groups = [
   {
@@ -57,10 +66,11 @@ const vocabDisplaySummary = computed(() => '已开启 ' + VOCAB_DISPLAY_OPTIONS.
     <section class="settings-hub-group" aria-labelledby="hub-appearance-title">
       <h2 id="hub-appearance-title" class="settings-hub-group-title">外观与显示</h2>
       <div class="settings-hub-rows">
-        <RouterLink class="settings-hub-row link" to="/android-appearance"><span class="settings-hub-row-icon"><Moon :size="19" /></span><span><strong>外观与显示</strong><small>浅色或深色主题</small></span><b class="settings-hub-chevron">›</b></RouterLink>
+        <div v-if="landscape" class="settings-hub-row"><span class="settings-hub-row-icon"><Moon :size="19" /></span><strong>深色模式</strong><button class="settings-theme-switch" type="button" role="switch" :aria-checked="dark" aria-label="深色模式" @click="toggleTheme"><span /></button></div>
+        <RouterLink v-else class="settings-hub-row link" to="/android-appearance"><span class="settings-hub-row-icon"><Moon :size="19" /></span><span><strong>外观与显示</strong><small>浅色或深色主题</small></span><b class="settings-hub-chevron">›</b></RouterLink>
         <RouterLink class="settings-hub-row link" to="/android-vocabulary-display">
             <span class="settings-hub-row-icon"><Eye :size="19" /></span>
-            <span class="settings-hub-row-copy"><strong>单词显示</strong><small>{{ vocabDisplaySummary }}</small></span>
+            <span class="settings-hub-row-copy"><strong>{{ landscape ? '单词本设置' : '单词显示' }}</strong><small>{{ vocabDisplaySummary }}</small></span>
             <b class="settings-hub-chevron" aria-hidden="true">›</b>
         </RouterLink>
       </div>

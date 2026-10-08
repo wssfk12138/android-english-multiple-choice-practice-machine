@@ -51,6 +51,7 @@ const error = ref('')
 const notice = ref('')
 const expandedUnits = ref<Record<number, boolean>>({})
 const esqJobs = ref<any[]>([])
+const stagedEsqTasks = ref<any[]>([])
 const esqCurrent = ref<any>(null)
 const selectedEsqFile = ref<File | null>(null)
 const esqResolutions = ref<Record<string, 'keep_existing' | 'replace_with_imported'>>({})
@@ -89,6 +90,57 @@ const answerProgress = computed(() => ({
 
 async function loadJobs() { jobs.value = await get('/imports') }
 async function loadEsqJobs() { esqJobs.value = await get('/question-banks/imports') }
+
+function stagedTaskSize(bytes: number) {
+  const value = Number(bytes || 0)
+  if (value >= 1024 * 1024 * 1024) return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GiB'
+  if (value >= 1024 * 1024) return Math.round(value / (1024 * 1024)) + ' MiB'
+  return Math.max(1, Math.round(value / 1024)) + ' KiB'
+}
+function stagedTaskPhase(task: any) {
+  if (task.phase === 'failed') return '上次解析失败，未自动重试'
+  if (task.ready) return '已解析完成，可继续建立草稿'
+  return '解析未完成'
+}
+async function loadStagedEsqTasks() {
+  try {
+    const tasks = await get<any[]>('/question-banks/imports/staged')
+    stagedEsqTasks.value = Array.isArray(tasks) ? tasks : []
+  } catch { stagedEsqTasks.value = [] }
+}
+async function resumeStagedTask(task: any) {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    await post('/question-banks/imports/staged/resume', { stage_id: task.stage_id })
+    notice.value = '已继续解析该题库包，请在下方预览中确认发布'
+    await Promise.all([loadEsqJobs(), loadStagedEsqTasks()])
+  } catch (cause) { error.value = String(cause) }
+  finally { busy.value = false }
+}
+async function discardStagedTask(task: any) {
+  if (busy.value) return
+  const confirmed = await confirmDialog({
+    title: `删除未完成的暂存任务“${task.filename || ''}”？`,
+    message: [
+      `将删除该题库包在本机的暂存副本（${stagedTaskSize(task.archive_bytes)}）。`,
+      '已经导入的题库、单词本和做题记录都不受影响。',
+    ],
+    confirmLabel: '删除暂存副本',
+    danger: true,
+  })
+  if (!confirmed) return
+  busy.value = true
+  error.value = ''
+  try {
+    await post('/question-banks/imports/staged/discard', { stage_id: task.stage_id })
+    notice.value = '已删除该暂存副本'
+    await loadStagedEsqTasks()
+  } catch (cause) { error.value = String(cause) }
+  finally { busy.value = false }
+}
 function importStatusText(status: string) {
   return ({ draft: '草稿', published: '已发布', trashed: '已移入回收站' } as Record<string, string>)[status] || status
 }
@@ -98,6 +150,7 @@ onMounted(async () => {
     await loadQuestionBankProfiles()
     targetProfileId.value = questionBankProfilesState.activeId
     await Promise.all([loadJobs(), loadEsqJobs()])
+    await loadStagedEsqTasks()
     const remoteId = Number(route.query.esqImportId || 0)
     if (remoteId) await openEsqJob(remoteId)
   } catch (cause) { error.value = String(cause) }
@@ -480,6 +533,19 @@ async function removeImportJob(job: any, esq = false) {
         <div class="source-heading"><FileArchive :size="22" /><div><h2>ESQ 分享题库</h2></div></div>
         <label class="field"><span>ESQ 文件</span><input type="file" accept=".esq" @change="selectedEsqFile=($event.target as HTMLInputElement).files?.[0]||null"></label>
         <button class="button secondary" type="button" :disabled="busy || !selectedEsqFile" @click="uploadEsq"><FileArchive :size="17" />校验题库包</button>
+          <div v-if="stagedEsqTasks.length" style="display:grid;gap:8px;margin-top:10px">
+            <p style="margin:0;font-size:13px;color:var(--muted)">有 {{ stagedEsqTasks.length }} 个未完成的题库暂存任务：大题库包不会自动解析，避免占满内存导致闪退。</p>
+            <div v-for="task in stagedEsqTasks" :key="task.stage_id" style="display:flex;gap:8px;align-items:center;justify-content:space-between">
+              <span style="display:grid;gap:2px;min-width:0">
+                <b style="overflow-wrap:anywhere">{{ task.filename }}</b>
+                <small>{{ stagedTaskSize(task.archive_bytes) }} · {{ stagedTaskPhase(task) }}</small>
+              </span>
+              <span style="display:flex;gap:6px;flex:none">
+                <button class="button secondary compact" type="button" :disabled="busy" @click="resumeStagedTask(task)">继续解析</button>
+                <button class="button ghost danger compact" type="button" :disabled="busy" @click="discardStagedTask(task)"><Trash2 :size="14" />删除</button>
+              </span>
+            </div>
+          </div>
         <div class="history-mini">
           <div v-for="job in esqJobs.slice(0,4)" :key="job.id" style="display:flex;gap:6px">
             <button type="button" style="flex:1" @click="openEsqJob(job.id)">
@@ -496,6 +562,7 @@ async function removeImportJob(job: any, esq = false) {
       <div class="review-head"><div><span class="pill">ESQ 1.0</span><h2>{{ esqCurrent.preview.title }}</h2><p>{{ esqCurrent.preview.totals.questions }} 道题 · {{ esqCurrent.preview.totals.units }} 篇</p></div><div class="review-actions"><button class="button" :disabled="busy" @click="publishEsq"><FileCheck2 :size="17" />发布题库包</button><button class="button secondary" type="button" :disabled="busy" @click="closeEsqPreview"><X :size="17" />关闭预览</button></div></div>
       <div v-for="conflict in esqCurrent.preview.conflicts.filter((item:any)=>item.existing)" :key="conflict.paperKey" class="conflict-row">
         <b>{{ conflict.year }} 年已存在</b>
+        <span v-if="conflict.active_sessions" class="pill">该卷有 {{ conflict.active_sessions }} 条未完成练习，替换后可继续（按原内容评分）或重开</span>
         <label><input v-model="esqResolutions[conflict.paperKey]" type="radio" value="keep_existing">保留现有</label>
         <label><input v-model="esqResolutions[conflict.paperKey]" type="radio" value="replace_with_imported">使用导入版替换</label>
       </div>

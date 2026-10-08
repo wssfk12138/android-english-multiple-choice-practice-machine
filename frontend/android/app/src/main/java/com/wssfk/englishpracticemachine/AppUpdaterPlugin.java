@@ -52,15 +52,10 @@ public class AppUpdaterPlugin extends Plugin {
                 String sha = call.getString("sha256", "");
                 LanTlsTrust trust = new LanTlsTrust(tls.optString("hostId"), tls.optString("certificatePem"), tls.optString("certificatePin"));
                 LanQuestionBankDownload.download(call.getString("url", ""), trust, call.getString("token", ""), sha, size, temporary);
-                EsqArchive.Extraction extracted = EsqArchive.extract(temporary, getContext().getFilesDir(), sha);
-                String cleanupToken = "";
-                if (extracted.createdDirectory != null) {
-                    cleanupToken = UUID.randomUUID().toString();
-                    pendingQuestionBankAssets.put(cleanupToken, extracted.createdDirectory);
-                }
+                org.json.JSONObject staged = EsqStage.stage(temporary, getContext().getFilesDir());
                 JSObject result = new JSObject();
-                result.put("packageData", extracted.packageData.toString());
-                result.put("cleanupToken", cleanupToken);
+                result.put("packageData", staged.toString());
+                result.put("cleanupToken", "");
                 call.resolve(result);
             } catch (Exception error) {
                 call.reject("局域网题库下载失败，请检查共享权限、电脑身份、网络和可用空间", "LAN_BANK_DOWNLOAD_FAILED");
@@ -155,19 +150,10 @@ public class AppUpdaterPlugin extends Plugin {
             if (!hex(digest.digest()).equalsIgnoreCase(expectedHash)) {
                 throw new SecurityException("题库 SHA-256 校验失败，文件可能不完整或已被替换");
             }
-            EsqArchive.Extraction extracted = EsqArchive.extract(
-                temporary,
-                getContext().getFilesDir(),
-                expectedHash.toLowerCase(Locale.ROOT)
-            );
-            String cleanupToken = "";
-            if (extracted.createdDirectory != null) {
-                cleanupToken = UUID.randomUUID().toString();
-                pendingQuestionBankAssets.put(cleanupToken, extracted.createdDirectory);
-            }
+            org.json.JSONObject staged = EsqStage.stage(temporary, getContext().getFilesDir());
             JSObject result = new JSObject();
-            result.put("packageData", extracted.packageData.toString());
-            result.put("cleanupToken", cleanupToken);
+            result.put("packageData", staged.toString());
+            result.put("cleanupToken", "");
             call.resolve(result);
         } catch (Exception error) {
             call.reject(error.getMessage() == null ? "题库下载失败" : error.getMessage(), error);

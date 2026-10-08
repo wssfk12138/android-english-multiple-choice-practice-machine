@@ -51,9 +51,13 @@ try{
   await bounds()
   await open('wrong');await page.locator('.wrong-unit-row').waitFor()
   const filter=page.getByRole('radio',{name:'高频错题'})
-  await filter.check();await filter.focus();assert.equal(await filter.isChecked(),true)
+  await page.locator('.selection-option').filter({hasText:'高频错题'}).click();await filter.focus();assert.equal(await filter.isChecked(),true)
   assert.notEqual(await filter.evaluate(el=>getComputedStyle(el.parentElement).outlineStyle),'none')
   assert.equal(await page.getByRole('menu').count(),0)
+  if(width>height) {
+    assert.equal(await page.locator('.wrong-scope-actions > button').count(),3)
+    await bounds()
+  } else {
   await page.getByRole('button',{name:/更多操作/}).click()
   const analyze=page.getByRole('menuitem',{name:'分析',exact:true})
   await analyze.waitFor()
@@ -61,10 +65,11 @@ try{
   assert.equal(await analyze.evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))}),true,'menu is not clipped')
   await bounds();await analyze.click()
   await page.getByText('合成分析结果',{exact:true}).waitFor();assert.equal(await page.getByRole('menu').count(),0)
+  }
   await open('settings')
   assert.equal(await page.getByRole('checkbox').count(),0)
-  assert.equal(await page.getByRole('link',{name:/外观与显示/}).count(),1)
-  assert.equal(await page.getByRole('link',{name:/单词显示/}).count(),1)
+  assert.equal(await page.getByRole(width>height?'switch':'link',{name:width>height?/深色模式/:/外观与显示/}).count(),1)
+  assert.equal(await page.getByRole('link',{name:width>height?/单词本设置/:/单词显示/}).count(),1)
   await bounds()
   assert.deepEqual(errors,[]);await page.close()
   console.log(width+'x'+height+' font '+scale+': library batch, menu, radio focus, translation preference passed')

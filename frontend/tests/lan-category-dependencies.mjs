@@ -33,7 +33,7 @@ const db = {
   async rollbackTransaction() { sqlite.exec('ROLLBACK'); active = false; events.push('rollback') },
 }
 // Execute the production transaction wrapper with a native-connection adapter.
-const tx = { exports: {}, androidDatabase: async () => db, runTransactionSerially: fn => fn() }
+const tx = { exports: {}, rawAndroidDatabase: async () => db, runTransactionSerially: fn => fn() }
 vm.runInNewContext(compile(transactionSource), tx)
 const database = { transaction: tx.exports.transaction, rows: async (sql, values = []) => sqlite.prepare(sql).all(...values) }
 const compat = { exports: {} }

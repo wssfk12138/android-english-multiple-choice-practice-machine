@@ -4,7 +4,7 @@ import { readSnapshot, restoreUnit, historicalRetrySnapshot, snapshotGradeMany, 
 import type { SQLiteDBConnection } from '@capacitor-community/sqlite'
 import { Capacitor } from '@capacitor/core'
 import { Directory, Filesystem } from '@capacitor/filesystem'
-import { row, rows, run, transaction } from './database'
+import { row, rows, run, transaction, dbExecutor } from './database'
 import { aggregateAttempts } from './attempt-stats'
 import { incompleteSubmission, LocalApiError } from './errors'
 import { activeQuestionBankProfileId } from './question-bank-profiles'
@@ -65,7 +65,9 @@ async function serializeQuestion(
   savedOrder?: string[],
   includeAnswer = false,
   preserveOptionLabels = false,
+  dbx?: SQLiteDBConnection,
 ): Promise<JsonRecord> {
+  const { rows } = dbExecutor(dbx)
   let options = await rows<JsonRecord>(
     `SELECT stable_key, original_label, content, sequence, metadata
      FROM options WHERE question_id = ? ORDER BY sequence`,
@@ -114,7 +116,10 @@ export async function serializeUnit(
     includeAnswers?: boolean
     onlyQuestionIds?: Set<number>
   },
+  dbx?: SQLiteDBConnection,
 ): Promise<JsonRecord> {
+  // 传入事务内的原始连接时必须走它：全局助手在独占事务屏障下会循环等待。
+  const { row, rows } = dbExecutor(dbx)
   const unit = await row<JsonRecord>(
     `SELECT u.*, p.year, p.subject
      FROM units u JOIN papers p ON p.id = u.paper_id
@@ -155,6 +160,7 @@ export async function serializeUnit(
       options.answerOrders?.get(question.id) || sharedCandidateOrder,
       Boolean(options.includeAnswers),
       unit.subtype === 'true_false' || (preserveCandidateOrder && ((options.candidatePolicyVersion ?? 1) >= 1 || !options.answerOrders?.get(question.id)?.length)),
+      dbx,
     ))
   }
   if (unit.unit_type === 'listening') {
@@ -527,7 +533,9 @@ export async function abandonIfEmpty(sessionId: number): Promise<JsonRecord> {
   return { kept: false }
 }
 
-export async function getSession(sessionId: number): Promise<JsonRecord> {
+export async function getSession(sessionId: number, dbx?: SQLiteDBConnection): Promise<JsonRecord> {
+  // 事务内调用必须传原始连接，否则独占事务屏障会让全局助手循环等待。
+  const { row, rows } = dbExecutor(dbx)
   const session = await row<JsonRecord>(
     'SELECT * FROM practice_sessions WHERE id = ?',
     [sessionId],
@@ -561,7 +569,7 @@ export async function getSession(sessionId: number): Promise<JsonRecord> {
   }
   const units = []
   for (const unitId of unitIds) {
-    const unit = await restoreUnit(snapshot, unitId) || await serializeUnit(unitId, {
+    const unit = await restoreUnit(snapshot, unitId, dbx) || await serializeUnit(unitId, {
       shuffleOptions: Boolean(session.shuffle_options),
       answerOrders,
       candidatePolicyVersion: Number(session.candidate_policy_version || 0),
@@ -571,7 +579,7 @@ export async function getSession(sessionId: number): Promise<JsonRecord> {
       onlyQuestionIds: ['wrong', 'wrong_history'].includes(String(session.mode))
         ? onlyByUnit.get(unitId)
         : undefined,
-    })
+    }, dbx)
     const unitSubmission = unitSubmissions.get(unitId)
     for (const question of unit.questions) {
       const answer = answers.get(question.id)
@@ -756,8 +764,8 @@ async function gradeRows(
         currentStats.set(Number(item.question_id), item)
       }
     }
-    const placeholders = wrongRows.map(() => '?').join(', ')
-    await transactionRun(db, `INSERT OR IGNORE INTO wrong_stats(question_id) VALUES (${wrongRows.map(row => '(?)').join(', ')})`, wrongRows.map(row => Number(row.question_id)))
+    const placeholders = wrongRows.map(() => '(?)').join(', ')
+    await transactionRun(db, `INSERT OR IGNORE INTO wrong_stats(question_id) VALUES ${placeholders}`, wrongRows.map(row => Number(row.question_id)))
   }
   for (const answerRow of answerRows) {
     const original = gradeTable.get(Number(answerRow.question_id))!

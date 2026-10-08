@@ -1,5 +1,6 @@
 import { androidDatabase, isMigrationApplied, recordMigration, row, rows, run, transaction } from './database'
 import { captureSession } from './practice-snapshots'
+import type { SQLiteDBConnection } from '@capacitor-community/sqlite'
 
 type RecordValue = Record<string, any>
 export type ContentManifest = {version: number; revision: string; units: RecordValue[]}
@@ -133,7 +134,7 @@ export async function preflightContent(manifest: ContentManifest): Promise<Recor
 }
 
 // Call only inside transaction(), after a verified backup has completed.
-export async function applyContent(manifest: ContentManifest): Promise<RecordValue> {
+export async function applyContent(db: SQLiteDBConnection, manifest: ContentManifest): Promise<RecordValue> {
   if (!(await (await androidDatabase()).isTransactionActive()).result) throw new Error('题库修正必须在显式事务中执行')
   const records = await preflightContent(manifest)
   if (records.some(r => r.conflicts.length)) throw new Error('题库内容存在未审查差异，修正已停止')
@@ -144,7 +145,7 @@ export async function applyContent(manifest: ContentManifest): Promise<RecordVal
     for (const session of sessions) if (JSON.parse(session.unit_ids || '[]').includes(record.unitId)) sessionIds.add(session.id)
     for (const s of await rows<RecordValue>('SELECT DISTINCT session_id FROM practice_answers WHERE question_id IN (SELECT id FROM questions WHERE unit_id=?)', [record.unitId])) sessionIds.add(s.session_id)
   }
-  for (const id of [...sessionIds].sort((a, b) => a-b)) await captureSession(id, manifest.revision)
+  for (const id of [...sessionIds].sort((a, b) => a-b)) await captureSession(db, id, manifest.revision)
   await run('CREATE TABLE IF NOT EXISTS content_remediation_receipts (unit_id INTEGER, revision TEXT, before_hash TEXT NOT NULL, after_hash TEXT NOT NULL, historical_wrong_stats TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(unit_id,revision))')
   for (const record of pending) {
     const uid = record.unitId, target = record.change.after
@@ -187,7 +188,7 @@ export async function applyContentWithBackup(manifest: ContentManifest): Promise
   await Filesystem.writeFile({path, directory: Directory.Data, encoding: Encoding.UTF8, data, recursive: true})
   const saved = await Filesystem.readFile({path, directory: Directory.Data, encoding: Encoding.UTF8})
   if (saved.data !== data) throw new Error('题库修正备份校验失败')
-  const result = await transaction(() => applyContent(manifest))
+  const result = await transaction(tx => applyContent(tx, manifest))
   await markRemediationApplied(manifest.revision)
   return result
 }
@@ -260,7 +261,7 @@ async function remediationSettled(manifest: Pick<ContentManifest, 'revision' | '
 }
 
 // Imports (including LAN packages) must never restore a reviewed corrupt unit.
-export async function validateRemediatedImport(paper: RecordValue, answers: RecordValue): Promise<void> {
+export async function validateRemediatedImport(paper: RecordValue, answers: RecordValue, deferredQuestionHashes = false): Promise<void> {
   const manifest = await loadBundledContentManifest()
   if (!manifest) return
   const {questionContentHash} = await import('./question-bank')
@@ -278,6 +279,9 @@ export async function validateRemediatedImport(paper: RecordValue, answers: Reco
       || !same(unit.questions.map((q: RecordValue) => q.questionKey), target.questions.map((q: RecordValue) => q.key))) {
       throw new Error('此题库包含已修正的旧内容，请使用新版题库包；现有学习记录未修改')
     }
+    // Staged imports validate the complete key list here, then each full question
+    // hash in upsertPaper before writing it. Never skip the structural check.
+    if (deferredQuestionHashes) continue
     for (const q of unit.questions) {
       if (await questionContentHash(unit, q, answers[q.questionKey]) !== change.questionHashes[q.questionKey])
         throw new Error('此题库包含已修正的旧题目，请使用新版题库包；现有学习记录未修改')

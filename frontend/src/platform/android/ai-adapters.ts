@@ -131,6 +131,7 @@ const openAiResponses: AdapterDefinition = {
     temperature: options.temperature,
     ...(options.maxTokens ? { max_output_tokens: options.maxTokens } : {}),
     ...(options.reasoningEffort ? { reasoning: { effort: options.reasoningEffort } } : {}),
+    ...(options.responseFormat ? { text: { format: responsesFormat(options.responseFormat) } } : {}),
   }),
   parseText: data => {
     const root = object(data)
@@ -145,6 +146,17 @@ const openAiResponses: AdapterDefinition = {
     return requireText(pieces.join(''))
   },
   modelEndpoints: baseUrl => [{ url: `${cleanBase(baseUrl)}/models`, source: 'openai-responses' }],
+}
+
+function responsesFormat(format: Record<string, unknown>) {
+  if (format.type === 'json_object' || format.type === 'text') return { type: format.type }
+  const schema = object(format.json_schema)
+  if (format.type === 'json_schema' && schema && typeof schema.name === 'string' && object(schema.schema)) {
+    return { type: 'json_schema', name: schema.name, schema: schema.schema,
+      ...(typeof schema.strict === 'boolean' ? { strict: schema.strict } : {}),
+      ...(typeof schema.description === 'string' ? { description: schema.description } : {}) }
+  }
+  throw new Error('Responses JSON 格式配置无效，未发送请求')
 }
 
 const anthropic: AdapterDefinition = {

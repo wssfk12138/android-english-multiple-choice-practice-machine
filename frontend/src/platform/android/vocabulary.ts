@@ -528,12 +528,10 @@ export async function deleteVocabulary(id: number): Promise<{ ok: true }> {
   return { ok: true }
 }
 
-export async function retryVocabulary(_id: number): Promise<{ ok: true }> {
-  await run(
-    `UPDATE vocabulary_entries SET translation_status = 'queued',
-      translation_error = '', updated_at = CURRENT_TIMESTAMP
-     WHERE user_edited = 0 AND translation_status IN ('pending', 'failed')`,
-  )
+export async function retryVocabulary(id: number): Promise<{ ok: true }> {
+  const { requestVocabularyRun } = await import('./vocabulary-request-runner')
+  const ids = id > 0 ? [id] : (await rows<{id:number}>("SELECT id FROM vocabulary_entries WHERE user_edited=0 AND translation_status='failed'")).map(item => Number(item.id))
+  await requestVocabularyRun('translation', ids, { explicit: true, retry: true, source: 'retry' })
   return { ok: true }
 }
 
@@ -610,7 +608,7 @@ export async function queueTranslations(entryIds: number[]): Promise<JsonRecord>
       `UPDATE vocabulary_entries SET translation_status = 'queued',
         translation_error = '', updated_at = CURRENT_TIMESTAMP
        WHERE id IN (${ids.map(() => '?').join(',')})
-         AND user_edited = 0 AND translation_status IN ('pending','failed')`,
+         AND user_edited = 0 AND translation_status = 'pending'`,
       ids,
     )
     queuedCount += result.changes

@@ -1,18 +1,18 @@
-import { enrichVocabularyEntry } from './ai'
 import { row, rows, run } from './database'
 import { optionalAppSetting, writeAppSetting } from './app-settings'
 import { LocalApiError } from './errors'
 import { morphologyLabel, safeObject } from '../../vocabulary-context'
+import { requestVocabularyRun, startVocabularyRequestWorker } from './vocabulary-request-runner'
+import { pauseVocabularyRequests, vocabularyRequestStatus } from './vocabulary-request-store'
 
-// Device-local work. Never serialize jobs as learning results over LAN.
-let worker: Promise<void> | null = null
 export let vocabularyEnrichmentError = ''
-export function reportVocabularyEnrichmentError(cause: unknown) { vocabularyEnrichmentError = String(cause).slice(0, 600) }
-const pauseKey = 'vocabulary-enrichment-paused'
+export function reportVocabularyEnrichmentError(_cause: unknown) { vocabularyEnrichmentError = '词汇任务已停止，请查看任务状态' }
 const migrationKey = 'vocabulary-enrichment-v4'
 async function setting(key: string) { return optionalAppSetting(key) }
-export async function pauseVocabularyEnrichment() { await writeAppSetting(pauseKey, '1') }
-export async function resumeVocabularyEnrichment() { await writeAppSetting(pauseKey, '0') }
+export async function pauseVocabularyEnrichment() { await pauseVocabularyRequests() }
+export async function resumeVocabularyEnrichment(commandId?: string) {
+  await requestVocabularyRun('enrichment', undefined, { explicit: true, commandId, source: 'continue' })
+}
 export async function queueMissingVocabularyEnrichment(limit = 200): Promise<number> {
   const result = await run(
     "INSERT INTO vocabulary_enrichment_jobs(entry_id) " +
@@ -55,51 +55,25 @@ export function inventoryVocabularyEnrichment(): Promise<void> {
 export async function vocabularyEnrichmentProgress() {
   const items = await rows<{ state: string; count: number }>('SELECT state, COUNT(*) AS count FROM vocabulary_enrichment_jobs GROUP BY state')
   const progress = { queued: 0, inflight: 0, ready: 0, failed: 0 }
-  for (const item of items) {
-    if (item.state in progress) progress[item.state as keyof typeof progress] = Number(item.count) || 0
-  }
+  for (const item of items) if (item.state in progress) progress[item.state as keyof typeof progress] = Number(item.count) || 0
   const profile = await row<{name:string;default_model:string}>("SELECT name,default_model FROM ai_profiles WHERE enabled=1 AND TRIM(default_model)<>'' ORDER BY is_default DESC,id LIMIT 1")
-  return { ...progress, paused: await setting(pauseKey) === '1', waiting_configuration: !profile, profile: profile ? `${profile.name} · ${profile.default_model}` : '', inventoried: await setting(migrationKey) === 'done' }
+  const scheduler = await vocabularyRequestStatus()
+  return { ...progress, paused: Boolean(scheduler.reason), scheduler, waiting_configuration: !profile,
+    profile: profile ? profile.name + ' · ' + profile.default_model : '', inventoried: await setting(migrationKey) === 'done' }
 }
 export async function queueVocabularyEnrichment(id: number, contextChanged = false): Promise<void> {
-  await run("INSERT INTO vocabulary_enrichment_jobs(entry_id) VALUES (?) ON CONFLICT(entry_id) DO UPDATE SET state='queued', error='', updated_at=CURRENT_TIMESTAMP WHERE vocabulary_enrichment_jobs.state NOT IN ('queued','inflight') OR ? = 1", [id, contextChanged ? 1 : 0])
-}
-async function work(): Promise<void> {
-  while (true) {
-    if (await setting(pauseKey) === '1') return
-    if (!await row("SELECT id FROM ai_profiles WHERE enabled=1 AND TRIM(default_model)<>'' ORDER BY is_default DESC,id LIMIT 1")) return
-    const job = await row<{entry_id:number}>("SELECT entry_id FROM vocabulary_enrichment_jobs WHERE state='queued' ORDER BY updated_at,entry_id LIMIT 1")
-    if (!job) return
-    const claimed = await run("UPDATE vocabulary_enrichment_jobs SET state='inflight', error='', updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND state='queued'", [job.entry_id])
-    if (!claimed.changes) continue
-    try {
-      await enrichVocabularyEntry(job.entry_id)
-      await run("UPDATE vocabulary_enrichment_jobs SET state='ready', error='', updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND state='inflight'", [job.entry_id])
-    } catch (cause) {
-      reportVocabularyEnrichmentError(cause)
-      await run("UPDATE vocabulary_enrichment_jobs SET state='failed', error=?, updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND state='inflight'", [String(cause).slice(0,600),job.entry_id])
-      // Configuration/provider failures must not fan out across the remaining queue.
-      if (!(cause instanceof LocalApiError) || cause.status === 400 || cause.status === 401 || cause.status === 429 || cause.status >= 500) return
-    }
-  }
+  await run("INSERT INTO vocabulary_enrichment_jobs(entry_id) VALUES (?) ON CONFLICT(entry_id) DO UPDATE SET state='queued', error='', updated_at=CURRENT_TIMESTAMP WHERE vocabulary_enrichment_jobs.state = 'ready' OR (vocabulary_enrichment_jobs.state = 'queued' AND ? = 1)", [id, contextChanged ? 1 : 0])
 }
 export function startVocabularyEnrichmentWorker(): Promise<void> {
-  if (!worker) {
-    vocabularyEnrichmentError = ''
-    worker = work().finally(() => { worker = null })
-  }
-  return worker
+  return requestVocabularyRun('enrichment', undefined, { source: 'maintenance' }).then(() => startVocabularyRequestWorker())
 }
-export async function requestVocabularyEnrichment(id: number): Promise<void> {
-  await queueVocabularyEnrichment(id)
-  await startVocabularyEnrichmentWorker()
-  const job = await row<{state:string;error:string}>('SELECT state,error FROM vocabulary_enrichment_jobs WHERE entry_id=?', [id])
-  if (job?.state === 'failed') throw new LocalApiError(502, job.error)
-  if (job?.state !== 'ready') throw new LocalApiError(409, '补全已排队，请检查默认模型配置或恢复后台补全')
+export async function requestVocabularyEnrichment(id: number, commandId?: string): Promise<void> {
+  if (!await row('SELECT id FROM vocabulary_entries WHERE id=?', [id])) throw new LocalApiError(404, '单词不存在')
+  // An explicit detail action creates a job only for this word.
+  await run('INSERT OR IGNORE INTO vocabulary_enrichment_jobs(entry_id) VALUES(?)', [id])
+  await requestVocabularyRun('enrichment', [id], { explicit: true, retry: true, commandId, source: 'detail' })
 }
-
-export async function retryPendingVocabularyEnrichments(): Promise<void> {
-  // Retry existing requests only; never enrol every old ready word for paid enrichment.
-  await run("UPDATE vocabulary_enrichment_jobs SET state='queued',error='',updated_at=CURRENT_TIMESTAMP WHERE state='failed'")
-  await startVocabularyEnrichmentWorker()
+export async function retryPendingVocabularyEnrichments(ids?: number[], commandId?: string): Promise<void> {
+  const selected = ids || (await rows<{entry_id:number}>("SELECT entry_id FROM vocabulary_enrichment_jobs WHERE state='failed' ORDER BY entry_id")).map(item => Number(item.entry_id))
+  await requestVocabularyRun('enrichment', selected, { explicit: true, retry: true, commandId, source: 'retry' })
 }

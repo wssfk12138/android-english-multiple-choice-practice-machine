@@ -1,71 +1,15 @@
-import { translateVocabularyEntries } from './ai'
-import { rows, run } from './database'
+import { requestVocabularyRun, startVocabularyRequestWorker } from './vocabulary-request-runner'
 import { queueTranslations } from './vocabulary'
 
-let worker: Promise<void> | null = null
-
-async function pendingIds(limit = 8): Promise<number[]> {
-  return (await rows<{ id: number }>(
-    `SELECT id FROM vocabulary_entries
-     WHERE user_edited = 0 AND translation_status = 'queued'
-     ORDER BY updated_at, id LIMIT ?`,
-    [limit],
-  )).map(item => Number(item.id))
-}
-
-async function work() {
-  while (true) {
-    const ids = await pendingIds()
-    if (!ids.length) return
-    await run(
-      `UPDATE vocabulary_entries SET translation_status = 'translating', updated_at = CURRENT_TIMESTAMP
-       WHERE id IN (${ids.map(() => '?').join(',')}) AND user_edited = 0 AND translation_status = 'queued'`,
-      ids,
-    )
-    try {
-      await translateVocabularyEntries(ids)
-      // A partial model response must not spin indefinitely. Keep unmatched
-      // entries visible as failed so the user can retry them explicitly.
-      await run(
-        `UPDATE vocabulary_entries SET translation_status = 'failed',
-          translation_error = '模型没有返回该单词的有效翻译',
-          updated_at = CURRENT_TIMESTAMP
-         WHERE id IN (${ids.map(() => '?').join(',')})
-           AND user_edited = 0 AND translation_status = 'translating'`,
-        ids,
-      )
-    } catch (cause) {
-      await run(
-        `UPDATE vocabulary_entries SET translation_status = 'failed',
-          translation_error = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE id IN (${ids.map(() => '?').join(',')})
-           AND user_edited = 0 AND translation_status = 'translating'`,
-        [String(cause).slice(0, 600), ...ids],
-      )
-      // Stop on a provider/configuration failure without leaving an invisible queue.
-      await run(
-        `UPDATE vocabulary_entries SET translation_status = 'failed', translation_error = ?,
-         updated_at = CURRENT_TIMESTAMP WHERE user_edited = 0 AND translation_status = 'queued'`,
-        [String(cause).slice(0, 600)],
-      )
-      return
-    }
-  }
-}
-
-export function startVocabularyTranslationWorker(): Promise<void> {
-  if (!worker) {
-    worker = work().finally(() => { worker = null })
-  }
-  return worker
-}
-
-export async function queueAndStartVocabularyTranslations(entryIds: number[]) {
+export const startVocabularyTranslationWorker = startVocabularyRequestWorker
+export async function queueAndStartVocabularyTranslations(entryIds: number[], source = 'automatic') {
   const queued = await queueTranslations(entryIds)
-  void startVocabularyTranslationWorker()
-  return { ...queued, workerStarted: true }
+  try {
+    const started = await requestVocabularyRun('translation', entryIds.length ? entryIds : undefined, { source })
+    return { ...queued, ...started }
+  } catch {
+    // Unconfigured automatic work stays queued. Explicit actions report errors.
+    return { ...queued, workerStarted: false }
+  }
 }
-
-export function resumeVocabularyTranslations() {
-  void startVocabularyTranslationWorker()
-}
+export function resumeVocabularyTranslations() { void startVocabularyRequestWorker() }

@@ -1,6 +1,8 @@
 apply plugin: 'com.android.application'
 
 def applicationIdOverride = providers.gradleProperty("appApplicationId").getOrElse("").trim()
+def applicationLabelOverride = providers.gradleProperty("appApplicationLabel").getOrElse("").trim()
+def applicationIconName = providers.gradleProperty("appIconName").getOrElse("ic_launcher").trim()
 def signingProperties = new Properties()
 def signingPropertiesFile = rootProject.file('signing.properties')
 def hasReleaseSigning = signingPropertiesFile.isFile()
@@ -13,6 +15,11 @@ android {
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId applicationIdOverride ?: "com.wssfk.englishpracticemachine"
+        manifestPlaceholders = [
+            appLabel: applicationLabelOverride ?: "英语刷题机",
+            appIcon: "@mipmap/" + applicationIconName,
+            appRoundIcon: "@mipmap/" + applicationIconName + "_round"
+        ]
         // Apache POI uses MethodHandle APIs that Android supports natively
         // from API 26. The primary target is Android 14, and Android 8.0+
         // remains a practical compatibility floor for this document-import build.
@@ -21,6 +28,7 @@ android {
         versionCode providers.gradleProperty("appVersionCode").getOrElse("1").toInteger()
         versionName providers.gradleProperty("appVersionName").getOrElse("0.1.0-alpha")
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        resValue 'bool', 'webview_debugging_enabled', 'false'
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -41,6 +49,9 @@ android {
         }
     }
     buildTypes {
+        debug {
+            resValue 'bool', 'webview_debugging_enabled', 'true'
+        }
         release {
             minifyEnabled false
             if (hasReleaseSigning) signingConfig signingConfigs.release
@@ -48,6 +59,7 @@ android {
         }
         internal {
             initWith release
+            resValue 'bool', 'webview_debugging_enabled', 'true'
             matchingFallbacks = ['release']
             minifyEnabled false
             if (hasReleaseSigning) signingConfig signingConfigs.release
@@ -76,6 +88,8 @@ repositories {
 }
 
 dependencies {
+    // Streaming JSON reader; no reflection-based deserialization of imported data.
+    implementation 'com.google.code.gson:gson:2.11.0'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"

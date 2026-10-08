@@ -126,13 +126,19 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
     '../../vocabulary-context': { ...realContext, projectVocabulary: (entry) => entry },
     './vocabulary-enrichment-runner': { queueVocabularyEnrichment: async () => {} },
   })
+  const config = loadModule('vocabulary-request-config', { './database': database, './model-key-store': {selectedKey:async()=>''}, './errors': errors })
+  const store = loadModule('vocabulary-request-store', { './database': database, './errors': errors })
+  const result = loadModule('vocabulary-request-result', {})
   const ai = loadModule('ai', {
+    './vocabulary-request-config': config, './vocabulary-request-store': store, './vocabulary-request-result': result,
     '../../services/vocabularyTranslationConfig': { loadVocabularyEnrichment: () => true },
     './database': database,
     './errors': errors,
     './model-key-store': {},
     './vocabulary-enrichment-fields': {},
     './native-http': {},
+    './vocabulary-network-policy': {},
+    './vocabulary-native-http': {},
     './ai-adapters': {},
     '../../vocabulary-context': {
       projectVocabulary: (entry) => entry,
@@ -141,7 +147,9 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
       vocabularyWriteGuard: () => ({ sql: '1 = 1', values: [] }),
     },
   })
+  const sharedRunner = loadModule('vocabulary-request-runner', { './ai':ai, './vocabulary-request-config':config, './vocabulary-request-result':result, './vocabulary-request-store':store, './errors':errors })
   const runner = loadModule('vocabulary-translation-runner', {
+    './vocabulary-request-runner': sharedRunner,
     './database': database,
     './ai': ai,
     './vocabulary': vocabulary,
@@ -257,9 +265,9 @@ for (const orientation of ['portrait', 'landscape']) {
       try {
         if (scenario === 'no-model') {
           await f.runner.startVocabularyTranslationWorker()
-          const failed = await f.vocabulary.serializeEntry(1)
-          assert.equal(failed.translation_status, 'failed')
-          assert.match(failed.translation_error, /\u8bf7\u5148\u914d\u7f6e/)
+          const unsent = await f.vocabulary.serializeEntry(1)
+          assert.equal(unsent.translation_status, 'queued', 'Unconfigured work has not been sent')
+          assert.equal(unsent.translation_error, '')
           await f.click(byClass(f.root, 'vocab-list-item')[0])
           if (orientation === 'portrait') await f.click(byClass(f.root, 'vocab-list-item')[0])
         }
@@ -277,7 +285,7 @@ for (const orientation of ['portrait', 'landscape']) {
         const saved = await f.vocabulary.serializeEntry(1)
         for (const [key, value] of Object.entries(manual)) assert.equal(saved[key], value)
         assert.equal(saved.user_edited, 1)
-        assert.equal(saved.translation_status, scenario === 'no-model' ? 'failed' : scenario, 'Manual saving must not claim a model translation succeeded')
+        assert.equal(saved.translation_status, scenario === 'no-model' ? 'queued' : scenario, 'Manual saving must not claim a model translation succeeded')
         assert.ok(text(f.detail()).includes(manual.common_meaning), 'Saved meaning remains visible')
         assert.ok(text(f.detail()).includes(manual.note), 'Saved note remains visible as text')
         assert.equal(find(f.detail(), item => item.tag === 'b').length, 0, 'Manual content must not become HTML')

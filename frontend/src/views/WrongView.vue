@@ -16,6 +16,8 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { get, post } from '../api'
 import { confirmDialog } from '../platform/dialogs'
+import { useAndroidLandscape } from '../composables/useAndroidLandscape'
+import { wrongListReturn } from '../services/wrongListReturn'
 
 type RetryRound = {
   id: number
@@ -58,6 +60,7 @@ type AnalysisStatus = {
 }
 
 const router = useRouter()
+const landscape = useAndroidLandscape()
 const view = ref<'current' | 'mastered' | 'all' | 'frequent'>(useRoute().query.view === 'frequent' ? 'frequent' : 'current')
 const units = ref<WrongUnit[]>([])
 const error = ref('')
@@ -110,7 +113,7 @@ async function load() {
     } catch {
       // The wrong-book remains usable when model configuration is unavailable.
     }
-    if (!openYears.value.size && grouped.value[0]) openYears.value = new Set([grouped.value[0].year])
+    if (!wrongListReturn.pending && !openYears.value.size && grouped.value[0]) openYears.value = new Set([grouped.value[0].year])
   } catch (cause) {
     error.value = String(cause)
     loadFailed.value = true
@@ -119,8 +122,21 @@ async function load() {
   }
 }
 
+if (wrongListReturn.pending) view.value = wrongListReturn.view as typeof view.value
 watch(view, load)
-onMounted(load)
+onMounted(async () => {
+  if (wrongListReturn.pending) {
+    view.value = wrongListReturn.view as typeof view.value
+    openYears.value = new Set(wrongListReturn.years)
+    openUnits.value = new Set(wrongListReturn.units)
+  }
+  await load()
+  if (wrongListReturn.pending) {
+    await nextTick()
+    window.scrollTo({ top:wrongListReturn.scroll })
+    wrongListReturn.pending = false
+  }
+})
 
 function toggleSet(source: Set<number>, value: number) {
   const next = new Set(source)
@@ -194,6 +210,11 @@ async function retryRound(unit: WrongUnit, retry: RetryRound) {
 
 async function analyzeUnit(unit: WrongUnit) {
   moreMenuFor.value = null
+  if (landscape.value) {
+    Object.assign(wrongListReturn, { pending:true, view:view.value, years:[...openYears.value], units:[...openUnits.value], scroll:window.scrollY })
+    await router.push(`/wrong/analysis/${unit.unit_id}`)
+    return
+  }
   const status = analysisStatuses.value[unit.unit_id]
   const title = `${unit.year} 年${unit.unit_title}`
   if (status?.locked) {
@@ -245,6 +266,7 @@ function closeAnalysis() {
 
 function analysisLabel(unit: WrongUnit) {
   const status = analysisStatuses.value[unit.unit_id]
+  if (landscape.value && status?.report_id) return '查看分析'
   if (status?.locked) return '查看分析'
   return status ? '重新分析' : '分析'
 }
@@ -329,8 +351,9 @@ async function archive(unitIds: number[]) {
               </button>
               <div v-if="!selecting" class="wrong-scope-actions">
                 <button class="button compact wrong-retry-button" type="button" :disabled="!unit.current_count || Boolean(startingKey)" @click="retryUnit(unit)"><Play :size="14" />{{ startingKey === `unit-${unit.unit_id}` ? '启动中…' : '重做' }}</button>
+                <button v-if="landscape" class="button compact wrong-analysis-button" type="button" :disabled="!unit.current_count && !analysisStatuses[unit.unit_id]?.report_id" @click="analyzeUnit(unit)"><Sparkles :size="14" /><span>{{ analysisLabel(unit) }}</span></button>
                 <button class="button compact danger-text wrong-delete-button" type="button" @click="archive([unit.unit_id])"><Trash2 :size="14" />删除</button>
-                <div class="wrong-more">
+                <div v-if="!landscape" class="wrong-more">
                   <button class="icon-button" type="button" :aria-label="`${unit.unit_title} 更多操作`" :aria-expanded="moreMenuFor === unit.unit_id" @click="moreMenuFor = moreMenuFor === unit.unit_id ? null : unit.unit_id">
                     <MoreHorizontal :size="17" />
                   </button>
@@ -360,6 +383,11 @@ async function archive(unitIds: number[]) {
 </template>
 
 <style scoped>
+html[data-platform="android"][data-orientation="landscape"] .wrong-unit-expand { min-width:0; }
+html[data-platform="android"][data-orientation="landscape"] .wrong-level-copy strong { white-space:normal; overflow-wrap:anywhere; }
+html[data-platform="android"][data-orientation="landscape"] .wrong-scope-actions { flex-wrap:nowrap; flex-shrink:0; }
+html[data-platform="android"][data-orientation="landscape"] .wrong-scope-actions > button { flex:0 0 68.3294px; width:68.3294px; min-height:49px; padding:4px; font-size:13px; display:flex; align-items:center; justify-content:center; gap:5px; }
+html[data-platform="android"][data-orientation="landscape"] .wrong-analysis-button span { max-width:2em; white-space:normal; line-height:1.25; }
 .wrong-head,.wrong-head-actions,.wrong-view-switch,.wrong-level-row,.wrong-expand-button,.wrong-unit-row,.wrong-unit-expand,.wrong-scope-actions,.wrong-round-row{display:flex;align-items:center}.wrong-head{gap:16px;justify-content:space-between}.wrong-head-actions{gap:8px;flex-wrap:wrap}.wrong-view-switch{gap:4px;width:max-content;max-width:100%;padding:4px;border:1px solid var(--border,var(--line));border-radius:8px;background:var(--surface);flex-wrap:wrap}.wrong-view-switch .selection-option{min-height:40px;flex:1 1 auto;display:flex;align-items:center;justify-content:center;padding:6px 12px;border:0;border-radius:6px;background:transparent;color:var(--muted);font:inherit;white-space:nowrap}.wrong-view-switch .selection-option.active{background:var(--primary);color:white}.wrong-tree{display:grid;gap:10px}.wrong-year{padding:0;overflow:visible}.wrong-year-row{padding:4px 10px}.wrong-expand-button,.wrong-unit-expand{flex:1;min-width:0;gap:10px;padding:10px 4px;border:0;background:transparent;color:inherit;text-align:left}.wrong-level-copy{display:grid;gap:2px;min-width:0}.wrong-level-copy strong,.wrong-level-copy span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.wrong-unit-row .wrong-level-copy span{white-space:normal}.wrong-level-copy span{font-size:.82rem;color:var(--muted)}.wrong-level-icon{display:grid;flex:0 0 34px;width:34px;height:34px;place-items:center;border-radius:7px;background:var(--primary-soft);color:var(--primary)}.wrong-chevron{margin-left:auto;transition:transform .2s}.wrong-chevron.open{transform:rotate(180deg)}.wrong-units{border-top:1px solid var(--border,var(--line))}.wrong-unit-block+.wrong-unit-block{border-top:1px solid var(--border,var(--line))}.wrong-unit-row{gap:8px;padding:5px 10px 5px 22px}.wrong-unit-expand{min-width:180px}.wrong-unit-row.selectable .wrong-unit-expand{min-height:48px;cursor:pointer}.wrong-scope-actions{gap:6px;flex-wrap:wrap}.wrong-select{display:grid;place-items:center;flex:0 0 32px}.wrong-select input{width:19px;height:19px}.wrong-round-list{padding:0 14px 8px 70px}.wrong-round-row{width:100%;gap:10px;min-height:38px;padding:7px 10px;border:0;border-top:1px solid var(--border,var(--line));background:transparent;color:inherit;text-align:left}.wrong-round-row strong{margin-left:auto}.wrong-round-row:disabled{opacity:.65}.wrong-round-empty{padding:10px;color:var(--muted);font-size:.86rem}.wrong-overview>div{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}.wrong-analysis-copy{white-space:pre-wrap}.wrong-analysis-category{display:flex;justify-content:space-between;gap:12px}.icon-button{display:grid;width:36px;height:36px;padding:0;place-items:center;border:1px solid var(--border,var(--line));border-radius:8px;background:transparent;color:inherit}.danger{color:var(--danger)}.wrong-more{position:relative}.wrong-more-menu{position:absolute;top:40px;right:0;z-index:30;min-width:140px;padding:6px;border:1px solid var(--line);border-radius:12px;background:var(--surface-solid);box-shadow:var(--shadow);display:grid;gap:2px}.wrong-more-item{min-height:44px;padding:9px 12px;display:flex;align-items:center;gap:8px;border:0;border-radius:9px;background:transparent;color:var(--ink);font:inherit;text-align:left}.wrong-more-item:hover{background:var(--primary-faint)}.wrong-error-text{white-space:normal;overflow-wrap:anywhere}
 @media(max-width:720px){.wrong-head{align-items:flex-start}.wrong-head .lead{display:none}.wrong-unit-row{align-items:flex-start;padding-left:10px;flex-wrap:wrap}.wrong-unit-expand{flex-basis:calc(100% - 40px)}.wrong-scope-actions{width:100%;justify-content:flex-start;padding-left:40px}.wrong-round-list{padding-left:48px}.wrong-round-row{display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px}.wrong-round-row strong{margin-left:0}.wrong-round-row>span:last-of-type{grid-column:2}.wrong-view-switch{width:100%}.wrong-view-switch .selection-option{flex:1 1 40%;padding-inline:6px}.wrong-overview{padding:10px}.wrong-head-actions>span{font-size:.82rem}}
 .wrong-scope-actions .wrong-retry-button,.wrong-scope-actions .wrong-analysis-button{min-width:0;padding-inline:7px;font-size:11px;white-space:nowrap}

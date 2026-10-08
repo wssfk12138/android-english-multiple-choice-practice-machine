@@ -5,7 +5,7 @@ import { analyzeWrongQuestions, analyzeWrongStatus, createProfile, createConvers
 import { LocalApiError } from './errors'
 import { chooseSnapshot } from './practice-snapshots'
 import { abandonIfEmpty, archiveWrongUnits, createSession, dashboard, getSession, listWrong, saveAnswer, submitSession, submitUnit } from './practice'
-import { createEsqImport, listEsqImports, listPapers, publishEsqImport, readEsqImport, sweepEmptyPaperSessions } from './question-bank'
+import { createEsqImport, discardStagedEsqTask, listEsqImports, listStagedEsqTasks, listPapers, publishEsqImport, readEsqImport, resumeStagedEsqTask, sweepEmptyPaperSessions } from './question-bank'
 import { addVocabulary, deleteVocabulary, homeVocabulary, listVocabulary, reviewVocabulary, retryVocabulary, serializeEntry, updateVocabulary, vocabularyRevision, vocabularyStatus } from './vocabulary'
 import { checkAppUpdate, checkQuestionBankCatalog, downloadQuestionBankPackage, installAppUpdate, readUpdateSettings, updateSettings } from './app-update'
 import {
@@ -73,6 +73,24 @@ function scheduleEmptyPaperSweep() {
   else run()
 }
 
+let stagedTaskSweepStarted = false
+function scheduleStagedTaskSweep() {
+  if (stagedTaskSweepStarted) return
+  stagedTaskSweepStarted = true
+  // 枚举暂存任务、登记已有草稿、清掉过期失败副本；全程不解析压缩包，
+  // 所以放在启动空闲期是安全的，也不会把失败任务变成本进程的重试风暴。
+  // 动态导入 + 可选调用：测试沙箱里的 ./question-bank 是受控映射，
+  // 缺少这个新导出时不能把本地接口一起打崩。
+  const run = () => void import('./question-bank')
+    .then(module => module.listStagedEsqTasks?.())
+    .catch(() => {})
+  const idle = (globalThis as any).requestIdleCallback as ((callback: () => void, options?: { timeout: number }) => number) | undefined
+  const delay = (globalThis as any).setTimeout as ((callback: () => void, timeout: number) => number) | undefined
+  if (typeof idle === 'function') idle(run, { timeout: 3000 })
+  else if (typeof delay === 'function') delay(run, 2000)
+  else run()
+}
+
 export async function androidLocalApi<T>(path: string, options: RequestInit = {}): Promise<T> {
   const method = String(options.method || 'GET').toUpperCase()
   const url = new URL(path, 'https://local.english-practice.invalid')
@@ -93,6 +111,7 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   // Empty-session cleanup is process-wide maintenance. Re-triggering it from
   // every local API call created needless bridge traffic during first screen.
   scheduleEmptyPaperSweep()
+  scheduleStagedTaskSweep()
   let params: RegExpMatchArray | null
 
   if (method === 'GET' && pathname === '/study-todos') return await studyTodos() as T
@@ -173,6 +192,15 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
       newName === null ? undefined : String(newName),
     ) as T
   }
+  if (pathname === '/question-banks/imports/staged' && method === 'GET') {
+    return await listStagedEsqTasks() as T
+  }
+  if (pathname === '/question-banks/imports/staged/resume' && method === 'POST') {
+    return await resumeStagedEsqTask(String(body?.stage_id || '')) as T
+  }
+  if (pathname === '/question-banks/imports/staged/discard' && method === 'POST') {
+    return await discardStagedEsqTask(String(body?.stage_id || '')) as T
+  }
   params = match(pathname, /^\/question-banks\/imports\/(\d+)$/)
   if (params && method === 'GET') return await readEsqImport(Number(params[1])) as T
   if (params && method === 'DELETE') return await deleteImportDraft('esq_import', Number(params[1])) as T
@@ -221,10 +249,10 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
     const jobs = await import('./vocabulary-enrichment-runner')
     if (body?.action === 'inventory') await jobs.inventoryVocabularyEnrichment()
     else if (body?.action === 'pause') await jobs.pauseVocabularyEnrichment()
-    else if (body?.action === 'resume') await jobs.resumeVocabularyEnrichment()
+    else if (body?.action === 'resume') await jobs.resumeVocabularyEnrichment(String(body.command_id || crypto.randomUUID()))
     else if (body?.action === 'retry') {
-      await jobs.resumeVocabularyEnrichment()
-      void jobs.retryPendingVocabularyEnrichments().catch(jobs.reportVocabularyEnrichmentError)
+      if (body.entry_ids !== undefined && (!Array.isArray(body.entry_ids) || body.entry_ids.some((id: unknown) => !Number.isSafeInteger(id) || Number(id) <= 0))) throw new LocalApiError(400, '词条编号无效')
+      await jobs.retryPendingVocabularyEnrichments(body.entry_ids, String(body.command_id || crypto.randomUUID()))
     }
     if (body?.action === 'start' || body?.action === 'resume') void jobs.startVocabularyEnrichmentWorker().catch(jobs.reportVocabularyEnrichmentError)
     return await jobs.vocabularyEnrichmentProgress() as T
@@ -244,17 +272,29 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (pathname === '/vocabulary/translation-runs' && method === 'POST') {
     let ids = (body?.entry_ids || []).map(Number).filter(Boolean)
     const trigger = String(body?.trigger || '')
-    if (trigger === 'practice_exit' || trigger === 'vocabulary_open') {
-      const { rows } = await import('./database')
-      const pending = await rows<{ id: number }>(
-        `SELECT id FROM vocabulary_entries
-         WHERE user_edited = 0 AND translation_status IN ('pending', 'queued')
-         ORDER BY updated_at, id`,
-      )
-      ids = [...new Set([...ids, ...pending.map(item => Number(item.id))])]
-    }
-    const queued = await queueAndStartVocabularyTranslations(ids)
+    const queued = await queueAndStartVocabularyTranslations(ids, trigger)
     return queued as T
+  }
+  if (pathname === '/vocabulary/request-status' && method === 'GET') {
+    const { vocabularyRequestStatus } = await import('./vocabulary-request-store')
+    const { vocabularyTransmissionActive } = await import('./vocabulary-request-runner')
+    return { ...await vocabularyRequestStatus(), transmissionActive: vocabularyTransmissionActive() } as T
+  }
+  if (pathname === '/vocabulary/request-runs' && method === 'POST') {
+    const store = await import('./vocabulary-request-store')
+    const runner = await import('./vocabulary-request-runner')
+    if (body?.action === 'pause') await store.pauseVocabularyRequests()
+    else if (body?.action === 'acknowledge') {
+      if (body.confirmed !== true || typeof body.attempt_id !== 'string') throw new LocalApiError(400, '请确认已知会该批次可能已产生费用')
+      await store.acknowledgeVocabularyUnknown(body.attempt_id)
+    } else if (body?.action === 'continue' || body?.action === 'retry') {
+      if (!['translation','enrichment'].includes(body.task)) throw new LocalApiError(400, '请明确任务类型')
+      if (typeof body.command_id !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.command_id)) throw new LocalApiError(400, '缺少有效的操作标识')
+      if (body.action === 'retry' && !Array.isArray(body.entry_ids)) throw new LocalApiError(400, '请列明重试对象')
+      if (body.entry_ids !== undefined && (!Array.isArray(body.entry_ids) || body.entry_ids.some((id: unknown) => !Number.isSafeInteger(id) || Number(id) <= 0))) throw new LocalApiError(400, '词条编号无效')
+      await runner.requestVocabularyRun(body.task, body.entry_ids, { explicit: true, retry: body.action === 'retry', commandId: body.command_id, source: body.action })
+    } else throw new LocalApiError(400, '未知词汇任务操作')
+    return { ...await store.vocabularyRequestStatus(), transmissionActive: runner.vocabularyTransmissionActive() } as T
   }
   params = match(pathname, /^\/vocabulary\/(\d+)$/)
   if (params && method === 'GET') return await serializeEntry(Number(params[1])) as T
@@ -272,11 +312,8 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   }
   if (pathname === '/vocabulary/retry-pending' && method === 'POST') {
     await retryVocabulary(0)
-    const result = await queueAndStartVocabularyTranslations([])
-    const { retryPendingVocabularyEnrichments } = await import('./vocabulary-enrichment-runner')
-    void retryPendingVocabularyEnrichments().catch(() => { /* Durable job status is shown by polling. */ })
     notifyLocalChange()
-    return result as T
+    return { accepted: true } as T
   }
   params = match(pathname, /^\/vocabulary\/(\d+)\/enrichment$/)
   if (params && method === 'POST') {
@@ -289,11 +326,8 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (params && method === 'POST') {
     const id = Number(params[1])
     await retryVocabulary(id)
-    const result = await queueAndStartVocabularyTranslations([id])
-    const { retryPendingVocabularyEnrichments } = await import('./vocabulary-enrichment-runner')
-    void retryPendingVocabularyEnrichments().catch(() => { /* Durable job status is shown by polling. */ })
     notifyLocalChange()
-    return result as T
+    return { accepted: true } as T
   }
   params = match(pathname, /^\/vocabulary\/(\d+)\/review$/)
   if (params && method === 'POST') {

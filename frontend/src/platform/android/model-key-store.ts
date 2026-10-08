@@ -1,5 +1,6 @@
 import { secureStore } from "../secure-store"
 import { baseIdentity, emptyKeys, keyIdentity, keySummary, type KeySet } from "../model-keys"
+import { invalidateVocabularyConfiguration } from './vocabulary-request-store'
 import { row } from "./database"
 
 export type Vault = { version: 1; profiles: Record<string, KeySet>; suppressed: Record<string, string[]> }
@@ -109,6 +110,7 @@ async function editUnlocked(id: number, body: Record<string, any>) {
       if (!item.suppressed.includes(identity)) item.suppressed.push(identity)
       if (item.selected === identity) item.selected = ""
     } else throw new Error("密钥操作无效")
+    if (body.action !== 'rename') await invalidateVocabularyConfiguration()
     await saveKeys(state)
     return keySummary(item)
 }

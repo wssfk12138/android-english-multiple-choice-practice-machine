@@ -411,9 +411,11 @@ F1–F23、N1–N5：显示项已拆分，模型目录默认收起并限制列�
 
 全量门禁已重新执行：69 项通过、0 失败、0 跳过（strict）；前端生产构建通过。
 
-## 11. 首页与单词本首次载入卡顿观察任务（已纳入，已完成本轮源码观察）
+## 11. 首页与单词本首次载入卡顿观察任务（已纳入；2026-09-14 已完成本轮源码观察与真机数据库只读实测）
 
 用户要求：将首页数据和单词本数据的初次载入卡顿加入整改方案；修改时遇到可能相关的线索应记录，并在方案执行完成时统一汇报。此项是整改过程中的观察与交付义务，不是自动启动独立性能修复或全面性能排查。
+
+2026-09-14 补充：本轮在源码观察之外，改用两台设备的真实导出数据库快照只读执行当前源码中的原始 SQL 并取执行计划（脚本 `work/perf-probe.cjs`，输出 `work/perf-tablet.txt`、`work/perf-phone.txt`），完整结论、数据与限制见[首页与单词本首次载入卡顿审查](history/2026-09-14-android-first-load-lag-audit.md)。要点：热点 SQL 全部 ≤ 2 ms，单词本数据量两台设备完全相同（216 词 / 224 出现记录），而平板题库数据更多却只有平板卡，因此可排除“SQL 慢”和“数据量大”两类解释；仍成立的候选集中在冷启动双轮刷新、3.85 MB 修正清单固定成本、后台 worker 与首屏争抢单连接、以及横屏/首页多层 `backdrop-filter` 的渲染成本。未取得真机分段计时，不据此声称已定位唯一根因。
 
 ### 观察范围与证据要求
 
@@ -422,12 +424,17 @@ F1–F23、N1–N5：显示项已拆分，模型目录默认收起并限制列�
 - 每条记录包含具体文件/函数、触发路径、观察证据、可能影响、已排除或仍未知部分、建议验证方式，以及本次是否因既定整改而改变该路径。只做必要的静态核对或复用获准测试证据，不擅自连设备、付费调用、全库操作或扩大性能重构。
 - 已有历史采样可链接供追溯，但标明日期、设备和局限，不当作 R3 的新测量。没有新线索也要如实汇报“本次修改范围未发现新增可确认线索”，不能据此宣称不卡顿。
 
-### 观察记录（本表为唯一详细记录，后续实施时更新）
+### 观察记录（本表为索引；2026-09-14 的完整证据、实测数据与限制见[首页与单词本首次载入卡顿审查](history/2026-09-14-android-first-load-lag-audit.md)）
 
 | 编号 | 路径/代码位置 | 证据及类别 | 可能影响与不确定性 | 本次处理/建议验证 |
 | --- | --- | --- | --- | --- |
 | L1 首页冷启动/再次挂载 | `DashboardView.vue` 的 `loadHome`、`refreshHome` | 源码：三个请求并行；启动事件和挂载共用在途 Promise，但会排队一次补跑；startup 失败还会在 500ms 后重试 | 合并不等于完全免除重复读取；实际请求、首帧时间未知 | 本次未改动此路径；后续冷启动与返回首页分别计时，不能据此宣称性能改善 |
 | L2 单词本首次进入/再次挂载 | `VocabularyView.vue` 的 `startPendingTranslations`、`load`、`initializeEnrichment` | 源码：先 await translation-runs，再加载列表和所选词详情；随后不等待 initializeEnrichment 完成。补缺盘点后 nextTick 再启动，状态定时轮询 | 翻译队列启动在列表前串行等待是可确认路径；等待耗时及后台数据库争用程度未知。非阻塞调用不保证物理首帧已经呈现 | 既定整改接入了补缺；未做性能重构。后续区分首次/再次进入、词库规模测量队列启动、列表与详情耗时 |
+| L3 首页冷启动双轮刷新（2026-09-14 补充） | `main.ts:14-47` 的 `await ensureContentRemediation()`、事件派发 `:46`；`DashboardView.vue:76-92、120-121` | 源码事实：启动事件要等内容修正 + `purgeExpiredTrash` + 内置题库安装整段结束；单飞只合并同刻在途、跨轮不合并，故冷启动固定发两轮 `/startup`+`/vocabulary/home`+`/papers`，`:key="tasksRevision"` 让 `StudyTodos` 重挂载两次 | 每个首页请求约 20 条 SQL，全部翻倍；`activeQuestionBankProfileId` 约解析 5 次/轮。真机毫秒占比未知 | 未改代码。建议先给冷启动路径打时间戳，量出两轮与首帧的关系再决定是否合并 |
+| L4 内容修正清单固定成本（2026-09-14 补充） | `content-remediation.ts:207-220、223-238、240-257`；`content-remediation.ts:174-192` | 源码 + 实测：清单 `/content-remediation.json` **4,030,971 字节（3.85 MB）、65 单元、835 题**，每次冷启动都要 fetch 并跑 `validateContentManifest` 全量比对，随后约 3 条 SQL；首次安装首启还会走全库 `exportToJson` 备份 + 校验 + 事务内千条级写入 | 清单 fetch 与校验在前端线程；常规启动实际代价未在真机测得 | 未改代码。建议查设备 `app_migrations` 是否已有 `content-remediation:2026-09-r3`，并量清单 fetch+校验耗时 |
+| L5 手机竖屏渲染隐藏首页树（2026-09-14 补充） | `DashboardView.vue:168、198-199`；`dashboard-glass.css:102`；`styles.css:4420` | 源码事实：desktop 与 portrait 两棵首页子树都挂载、都渲染，只由 CSS `display:none` 隐藏；`StudyTodos` 只在 desktop 树内，故手机竖屏也发 `/study-todos` 且手机无任何入口显示它；两个 `QuestionBankSwitcher` 同时挂载 | 纯浪费的请求与渲染；是否导致 `/question-bank-profiles` 双发未确认 | 未改代码。建议随计时一并统计竖屏下实际发出的请求数与 `tasksRevision` 自增次数 |
+| L6 单连接与后台补全争抢（2026-09-14 补充） | `database.ts:437、940-1151、1153-1179、1181-1210`；`local-api.ts:66-71`；`vocabulary-translation-runner.ts:16-54`；`vocabulary-enrichment-runner.ts:65-83` | 源码事实：只有一个数据库连接，`rows/row/run` 不入队、仅 `transaction()` 串行；原生插件调用共用一个 `HandlerThread`（FIFO）；应用未设置 journal_mode（实测为 `delete`，非 WAL）；两个 worker 彼此不串行且与 UI 请求并发同一张表 | 慢语句队头阻塞；写事务阻塞读。冷启动时修正/翻译/补缺与首屏争抢。真机争抢程度未测 | 未改代码。建议在 worker 空转与满载两种状态下对同一路径各计时一次 |
+| L7 单词本评分与巩固的重复全量读取（2026-09-14 补充） | `VocabularyView.vue:295-341`（`:305`）、`370-379`（`:377`）、`49-53`；`vocabulary.ts:292-303、318-333` | 源码事实：每次评分前都 `await refreshDueQueue()`（一次 `limit=all` 全量到期集查询）；`startReinforcement` 先 `await load(...,{all:true})` 再切界面且无骨架；列表 SQL 为 `SELECT *` + 每行相关子查询 + `datetime()` 排序（执行计划确认全表扫描 + 临时 B 树），并整批拉取当前页全部出现记录 | 与 2026-09-13 记录的“评分等待 4.9 秒”路径相邻，但本轮未测得其中占比 | 未改代码。建议按历史 `measurement-and-route.md` 的 P0 建议先补细分计时 |
 
 ### 整改完成时必须汇报
 

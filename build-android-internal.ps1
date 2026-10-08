@@ -1,6 +1,7 @@
 ﻿param(
     [int]$VersionCode = 5,
     [string]$VersionName = '0.1.0-alpha.5',
+    [string]$ApplicationLabel = '内测·英语刷题机',
     [string]$AppUpdateManifestUrl = '',
     [string]$QuestionBankCatalogUrl = '',
     [string]$BundledQuestionBank = '',
@@ -76,6 +77,9 @@ if ($VersionCode -lt 1) {
 if ([string]::IsNullOrWhiteSpace($VersionName)) {
     throw 'VersionName cannot be empty.'
 }
+if ([string]::IsNullOrWhiteSpace($ApplicationLabel)) {
+    throw 'ApplicationLabel cannot be empty.'
+}
 if (-not (Test-Path -LiteralPath $signingProperties)) {
     throw "Fixed signing is not configured: $signingProperties"
 }
@@ -143,7 +147,9 @@ try {
         Invoke-Checked {
             .\gradlew.bat assembleInternal `
                 "-PappVersionCode=$VersionCode" `
-                "-PappVersionName=$VersionName"
+                "-PappVersionName=$VersionName" `
+                "-PappApplicationLabel=$($ApplicationLabel.Trim())" `
+                "-PappIconName=ic_launcher_internal"
         } 'Gradle internal build'
     } finally {
         Pop-Location

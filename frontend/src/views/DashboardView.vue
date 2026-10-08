@@ -80,7 +80,7 @@ function wait(milliseconds: number) {
 }
 
 function reloadAfterAndroidStartup(event: Event) {
-  if ((event as CustomEvent).detail?.changed !== false) void loadHome()
+  if ((event as CustomEvent).detail?.needsHomeRefresh === true) void loadHome()
 }
 
 // 挂载时的首次加载和 Android 启动准备完成事件会同时触发首页刷新。用一个在途
@@ -88,6 +88,19 @@ function reloadAfterAndroidStartup(event: Event) {
 // /papers；加载期间再次请求只排队一次补跑，题库切换引起的刷新不会被丢掉。
 let homeLoad: Promise<void> | null = null
 let homeReloadQueued = false
+let papersLoad: Promise<void> | null = null
+
+function loadSecondaryHomeData() {
+  papersLoad ||= (async () => {
+    await new Promise<void>(resolve => {
+      const run = () => resolve()
+      const idle = (window as any).requestIdleCallback as ((callback: () => void, options?: { timeout: number }) => number) | undefined
+      if (typeof idle === 'function') idle(run, { timeout: 1200 })
+      else window.setTimeout(run, 500)
+    })
+    try { papers.value = await get('/papers') || [] } catch { /* Core home remains usable. */ }
+  })().finally(() => { papersLoad = null })
+}
 
 function loadHome(): Promise<void> {
   homeReloadQueued = true
@@ -111,12 +124,10 @@ async function refreshHome() {
 
   let dashboardResult: PromiseSettledResult<any> | null = null
   let wordsResult: PromiseSettledResult<any> | null = null
-  let papersResult: PromiseSettledResult<any> | null = null
   for (let attempt = 0; attempt < 2; attempt++) {
-    [dashboardResult, wordsResult, papersResult] = await Promise.allSettled([
+    [dashboardResult, wordsResult] = await Promise.allSettled([
       embedded && !data.value ? Promise.resolve(embedded) : get('/startup'),
       get('/vocabulary/home?limit=20'),
-      get('/papers'),
     ])
     if (dashboardResult.status === 'fulfilled') break
     if (attempt === 0) await wait(500)
@@ -124,8 +135,12 @@ async function refreshHome() {
   if (dashboardResult?.status === 'fulfilled') data.value = dashboardResult.value
   else error.value = '首页数据暂时没有加载成功，请刷新页面重试。'
   if (wordsResult?.status === 'fulfilled') vocabulary.value = wordsResult.value.items || []
-  if (papersResult?.status === 'fulfilled') papers.value = papersResult.value || []
   vocabularyPage.value = 0
+
+  // The paper list is below the first viewport on the tablet layout. Fetch it
+  // only after the browser reports an idle window so it cannot hold the core
+  // dashboard and vocabulary ticker behind a large bridge response.
+  loadSecondaryHomeData()
 }
 
 onMounted(async () => {

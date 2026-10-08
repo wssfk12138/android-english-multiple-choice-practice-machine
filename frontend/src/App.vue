@@ -2,6 +2,7 @@
 import { BookOpenText, Download, Moon, PackageCheck, Settings2, Sun, Trash2 } from 'lucide-vue-next'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { App as CapacitorApp } from '@capacitor/app'
+import { useThemeState } from './composables/useThemeState'
 import type { PluginListenerHandle } from '@capacitor/core'
 import { useRoute, useRouter } from 'vue-router'
 import { platformRuntime } from './platform/runtime'
@@ -17,12 +18,8 @@ const route = useRoute()
 const router = useRouter()
 const ANDROID_ONBOARDING_KEY = 'linjian-android-onboarding-v1'
 // 初始化时同步读取主题偏好，避免暗色用户在首帧渲染前闪一下浅色（FOUC）。
-const dark = ref(
-  localStorage.getItem('linjian-theme') === 'dark'
-    || (!localStorage.getItem('linjian-theme')
-      && typeof matchMedia !== 'undefined'
-      && matchMedia('(prefers-color-scheme: dark)').matches),
-)
+const dark = useThemeState()
+dark.value = localStorage.getItem('linjian-theme') === 'dark'
 const installerCleanup = ref<PendingInstallerCleanup | null>(null)
 const installerCleanupBusy = ref(false)
 const installerCleanupError = ref('')
@@ -182,12 +179,8 @@ onMounted(async () => {
         updateWindowMode()
         window.setTimeout(updateWindowMode, 180)
         resumeVocabularyTranslations()
-      } else if (route.path.startsWith('/practice')) {
-        void post('/vocabulary/translation-runs', {
-          entry_ids: [],
-          trigger: 'practice_exit',
-        }).catch(() => undefined)
       }
+      // PracticeView owns background exit ordering: settle/save timer, then queue words.
     })
     try {
       const pending = await pendingInstallerCleanup()

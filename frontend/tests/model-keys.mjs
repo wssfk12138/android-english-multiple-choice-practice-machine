@@ -36,7 +36,7 @@ const secureStore = {
   set: async (key, value) => { if (failSave) throw Error('injected storage failure'); storage.set(key, value) },
   remove: async key => { if (failRemove) throw Error('injected remove failure'); storage.delete(key) },
 }
-const makeStore = () => load('android/model-key-store', name => name === '../secure-store' ? { secureStore } : name === '../model-keys' ? policy : db)
+const makeStore = () => load('android/model-key-store', name => name === './vocabulary-request-store' ? {invalidateVocabularyConfiguration:async()=>{}} : name === '../secure-store' ? { secureStore } : name === '../model-keys' ? policy : db)
 let vault = makeStore()
 failSave = true
 await assert.rejects(vault.namedKeySummary(1))
@@ -51,6 +51,29 @@ assert.equal(await vault.selectedKey(1), 'synthetic-legacy')
 assert.equal(storage.has('ai-profile-1-api-key'), false)
 assert.equal((await vault.namedKeySummary(1)).keys.length, 1)
 assert.ok(!JSON.stringify(await vault.namedKeySummary(1)).includes('synthetic-legacy'))
+// 配置页对每个配置都读一次同一份密钥库，重复跨原生桥是本页首屏的主要开销：
+// 同一进程内密钥库只允许读一次、旧版单密钥条目只允许删一次，且写入后必须立刻可见。
+{
+  const reads = []
+  const removes = []
+  const counting = {
+    get: async key => { reads.push(key); return storage.get(key) ?? null },
+    set: async (key, value) => { storage.set(key, value) },
+    remove: async key => { removes.push(key); storage.delete(key) },
+  }
+  const store = load('android/model-key-store', name => name === './vocabulary-request-store' ? {invalidateVocabularyConfiguration:async()=>{}} : name === '../secure-store' ? { secureStore: counting } : name === '../model-keys' ? policy : db)
+  const selectedBefore = (await store.namedKeySummary(1)).selected_key_id
+  await store.namedKeySummary(1)
+  await store.selectedKey(1)
+  assert.equal(selectedBefore, await policy.keyIdentity('synthetic-legacy'))
+  await store.editNamedKey(1, { action: 'select', identity: '' })
+  assert.equal(await store.selectedKey(1), '', 'later reads must observe earlier writes')
+  await store.editNamedKey(1, { action: 'select', identity: selectedBefore })
+  assert.equal(await store.selectedKey(1), 'synthetic-legacy')
+  assert.equal(reads.filter(key => key === 'ai-named-keys-v1').length, 1, 'the key vault must cross the native bridge once per process')
+  assert.equal(reads.filter(key => key === 'ai-profile-1-api-key').length, 0, 'a migrated profile must not rescan the legacy key')
+  assert.equal(removes.filter(key => key === 'ai-profile-1-api-key').length, 1, 'the legacy key must be removed from the native store once per process')
+}
 await assert.rejects(vault.editNamedKey(1, { action: 'add', value: { secret: 'synthetic' }, name: 'Bad' }))
 const value = 'synthetic-incoming'
 const identity = await policy.keyIdentity(value)

@@ -16,6 +16,14 @@ public final class LocalizedWebChromeClient extends BridgeWebChromeClient {
     }
 
     @Override
+    public boolean onShowFileChooser(WebView view, android.webkit.ValueCallback<android.net.Uri[]> callback, FileChooserParams params) {
+        return super.onShowFileChooser(view, uris -> {
+            EsqImportPlugin.selected(bridge.getContext(), uris);
+            callback.onReceiveValue(uris);
+        }, params);
+    }
+
+    @Override
     public boolean onJsConfirm(WebView view, String url, String message, JsResult result) {
         if (bridge.getActivity().isFinishing() || bridge.getActivity().isDestroyed()) {
             result.cancel();

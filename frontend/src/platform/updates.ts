@@ -19,6 +19,57 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+/**
+ * Capacitor 只在响应头声明 application/json 时才自动解析 JSON；GitHub Release
+ * 附件以 application/octet-stream 下发，raw 文件是 text/plain，若沿用默认解析会
+ * 把整个清单当成字符串而校验失败。这里固定按文本取回，再自行解析。
+ */
+async function fetchJsonSource(
+  url: string,
+  label: string,
+  connectTimeoutMs = 10000,
+): Promise<{ status: number, url: unknown, text: string }> {
+  const response = await CapacitorHttp.get({
+    url,
+    headers: { Accept: 'application/json' },
+    connectTimeout: connectTimeoutMs,
+    readTimeout: 30000,
+    responseType: 'text',
+  })
+  return {
+    status: response.status,
+    url: response.url,
+    text: typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? null),
+  }
+}
+
+function parseJsonSource(text: string, label: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new UpdateManifestError(`${label}响应不是有效 JSON，请确认地址指向 JSON 文件而不是网页`)
+  }
+}
+
+/** 失败提示里带上响应的顶层结构，用户自己就能看出填错了哪种地址。 */
+function describeJsonShape(value: unknown): string {
+  if (Array.isArray(value)) return `数组（${value.length} 项）`
+  if (!isRecord(value)) return typeof value
+  const keys = Object.keys(value)
+  return keys.length ? `字段 ${keys.slice(0, 8).join('、')}${keys.length > 8 ? '…' : ''}` : '空对象'
+}
+
+function looksLikeUpdateManifest(value: unknown): boolean {
+  return isRecord(value)
+    && value.schemaVersion === 1
+    && typeof value.channel === 'string'
+    && typeof value.apkUrl === 'string'
+}
+
+function describeSourceHost(url: string): string {
+  try { return new URL(url).host } catch { return url }
+}
+
 function assertManifest(value: unknown): asserts value is UpdateManifest {
   if (!isRecord(value)
     || value.schemaVersion !== 1
@@ -32,16 +83,11 @@ function assertManifest(value: unknown): asserts value is UpdateManifest {
 }
 
 export async function fetchUpdateManifest(url: string): Promise<UpdateManifest> {
-  const response = await CapacitorHttp.get({
-    url,
-    headers: { Accept: 'application/json' },
-    connectTimeout: 10000,
-    readTimeout: 30000,
-  })
+  const response = await fetchJsonSource(url, '更新清单')
   if (response.status < 200 || response.status >= 300) {
     throw new UpdateManifestError(`更新清单请求失败：${response.status}`)
   }
-  const data: unknown = response.data
+  const data = parseJsonSource(response.text, '更新清单')
   assertManifest(data)
   return data
 }
@@ -134,7 +180,11 @@ function normalizeCatalogPackage(item: unknown, index: number): QuestionBankRemo
 
 export function validateQuestionBankCatalog(value: unknown): QuestionBankRemoteCatalog {
   if (!isRecord(value) || value.catalogVersion !== 1 || !Array.isArray(value.packages)) {
-    throw new UpdateManifestError('题库目录 catalogVersion 或 packages 不受支持')
+    // 更新清单和题库目录都是 JSON：填错地址时必须能一眼看出是哪种文件。
+    if (looksLikeUpdateManifest(value)) {
+      throw new UpdateManifestError('这个地址返回的是程序更新清单，不是题库目录；请填写题库目录地址')
+    }
+    throw new UpdateManifestError(`题库目录 catalogVersion 或 packages 不受支持（收到的 JSON：${describeJsonShape(value)}）`)
   }
   if (value.packages.length > MAX_CATALOG_PACKAGES) {
     throw new UpdateManifestError('题库目录 packages 超过 500 项')
@@ -160,21 +210,18 @@ export function validateQuestionBankCatalog(value: unknown): QuestionBankRemoteC
 
 export async function fetchQuestionBankCatalog(url: string): Promise<QuestionBankRemoteCatalog> {
   const sourceUrl = validateQuestionBankRemoteUrl(url, '题库目录地址')
-  const response = await CapacitorHttp.get({
-    url: sourceUrl,
-    headers: { Accept: 'application/json' },
-    connectTimeout: 10000,
-    readTimeout: 30000,
-  })
+  // 现场实测：受限网络里直连源会卡满连接超时。目录有多个候选源，
+  // 4 秒足够建连，能省下约 26 秒白等，不影响可用源。
+  const response = await fetchJsonSource(sourceUrl, '题库目录', 4000)
   if (response.status < 200 || response.status >= 300) {
     throw new UpdateManifestError(`题库目录请求失败：${response.status}`)
   }
   validateQuestionBankRemoteUrl(response.url, '题库目录最终响应地址')
-  const data: unknown = response.data
-  const byteLength = new TextEncoder().encode(JSON.stringify(data)).byteLength
+  const byteLength = new TextEncoder().encode(response.text).byteLength
   if (byteLength > MAX_CATALOG_BYTES) {
     throw new UpdateManifestError('题库目录超过 2 MiB 大小上限')
   }
+  const data = parseJsonSource(response.text, '题库目录')
   return validateQuestionBankCatalog(data)
 }
 
@@ -189,7 +236,7 @@ export async function fetchQuestionBankCatalogFromSources(
       const catalog = await fetchQuestionBankCatalog(sources[index])
       return { ...catalog, sourceUrl: sources[index], checkedSources: index + 1 }
     } catch (error) {
-      failures.push(String(error instanceof Error ? error.message : error))
+      failures.push(`${describeSourceHost(sources[index]!)}：${String(error instanceof Error ? error.message : error)}`)
     }
   }
   throw new UpdateManifestError(`题库目录均不可用：${failures.join('；')}`)

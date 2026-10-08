@@ -38,13 +38,22 @@ async function fixture(legacy = false) {
     async commitTransaction() { sqlite.exec('COMMIT'); active = false },
     async rollbackTransaction() { sqlite.exec('ROLLBACK'); active = false },
   }
-  const tx = { exports: {}, androidDatabase: async () => db, runTransactionSerially: fn => fn() }
+  const tx = { exports: {}, rawAndroidDatabase: async () => db, runTransactionSerially: fn => fn() }
   vm.runInNewContext(compile(transactionSource), tx)
   const database = {
     transaction: tx.exports.transaction,
     rows: async (sql, values = []) => sqlite.prepare(sql).all(...values),
     row: async (sql, values = []) => sqlite.prepare(sql).get(...values),
     run: async (sql, values = []) => sqlite.prepare(sql).run(...values),
+    dbExecutor: exec => exec ? {
+      row: async (sql, values = []) => (await exec.query(sql, values)).values?.[0] ?? null,
+      rows: async (sql, values = []) => (await exec.query(sql, values)).values || [],
+      run: async (sql, values = []) => { const r = await exec.run(sql, values); return { changes: Number(r.changes?.changes ?? r.changes ?? 0), lastId: r.lastInsertRowid } },
+    } : {
+      row: async (sql, values = []) => sqlite.prepare(sql).get(...values),
+      rows: async (sql, values = []) => sqlite.prepare(sql).all(...values),
+      run: async (sql, values = []) => { const r = sqlite.prepare(sql).run(...values); return { changes: r.changes, lastId: r.lastInsertRowid } },
+    },
   }
   const modules = Object.fromEntries(['lan-sync-compat', 'lan-categories', 'lan-sync-serialization', 'lan-sync-versions', 'attempt-stats', 'practice-snapshots', 'candidate-order-policy', 'ordering-fixed-slots'].map(name => {
     const context = { exports: {}, require: name => name === './database' ? database : {} }
