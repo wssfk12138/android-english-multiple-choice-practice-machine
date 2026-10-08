@@ -54,8 +54,18 @@ try{
   if(name==='updates'){
    assert.equal(await page.locator('#android-catalog-url').inputValue(),'https://fixture.test/catalog.json')
    for(const count of [0,1,25]){await page.evaluate(n=>window.count=n,count);await page.getByRole('button',{name:'检查远程题库',exact:true}).click();await page.waitForFunction(n=>document.querySelectorAll('.catalog-item').length===n,count)}
-   await page.getByRole('button',{name:'检查程序更新',exact:true}).click();await page.locator('.update-result').waitFor()
-   if(width===1280){const cards=await page.locator('.maintenance-update-grid > section').evaluateAll(es=>es.map(e=>{const r=e.getBoundingClientRect();return {y:r.y,w:r.width,h:r.height,b:r.bottom}}));assert.ok(Math.abs(cards[0].y-cards[1].y)<2);assert.ok(cards[0].w>cards[1].w);assert.ok(cards[1].h>cards[0].h+100);const r=await page.locator('.catalog-results').boundingBox();assert.ok(r.width>cards[0].w+cards[1].w);assert.ok(r.y>=Math.max(...cards.map(c=>c.b)))}
+   await page.getByRole('button',{name:'检查程序更新',exact:true}).click()
+   await page.locator('.app-band .update-summary').filter({hasText:'检测到可用的新版本'}).waitFor()
+   assert.equal(await page.locator('.version-list .available-version strong').innerText(),'next')
+   assert.equal(await page.locator('.version-list .version-row').nth(1).innerText(),'fixture\n已安装')
+   assert.equal(await page.locator('.release-notes').innerText(),'长更新说明。'.repeat(150))
+   const cards=await page.locator('.maintenance-update-grid > section').evaluateAll(es=>es.map(e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,b:r.bottom}}))
+   assert.equal(cards.length,2);assert.ok(cards[1].y>=cards[0].b);assert.ok(Math.abs(cards[0].x-cards[1].x)<2);assert.ok(Math.abs(cards[0].w-cards[1].w)<2)
+   const catalog=await page.locator('.catalog-content').boundingBox();assert.ok(catalog.y>=cards[0].y&&catalog.y+catalog.height<=cards[0].b)
+   const packages=await page.locator('.catalog-item').evaluateAll(es=>es.slice(0,2).map(e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,b:r.bottom}}))
+   if(width>650){assert.ok(Math.abs(packages[0].y-packages[1].y)<2);assert.ok(packages[1].x>packages[0].x)}else assert.ok(packages[1].y>=packages[0].b)
+   const notes=await page.locator('.release-notes').evaluate(e=>{e.scrollTop=e.scrollHeight;return {overflow:getComputedStyle(e).overflowY,height:e.clientHeight,scroll:e.scrollHeight,top:e.scrollTop}})
+   assert.equal(notes.overflow,'auto');assert.ok(notes.scroll>notes.height);assert.ok(notes.top>0)
   }
   if(name==='diagnostics'){
    assert.equal(await page.locator('.diagnostic-group').nth(1).getByRole('button',{name:'导出应用数据库副本'}).count(),1)

@@ -9,11 +9,12 @@ import {createApp, h, reactive, ref} from 'vue';
 import {createRouter,createWebHashHistory} from 'vue-router';
 import Settings from '/src/views/AndroidVocabularyDisplayView.vue';
 import Content from '/src/components/VocabularyMemoryContent.vue';
-import {loadVocabDisplayConfig} from '/src/services/vocabularyDisplayConfig';
+import {loadVocabDisplayConfig,VOCAB_DISPLAY_OPTIONS} from '/src/services/vocabularyDisplayConfig';
 import '/src/styles.css';
 const config=reactive(loadVocabDisplayConfig());
 window.addEventListener('vocab-display-change',()=>Object.assign(config,loadVocabDisplayConfig()));
-const word=reactive({id:1,term:'went',common_meaning:'常用测试',phonetic:'/went/',part_of_speech:'v.',latest_sentence:'She went home yesterday.',generated_example:{sentence:'They went to school.',translation:'他们去上学。'},morphology:{lemma:'go',currentForm:'过去式',forms:[{label:'原形',word:'go'}]},synonyms:[{word:'left',note:'同义测试'}],antonyms:[{word:'came',note:'反义测试'}],similar_forms:[{word:'want',note:'形近测试'}],memory_hint:'记忆测试',note:'笔记测试'});
+window.displayOptions=VOCAB_DISPLAY_OPTIONS;
+const word=reactive({id:1,term:'went',common_meaning:'常用测试',contextual_meaning:'语境测试',phonetic:'/went/',part_of_speech:'v.',latest_sentence:'She went home yesterday.',generated_example:{sentence:'They went to school.',translation:'他们去上学。'},morphology:{lemma:'go',currentForm:'过去式',forms:[{label:'原形',word:'go'}]},synonyms:[{word:'left',note:'同义测试'}],antonyms:[{word:'came',note:'反义测试'}],similar_forms:[{word:'want',note:'形近测试'}],memory_hint:'记忆测试',note:'笔记测试'});
 const token=ref(0);window.expand=()=>token.value++;window.nextWord=()=>word.id++;
 const app=createApp({render:()=>h('div',[h(Settings),h(Content,{entry:word,config,expanded:true,expansionToken:token.value})])});
 app.use(createRouter({history:createWebHashHistory(),routes:[{path:'/:pathMatch(.*)*',component:{render:()=>null}}]}));app.mount('#app');
@@ -25,22 +26,28 @@ try {
  const page=await browser.newPage({viewport:{width:1280,height:800}})
  const errors=[];page.on('pageerror',e=>errors.push(e.message))
  await page.goto(server.resolvedUrls.local[0]+'__display')
- const toggles=page.locator('.selection-option input');await toggles.first().waitFor();assert.equal(await toggles.count(),11)
+ const toggles=page.locator('.selection-option input');await toggles.first().waitFor()
+ const options=await page.evaluate(()=>window.displayOptions)
+ const expected={common_meaning:'常用测试',contextual:'语境测试',phonetic:'/went/',part_of_speech:'v.',source_sentence:'She went home yesterday.',model_sentence:'They went to school.',memory_hint:'记忆测试',synonyms:'同义测试',antonyms:'反义测试',similar_forms:'形近测试',morphology:'过去式',note:'笔记测试'}
+ assert.deepEqual(options.map(o=>o.key),Object.keys(expected))
+ assert.equal(await toggles.count(),options.length)
+ for(let i=0;i<options.length;i++)assert.match(await page.locator('.selection-option').nth(i).innerText(),new RegExp(options[i].label))
  for(const toggle of await toggles.all())await toggle.uncheck()
  const content=page.locator('.vocab-memory-content')
- const expected=['常用测试','/went/','v.','She went home yesterday.','They went to school.','记忆测试','同义测试','反义测试','形近测试','过去式','笔记测试']
- for(let i=0;i<11;i++){
-   await toggles.nth(i).check();assert.match(await content.innerText(),new RegExp(expected[i].replace(/[.*+?^${}()|[]\]/g,'\$&')))
+ for(let i=0;i<options.length;i++){
+   await toggles.nth(i).check();assert.match(await content.innerText(),new RegExp(expected[options[i].key].replace(/[.*+?^${}()|[]\]/g,'\$&')))
    await toggles.nth(i).uncheck();assert.equal((await content.innerText()).trim(),'')
  }
  for(const toggle of await toggles.all())await toggle.check()
  assert.equal(await content.locator('details:not([open])').count(),0)
- assert.equal(await content.locator('.memory-layer-static').count(),1)
+ assert.equal(await content.locator('.memory-layer-static').count(),2)
  await content.getByText('模型例句',{exact:true}).click();assert.equal(await content.locator('details:not([open])').count(),1)
  await page.evaluate(()=>window.expand());await page.waitForFunction(()=>!document.querySelector('.vocab-memory-content details:not([open])'))
  await content.getByText('模型例句',{exact:true}).click();await page.evaluate(()=>window.nextWord());await page.waitForFunction(()=>!document.querySelector('.vocab-memory-content details:not([open])'))
  await page.setViewportSize({width:800,height:1280});assert.equal(await content.locator('details:not([open])').count(),0)
- await toggles.nth(4).uncheck();await page.evaluate(()=>window.expand());assert.equal(await content.getByText('模型例句',{exact:true}).count(),0)
- await page.reload();await toggles.first().waitFor();assert.equal(await toggles.nth(4).isChecked(),false);assert.equal(await toggles.nth(0).isChecked(),true)
- assert.deepEqual(errors,[]);console.log('PASS all 11 independent switches, source/model coexistence, persisted settings, explicit expansion, word switch and rotation')
+ const modelIndex=options.findIndex(o=>o.key==='model_sentence'),contextIndex=options.findIndex(o=>o.key==='contextual')
+ await toggles.nth(modelIndex).uncheck();await page.evaluate(()=>window.expand());assert.equal(await content.getByText('模型例句',{exact:true}).count(),0)
+ await toggles.nth(contextIndex).uncheck();assert.equal(await content.getByText('语境测试',{exact:true}).count(),0)
+ await page.reload();await toggles.first().waitFor();assert.equal(await toggles.nth(modelIndex).isChecked(),false);assert.equal(await toggles.nth(contextIndex).isChecked(),false);assert.equal(await toggles.nth(0).isChecked(),true)
+ assert.deepEqual(errors,[]);console.log(`PASS all ${options.length} independent switches, source/model coexistence, persisted settings, explicit expansion, word switch and rotation`)
 } finally {await browser?.close();await server.close()}

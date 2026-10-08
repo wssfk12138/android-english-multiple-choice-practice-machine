@@ -25,6 +25,10 @@ const groups = computed(() => [
       <div class="review-meaning-heading"><small v-if="config.common_meaning">常用释义</small><span v-if="config.part_of_speech && entry.part_of_speech" class="review-part-of-speech">{{ entry.part_of_speech }}</span><span v-if="config.phonetic && entry.phonetic" class="review-phonetic">{{ entry.phonetic }}</span></div>
       <strong v-if="config.common_meaning">{{ entry.common_meaning || entry.contextual_meaning || '释义待补充' }}</strong>
     </section>
+    <section v-if="config.contextual && entry.contextual_meaning" class="memory-layer memory-layer-static contextual-meaning">
+      <h4>语境释义</h4>
+      <p>{{ entry.contextual_meaning }}</p>
+    </section>
     <template v-for="group in groups" :key="group.key">
     <details v-if="!group.source" class="memory-layer" :open="props.expanded">
       <summary>{{ group.label }}</summary>

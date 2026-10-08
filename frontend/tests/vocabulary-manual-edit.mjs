@@ -176,10 +176,10 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
     require(name) {
       if (name === 'vue') return vue
       if (name === '../composables/useAndroidLandscape') return { useAndroidLandscape: () => vue.ref(orientation === 'landscape') }
-      if (name === 'vue-router') return { useRoute: () => ({ query: {} }) }
+      if (name === 'vue-router') return { useRoute: () => ({ query: {} }), useRouter: () => ({ push: async () => {} }) }
       if (name === 'lucide-vue-next') {
         const icon = name => ({ name, setup() { return () => vue.h('span', { 'data-icon': name }) } })
-        return Object.fromEntries(['BookOpen', 'Check', 'ChevronDown', 'RefreshCw', 'Search', 'Star', 'Trash2'].map(name => [name, icon(name)]))
+        return Object.fromEntries(['BookOpen', 'BookOpenCheck', 'Check', 'ChevronDown', 'RefreshCw', 'Search', 'Star', 'Trash2'].map(name => [name, icon(name)]))
       }
       if (name === '../vocabulary-due-queue') return {
         reconcileDueQueue: (...args) => ({ version: 1, main: [], relearning: [], ordinarySinceRelearning: 0 }),
