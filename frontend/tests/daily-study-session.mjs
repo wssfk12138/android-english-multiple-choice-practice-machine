@@ -54,4 +54,10 @@ await invalidSession.open(); assert.equal(invalidSession.state.phase, 'error')
 invalid = false; await invalidSession.retry()
 assert.equal(retries, 2); assert.equal(invalidSession.state.phase, 'ready', 'invalid directory retry must reload directory')
 invalidSession.dispose()
+const bounded = new DailyStudySession(dependencies); await bounded.open()
+for (let index = 0; index < 205; index++) { await bounded.select(index); bounded.save(index) }
+const boundedReading = JSON.parse(records.get(DAILY_STUDY_STORAGE))[scope]
+assert.equal(Object.keys(boundedReading.positions).length, 200, 'long-term reading positions are bounded')
+assert.equal(boundedReading.positions[members[204].identity], 204, 'current position retained')
+bounded.dispose()
 console.log('PASS daily study session: persistence, deletion, identity reuse, frozen order, revisions, bounded cache, disposal and gestures')

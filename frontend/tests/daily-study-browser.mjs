@@ -65,7 +65,8 @@ const entry = '(' + fixture.toString() + ')();' +
   'import "/src/styles.css";import "/src/study-theme.css";' +
   'const router=createRouter({history:createMemoryHistory(),routes:[{path:"/vocabulary",component:Vocabulary},{path:"/vocabulary/daily-study",component:Study}]});' +
   'globalThis.router=router;await router.push("/vocabulary");await router.isReady();createApp({render:()=>h(RouterView)}).use(router).mount("#app");'
-const server = await createServer({ configFile: false, root, optimizeDeps: { noDiscovery: true, include: ['vue', 'vue-router', 'lucide-vue-next'] }, plugins: [{
+// Keep this fixture's optimized modules separate from other browser-test plugins.
+const server = await createServer({ configFile: false, root, cacheDir: join(root, 'node_modules/.vite-daily-study-browser'), optimizeDeps: { noDiscovery: true, include: ['vue', 'vue-router', 'lucide-vue-next'] }, plugins: [{
   name: 'isolated-daily-study', enforce: 'pre',
   resolveId(id) {
     if (id === 'virtual:daily-study') return id
@@ -164,6 +165,17 @@ try {
   assert.equal(await writes(), studyWriteBaseline, 'study adds zero mutation/translation/enrichment requests')
   assert.equal(await page.evaluate(() => JSON.stringify(globalThis.reviewFields)), reviewBefore)
   evidence.push({ scenario: 'actual entry, read-only requests and unchanged review fields', initialWrites: writeBaseline, studyWrites: 0, catalogMembers: 1203 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  let groups = 0
+  while (await page.getByRole('button', { name: '后一组单词', exact: true }).count()) {
+    await page.getByRole('button', { name: '后一组单词', exact: true }).click()
+    await page.waitForFunction(() => document.querySelector('.daily-study-shell')?.dataset.switching === 'false' && document.querySelector('.study-card')?.getAttribute('aria-busy') !== 'true')
+    assert.ok(await page.locator('.word-nav-list button').count() <= 41)
+    assert.ok(++groups < 65, 'complete directory reachable in bounded groups')
+  }
+  await page.locator('.word-nav-list button').last().click(); await ready(1203)
+  evidence.push({ scenario: 'all navigation groups to last word', groups, lastId: 1203, maxNavigationNodes: 41 })
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
   await page.locator('.study-top .back').click(); await page.locator('.daily-study-entry').waitFor()
   await page.evaluate(() => localStorage.setItem('daily-study:v1', JSON.stringify({ 'synthetic-db:all': { id: 1203, identity: 'stable-1203', index: 1202, positions: {} } })))
   await page.locator('.daily-study-entry').click(); await ready(1203)
@@ -177,11 +189,12 @@ try {
     const geometry = await page.evaluate(() => {
       const box = selector => { const r=document.querySelector(selector).getBoundingClientRect();return { x:r.x, y:r.y, width:r.width, height:r.height, right:r.right, bottom:r.bottom } }
       const scroll=document.querySelector('.study-scroll')
-      return { shell:box('.daily-study-shell'), card:box('.study-card'), scroll:box('.study-scroll'), next:box('.study-footer .next'), previous:box('.study-footer .previous'), overflow:scroll.scrollWidth > scroll.clientWidth + 1, rootOverflow:document.documentElement.scrollWidth > innerWidth + 1 }
+      return { shell:box('.daily-study-shell'), card:box('.study-card'), scroll:box('.study-scroll'), next:box('.study-footer .next'), previous:box('.study-footer .previous'), currentNav:box('[aria-current="true"]'), nav:box('.word-nav-list'), overflow:scroll.scrollWidth > scroll.clientWidth + 1, rootOverflow:document.documentElement.scrollWidth > innerWidth + 1 }
     })
     assert.equal(geometry.overflow, false, 'content horizontal overflow ' + width)
     assert.equal(geometry.rootOverflow, false); assert.ok(geometry.scroll.height >= 45, 'reading region remains reachable')
     assert.ok(geometry.next.bottom <= height && geometry.next.right <= width && geometry.previous.x >= 0)
+    assert.ok(geometry.currentNav.right <= geometry.nav.right + 1 && geometry.currentNav.right > geometry.nav.x, 'current navigation visible after resize/font growth')
     await page.locator('.study-scroll').evaluate(element => element.scrollTop = element.scrollHeight)
     assert.ok(await page.locator('.study-scroll').evaluate(element => element.scrollTop > 0))
     if (output) await page.screenshot({ path: join(output, 'daily-study-' + width + '-' + scale + (dark ? '-dark' : '') + '.png') })
@@ -201,4 +214,7 @@ try {
   assert.deepEqual(errors, [], 'real Vue runtime has no page errors')
   if (output) await writeFile(join(output, 'daily-study-browser-evidence.json'), JSON.stringify(evidence, null, 2))
   console.log('PASS daily study real Vue/Chromium: actual entry, 1203 members, bounded navigation, swipe exclusions, scroll/resume/rotation, revision, read-only, error/retry/empty/disposal and responsive layouts')
+} catch (error) {
+  console.error('Daily study browser page errors:', errors)
+  throw error
 } finally { await browser?.close(); await server.close() }

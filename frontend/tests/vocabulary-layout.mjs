@@ -194,7 +194,7 @@ try {
       localStorage.setItem('vocab-display-config',JSON.stringify({common_meaning:true,phonetic:true,part_of_speech:true,source_sentence:true,model_sentence:true,memory_hint:true,synonyms:true,antonyms:true,similar_forms:true,morphology:true,note:true}))
       window.dispatchEvent(new CustomEvent('vocab-display-change'))
     })
-    await page.locator('.page-head button').click()
+    await page.locator('.page-head button').filter({ hasText: '每日一背' }).click()
     await waitReviewCard(page)
     await waitReviewAnswer(page)
     for (const state of ['hidden','revealed']) {
@@ -263,7 +263,7 @@ try {
       globalThis.vocabRevision += 1
     })
     for (const kind of ['scheduled','reinforcement']) {
-      if(kind==='scheduled') await page.locator('.page-head button').click()
+      if(kind==='scheduled') await page.locator('.page-head button').filter({ hasText: '每日一背' }).click()
       else await page.locator('.vocab-reinforcement-actions button').first().click()
       await waitReviewCard(page)
       await page.locator('.reveal-button').click()

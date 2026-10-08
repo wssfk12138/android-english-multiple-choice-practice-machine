@@ -44,6 +44,13 @@ function has(key: VocabDisplayKey) {
 const hasContent = computed(() => columns.some(column => column.some(has)))
 let saveTimer: ReturnType<typeof setTimeout> | undefined, unlockTimer: ReturnType<typeof setTimeout> | undefined
 let refreshTimer: ReturnType<typeof setInterval> | undefined, disposed = false
+let navFrame = 0
+function revealNavigation() {
+  cancelAnimationFrame(navFrame)
+  navFrame = requestAnimationFrame(() => nav.value?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' }))
+}
+const navObserver = new ResizeObserver(revealNavigation)
+watch(nav, (element, previous) => { if (previous) navObserver.unobserve(previous); if (element) navObserver.observe(element) }, { flush: 'post' })
 const expanded = new Map<string, Record<string, boolean>>()
 function capture() {
   // During out-in transitions the previous DOM can outlive the new entry.
@@ -134,6 +141,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   capture(); disposed = true; session.dispose(); unlock(); clearTimeout(saveTimer); clearInterval(refreshTimer)
+  navObserver.disconnect(); cancelAnimationFrame(navFrame)
   document.removeEventListener('keydown', keys); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', capture)
   window.removeEventListener('pointerup', releasePointer); window.removeEventListener('pointercancel', releasePointer)
 })
