@@ -46,4 +46,12 @@ assert.equal(studySwipe(72, 0), 0); assert.equal(studySwipe(73, 50), 0)
 const window = studyNavigationWindow(1100, members.length)
 assert.ok(window.end-window.start <= 41 && window.start <= 1100 && window.end > 1100)
 assert.ok(records.get(DAILY_STUDY_STORAGE))
+let invalid = true, retries = 0
+const invalidSession = new DailyStudySession({ ...dependencies, catalog: async () => {
+  retries++; return { scope_key: 'invalid', revision, items: invalid ? [{ id: 1, term: 'invalid', identity: '' }] : [...members] }
+} })
+await invalidSession.open(); assert.equal(invalidSession.state.phase, 'error')
+invalid = false; await invalidSession.retry()
+assert.equal(retries, 2); assert.equal(invalidSession.state.phase, 'ready', 'invalid directory retry must reload directory')
+invalidSession.dispose()
 console.log('PASS daily study session: persistence, deletion, identity reuse, frozen order, revisions, bounded cache, disposal and gestures')

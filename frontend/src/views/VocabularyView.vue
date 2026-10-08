@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import VocabularyTerm from '../components/VocabularyTerm.vue'
 import VocabularyMemoryContent from '../components/VocabularyMemoryContent.vue'
-import { BookOpen, Check, ChevronDown, RefreshCw, Search, Star, Trash2 } from 'lucide-vue-next'
+import { BookOpen, BookOpenCheck, Check, ChevronDown, RefreshCw, Search, Star, Trash2 } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { del, get, post, put } from '../api'
 import { confirmDialog } from '../platform/dialogs'
 import { VOCAB_REVIEW_DISPLAY_CONFIG, loadVocabDisplayConfig } from '../services/vocabularyDisplayConfig'
@@ -14,13 +14,17 @@ import { useAndroidLandscape } from '../composables/useAndroidLandscape'
 import { loadVocabularyListSnapshot, loadVocabularyReviewSnapshot, saveVocabularyListSnapshot, saveVocabularyReviewSnapshot } from '../services/vocabularySnapshots'
 
 const route = useRoute()
+const router = useRouter()
 const landscape = useAndroidLandscape()
 const items = ref<any[]>([])
 const counts = ref<any>({ total:0, frequent:0, mastered:0, pending:0, review:0 })
 const selected = ref<any>(null)
-const filter = ref(route.query.review === 'scheduled' ? 'review' : 'all')
+const filter = ref(String(route.query.studyStatus || (route.query.review === 'scheduled' ? 'review' : 'all')))
 const currentBankScope = route.query.scope === 'current'
-const search = ref('')
+const search = ref(String(route.query.studySearch || ''))
+function startDailyStudy() {
+  void router.push({ path: '/vocabulary/daily-study', query: { status: filter.value, search: search.value.trim(), ...(currentBankScope ? { scope: 'current' } : {}) } })
+}
 const error = ref('')
 const notice = ref('')
 let noticeTimer: ReturnType<typeof setTimeout> | null = null
@@ -1067,7 +1071,8 @@ function filterCount(key: string) {
     </section>
     <div class="page-head">
       <div><h1>我的单词本</h1><span v-if="currentBankScope" class="muted">当前题库</span></div>
-      <div style="display:flex;gap:8px;align-items:center">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button v-if="landscape" class="button secondary daily-study-entry" @click="startDailyStudy"><BookOpenCheck :size="17" />每日一学</button>
         <button class="button" @click="startReview"><BookOpen :size="17" />每日一背 · 待背 {{ displayCount(counts.review) }} 词</button>
       </div>
     </div>

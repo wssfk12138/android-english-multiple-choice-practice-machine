@@ -19,6 +19,7 @@ const stripTypes = new Set([
   'vocabulary-identity.mjs',
 ])
 const prereq = new Set([
+  'daily-study-browser.mjs',
   'practice-timer-browser.mjs',
   'assistant-agent.mjs',
   'barcode-scanner-layout.mjs',

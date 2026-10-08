@@ -10,7 +10,7 @@ export function loadStudyReading(storage: Storage, scope: string): Reading | nul
   try {
     const saved = JSON.parse(storage.getItem(DAILY_STUDY_STORAGE) || '{}')[scope]
     if (!saved || !Number.isSafeInteger(saved.id) || typeof saved.identity !== 'string' || !Number.isSafeInteger(saved.index)) return null
-    const positions = Object.fromEntries(Object.entries(saved.positions || {}).filter(([identity, top]) => identity && typeof top === 'number' && Number.isFinite(top) && top >= 0))
+    const positions = Object.fromEntries(Object.entries(saved.positions || {}).filter(([identity, top]) => identity && typeof top === 'number' && Number.isFinite(top) && top >= 0).slice(-200))
     return { ...saved, positions }
   } catch { return null }
 }
@@ -65,7 +65,12 @@ export class DailyStudySession {
   get cacheSize() { return this.cache.size }
   get scrollTop() { return this.state.entry ? this.positions[String(this.state.entry.sync_id)] || 0 : 0 }
   save(top?: number) {
-    if (top !== undefined && this.state.entry && Number.isFinite(top)) this.positions[String(this.state.entry.sync_id)] = Math.max(0, top)
+    if (top !== undefined && this.state.entry && Number.isFinite(top)) {
+      const identity = String(this.state.entry.sync_id)
+      delete this.positions[identity]
+      this.positions[identity] = Math.max(0, top)
+      this.positions = Object.fromEntries(Object.entries(this.positions).slice(-200))
+    }
     if (!this.catalog || !this.stable) return
     this.state.saveFailed = !saveStudyReading(this.dependencies.storage, this.catalog.scope_key, {
       id: this.stable.id, identity: this.stable.identity, index: this.stableIndex, positions: this.positions,
@@ -78,9 +83,9 @@ export class DailyStudySession {
     try {
       const catalog = await this.dependencies.catalog()
       if (this.disposed || token !== this.generation) return
-      this.catalog = catalog; this.cache.clear(); this.epoch++
       // Missing legacy identities must never match an unrelated reused numeric ID.
       if (catalog.items.some(item => !Number.isSafeInteger(item.id) || typeof item.identity !== 'string' || !item.identity)) throw Error('Invalid entry identity')
+      this.catalog = catalog; this.cache.clear(); this.epoch++
       this.state.items = catalog.items
       const saved = loadStudyReading(this.dependencies.storage, catalog.scope_key)
       this.positions = saved?.positions || {}; this.stable = null
@@ -89,6 +94,7 @@ export class DailyStudySession {
       await this.select(this.state.index, true)
     } catch {
       if (token === this.generation && !this.disposed) {
+        this.catalog = null
         this.state.busy = false; this.state.phase = 'error'; this.state.error = '单词目录读取失败'; this.changed()
       }
     }

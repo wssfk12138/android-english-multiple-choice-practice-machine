@@ -25,6 +25,16 @@ try {
   const scoped = await api.dailyStudyCatalog(new URLSearchParams('scope=current'))
   assert.equal(scoped.items.length, 1)
   assert.notEqual(scoped.scope_key, all.scope_key)
+  f.db.exec('PRAGMA foreign_keys=ON')
+  const bankIdentity = f.db.prepare('SELECT identity FROM daily_study_bank_identity WHERE profile_id=1').get().identity
+  f.db.exec("UPDATE question_bank_profiles SET deleted_at=CURRENT_TIMESTAMP WHERE id=1")
+  f.db.exec("UPDATE question_bank_profiles SET deleted_at=NULL WHERE id=1")
+  assert.equal(f.db.prepare('SELECT identity FROM daily_study_bank_identity WHERE profile_id=1').get().identity, bankIdentity, 'soft delete/restore retains bank identity')
+  f.db.exec("INSERT INTO question_bank_profiles(id,name) VALUES(99,'Temporary synthetic bank')")
+  const temporaryIdentity = f.db.prepare('SELECT identity FROM daily_study_bank_identity WHERE profile_id=99').get().identity
+  f.db.exec('DELETE FROM question_bank_profiles WHERE id=99')
+  f.db.exec("INSERT INTO question_bank_profiles(id,name) VALUES(99,'Replacement synthetic bank')")
+  assert.notEqual(f.db.prepare('SELECT identity FROM daily_study_bank_identity WHERE profile_id=99').get().identity, temporaryIdentity, 'physical bank ID reuse changes identity')
   const oldIdentity = chosen.items[0].identity
   f.db.exec("DELETE FROM vocabulary_entries WHERE id=1001")
   f.seed(1, 'ready', 1001)
