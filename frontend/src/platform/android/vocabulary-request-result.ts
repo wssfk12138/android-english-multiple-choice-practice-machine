@@ -1,7 +1,7 @@
 import type { SQLiteDBConnection } from '@capacitor-community/sqlite'
 
 export type VocabularyTask = 'translation' | 'enrichment'
-export type VocabularyFailure = 'configuration' | 'http' | 'unknown' | 'parse' | 'validation' | 'save'
+export type VocabularyFailure = 'configuration' | 'http' | 'unknown' | 'truncated' | 'parse' | 'validation' | 'save'
 export interface VocabularyBatchResult {
   requestedIds: number[]
   modelValidIds: number[]

@@ -57,16 +57,19 @@ async function work() {
       }
       const result = observedResult
       result.writtenIds = [] // A rejected exclusive write transaction rolled back its content.
-      const status = cause instanceof LocalApiError && typeof cause.detail === 'object'
-        ? (cause.detail as { httpStatus?: number })?.httpStatus : undefined
+      const detail = cause instanceof LocalApiError && typeof cause.detail === 'object'
+        ? cause.detail as { httpStatus?: number; code?: string } | null : undefined
+      const status = detail?.httpStatus
       result.metadata = { ...metadata, ...(status ? { httpStatus: status } : {}) }
       result.failure = status && status >= 300 ? 'http'
         : !responding ? 'unknown' : committing && !(cause instanceof LocalApiError) ? 'save'
-          : cause instanceof LocalApiError && cause.status === 502 ? 'validation' : 'parse'
+          : cause instanceof LocalApiError && cause.status === 502
+            ? detail?.code === 'vocabulary_response_truncated' ? 'truncated' : 'validation' : 'parse'
       // Persist only a controlled category, never a provider's exception/body/URL.
       for (const id of claim.ids) result.invalid[id] = {
         configuration: '配置变化或发送前停止', http: `供应商返回 HTTP ${status}`, unknown: '请求结果未知',
-        save: '有效响应保存失败', validation: '模型缺少必需字段或词条不匹配', parse: '模型响应解析失败',
+        save: '有效响应保存失败', truncated: '模型响应被截断或未完整生成',
+        validation: '模型缺少必需字段或词条不匹配', parse: '模型响应解析失败',
       }[result.failure]
       try { await failVocabularyAttempt(claim, result) } catch { localFailure = true }
     } finally {

@@ -294,7 +294,7 @@ test('restart before intent resumes only proven-unsent members; post-commit rest
   assert.equal((await store.vocabularyRequestStatus()).unknown.length,0);f.close()
 })
 test('HTTP rejection categories and malformed output persist stop without leaking exception bodies',async()=>{
-  for(const status of [401,403,429,500]){
+  for(const status of [401,403,429,500,502]){
     const f=fixture();f.seed(9)
     f.onRequest(async(_ids,execution)=>{execution.response({httpStatus:status});throw new LocalApiError(400,'private-provider-body',{httpStatus:status})})
     await f.load('platform/android/vocabulary-request-runner').requestVocabularyRun('translation');await f.settle()
@@ -306,6 +306,39 @@ test('HTTP rejection categories and malformed output persist stop without leakin
   const f=fixture();f.seed(9);f.setResponse('not-json')
   await f.load('platform/android/vocabulary-request-runner').requestVocabularyRun('translation');await f.settle()
   assert.equal(f.db.prepare('SELECT category FROM vocabulary_request_attempts').get().category,'parse');assert.equal(f.calls.length,1);f.close()
+})
+test('truncated responses persist their own safe category for both tasks without resend',async()=>{
+  for(const task of ['translation','enrichment'])for(const finishReason of ['incomplete','length','content_filter','max_tokens']){
+    const f=fixture();f.seed(2,task==='translation'?'pending':'ready')
+    if(task==='enrichment')f.db.exec('INSERT INTO vocabulary_enrichment_jobs(entry_id) VALUES(1),(2)')
+    f.onRequest(async(_ids,execution)=>{
+      execution.response({httpStatus:200,finishReason,requestId:'synthetic-truncated-request'})
+      throw new LocalApiError(502,'private-provider-body',{code:'vocabulary_response_truncated'})
+    })
+    const runner=f.load('platform/android/vocabulary-request-runner')
+    await runner.requestVocabularyRun(task);await f.settle()
+    const attempt=f.db.prepare('SELECT category,result FROM vocabulary_request_attempts').get()
+    assert.equal(attempt.category,'truncated')
+    const result=JSON.parse(attempt.result)
+    assert.equal(result.metadata.finishReason,finishReason);assert.equal(result.metadata.httpStatus,200)
+    assert.equal(result.metadata.requestId,'synthetic-truncated-request')
+    assert.deepEqual(result.modelValidIds,[]);assert.deepEqual(result.writtenIds,[])
+    assert.ok(Object.values(result.invalid).every(reason=>reason==='模型响应被截断或未完整生成'))
+    assert.equal(attempt.result.includes('private-provider-body'),false)
+    assert.equal((await f.load('platform/android/vocabulary-request-store').vocabularyRequestStatus()).reason,'truncated')
+    await f.load('platform/android/vocabulary-request-recovery').recoverVocabularyRequests(f.raw)
+    await runner.requestVocabularyRun(task);await f.settle();assert.equal(f.calls.length,1);f.close()
+  }
+})
+test('local 502 structure and field errors remain validation failures',async()=>{
+  for(const task of ['translation','enrichment']){
+    const f=fixture();f.seed(1,task==='translation'?'pending':'ready')
+    if(task==='enrichment')f.db.exec('INSERT INTO vocabulary_enrichment_jobs(entry_id) VALUES(1)')
+    f.setResponse('[]')
+    await f.load('platform/android/vocabulary-request-runner').requestVocabularyRun(task);await f.settle()
+    assert.equal(f.db.prepare('SELECT category FROM vocabulary_request_attempts').get().category,'validation')
+    assert.equal(f.calls.length,1);f.close()
+  }
 })
 test('old attempt is superseded by a new retry, duplicate callbacks cannot overwrite it',async()=>{
   const f=fixture();f.seed(1)

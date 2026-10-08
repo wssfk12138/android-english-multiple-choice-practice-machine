@@ -285,7 +285,7 @@ async function chatCompletion(
     if (typeof finish === 'string' && /^[a-zA-Z0-9_-]{1,60}$/.test(finish)) metadata.finishReason = finish
     options.execution.response(metadata)
     if (['length','incomplete','content_filter','max_tokens'].includes(String(finish))) {
-      throw new LocalApiError(502, '词汇响应被截断或未完整生成，未自动重发')
+      throw new LocalApiError(502, '词汇响应被截断或未完整生成，未自动重发', { code: 'vocabulary_response_truncated' })
     }
   }
   try {

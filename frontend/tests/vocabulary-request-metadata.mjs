@@ -32,9 +32,20 @@ test('production chat wrapper preserves HTTP/request/finish/usage metadata witho
   assert.equal(lastRequest.readTimeout,undefined);assert.equal(lastRequest.totalTimeout,undefined)
   profile.base_url='https://www.fastaitoken.com/v1';profile.adapter='openai-responses'
   payload={status:'incomplete',output_text:'partial',usage:{input_tokens:100,output_tokens:40,total_tokens:140,output_tokens_details:{reasoning_tokens:25},input_tokens_details:{cached_tokens:60}}}
-  await assert.rejects(api.chatCompletion(1,'synthetic',[],{responseFormat:{type:'json_object'},execution:{beforeSend:async()=>{},response:metadata=>seen.push(plain(metadata))}}),/截断/)
+  await assert.rejects(api.chatCompletion(1,'synthetic',[],{responseFormat:{type:'json_object'},execution:{beforeSend:async()=>{},response:metadata=>seen.push(plain(metadata))}}),cause=>{
+    assert.match(cause.message,/截断/);assert.deepEqual(plain(cause.detail),{code:'vocabulary_response_truncated'});return true
+  })
   assert.equal(sent,4);assert.equal(lastRequest.readTimeout,180000)
   assert.deepEqual(plain(lastRequest.data.text),{format:{type:'json_object'}})
   assert.equal(seen.at(-1).finishReason,'incomplete');assert.equal(seen.at(-1).usage.total_tokens,140)
+  profile.adapter='openai-chat'
+  for(const finish of ['length','content_filter','max_tokens']){
+    payload={choices:[{message:{content:'private-provider-body'},finish_reason:finish}]}
+    const before=sent
+    await assert.rejects(api.chatCompletion(1,'synthetic',[],{execution:{beforeSend:async()=>{},response:metadata=>seen.push(plain(metadata))}}),cause=>{
+      assert.deepEqual(plain(cause.detail),{code:'vocabulary_response_truncated'});assert.equal(cause.message.includes('private-provider-body'),false);return true
+    })
+    assert.equal(sent,before+1);assert.equal(seen.at(-1).finishReason,finish)
+  }
   f.close()
 })
