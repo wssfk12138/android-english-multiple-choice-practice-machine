@@ -72,6 +72,24 @@ const timestamp = '2026-09-08 10:00:00'
 const insert = (f, text) => f.sqlite.prepare('INSERT INTO vocabulary_entries(term, normalized_term, note, updated_at) VALUES (?, ?, ?, ?)').run('word', 'word', text, timestamp)
 const note = f => f.sqlite.prepare('SELECT note FROM vocabulary_entries').get().note
 
+test('daily-study identity stays local across word synchronization', async () => {
+  const a = await fixture(), b = await fixture()
+  try {
+    insert(a, 'source'); insert(b, 'destination')
+    const identity = f => f.sqlite.prepare('SELECT daily_study_identity FROM vocabulary_entries').get().daily_study_identity
+    const before = identity(b)
+    const changes = await a.collectLocalChanges({}, tables)
+    const payload = changes.changes.vocabulary_entries[0]
+    assert.equal(payload.normalized_term, 'word')
+    assert.equal('daily_study_identity' in payload, false)
+    assert.equal('sync_id' in payload, false)
+    payload.daily_study_identity = identity(a)
+    await b.applyRemoteChanges(changes.changes, [])
+    assert.equal(identity(b), before, 'remote data cannot overwrite the local resume identity')
+    assert.notEqual(identity(a), identity(b))
+  } finally { a.sqlite.close(); b.sqlite.close() }
+})
+
 test('attempt ledger preserves legacy baseline, stable ordering, recent window and idempotence', () => {
   const module = { exports: {} }
   vm.runInNewContext(compile(read('attempt-stats')), module)

@@ -63,10 +63,10 @@ export class DailyStudySession {
   private changed() { this.dependencies.changed() }
   get scopeKey() { return this.catalog?.scope_key || '' }
   get cacheSize() { return this.cache.size }
-  get scrollTop() { return this.state.entry ? this.positions[String(this.state.entry.sync_id)] || 0 : 0 }
+  get scrollTop() { return this.state.entry ? this.positions[String(this.state.entry.daily_study_identity)] || 0 : 0 }
   save(top?: number) {
     if (top !== undefined && this.state.entry && Number.isFinite(top)) {
-      const identity = String(this.state.entry.sync_id)
+      const identity = String(this.state.entry.daily_study_identity)
       delete this.positions[identity]
       this.positions[identity] = Math.max(0, top)
       this.positions = Object.fromEntries(Object.entries(this.positions).slice(-200))
@@ -118,7 +118,7 @@ export class DailyStudySession {
         try { entry = this.cache.get(member.identity) || await this.dependencies.detail(member.id) }
         catch (cause) { if ((cause as { status?: number }).status !== 404) throw cause }
         if (this.disposed || token !== this.generation) return
-        if (!entry || entry.sync_id !== member.identity) {
+        if (!entry || entry.daily_study_identity !== member.identity) {
           this.cache.delete(member.identity); delete this.positions[member.identity]
           this.state.items = this.state.items.filter(item => item.identity !== member.identity)
           this.state.index = Math.min(this.state.index, Math.max(0, this.state.items.length - 1))
@@ -144,7 +144,7 @@ export class DailyStudySession {
       if (!member || this.cache.has(member.identity) || this.prefetching.has(member.identity) || this.prefetching.size >= 2) continue
       this.prefetching.add(member.identity)
       void this.dependencies.detail(member.id).then(entry => {
-        if (!this.disposed && token === this.generation && epoch === this.epoch && entry.sync_id === member.identity) this.remember(member.identity, entry)
+        if (!this.disposed && token === this.generation && epoch === this.epoch && entry.daily_study_identity === member.identity) this.remember(member.identity, entry)
       }).catch(() => { /* Optional adjacent reads cannot block navigation. */ }).finally(() => this.prefetching.delete(member.identity))
     }
   }

@@ -12,7 +12,7 @@ const storage = { getItem: key => records.get(key), setItem: (key, value) => { i
 const detail = async id => {
   if (delayed?.id === id) await delayed.promise
   if (missing.has(id)) throw Object.assign(Error('deleted'), { status: 404 })
-  return { id, sync_id: members[id - 1].identity, common_meaning: revision, review_count: 0 }
+  return { id, daily_study_identity: members[id - 1].identity, common_meaning: revision, review_count: 0 }
 }
 const dependencies = { catalog: async () => { catalogReads++; return { scope_key: scope, revision, items: [...members] } },
   status: async () => ({ scope_key: scope, revision }), detail, storage, changed() {} }

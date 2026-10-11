@@ -27,7 +27,7 @@ async function businessColumns(db: VersionDb, table: string): Promise<string[]> 
   const columns = (await db.query(`PRAGMA table_info(${table})`)).values || []
   return columns
     .map(column => String(column.name))
-    .filter(name => !name.startsWith('_sync_'))
+    .filter(name => !name.startsWith('_sync_') && name !== 'daily_study_identity')
     .sort()
 }
 
@@ -88,7 +88,7 @@ export async function ensureSyncVersions(
     for (const [name, definition] of [['_sync_seq', 'INTEGER NOT NULL DEFAULT 0'], ['_sync_rev', 'INTEGER NOT NULL DEFAULT 0'], ['_sync_origin', "TEXT NOT NULL DEFAULT ''"]] as const) {
       if (!names.has(name)) await execute(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`)
     }
-    const business = [...names].filter(name => !name.startsWith('_sync_')).sort()
+    const business = [...names].filter(name => !name.startsWith('_sync_') && name !== 'daily_study_identity').sort()
     const increment = `UPDATE sync_change_clock SET seq=seq+1 WHERE id=1; UPDATE ${table} SET _sync_seq=(SELECT seq FROM sync_change_clock WHERE id=1)`
     // Metadata writes are excluded from UPDATE OF, including with recursive triggers.
     // https://sqlite.org/lang_createtrigger.html

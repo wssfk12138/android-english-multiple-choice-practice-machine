@@ -54,8 +54,8 @@ watch(nav, (element, previous) => { if (previous) navObserver.unobserve(previous
 const expanded = new Map<string, Record<string, boolean>>()
 function capture() {
   // During out-in transitions the previous DOM can outlive the new entry.
-  if (!current.value || !scroller.value || scroller.value.dataset.identity !== current.value.sync_id) return
-  expanded.set(current.value.sync_id, Object.fromEntries([...scroller.value.querySelectorAll('details')].map(detail => [detail.closest<HTMLElement>('[data-study-section]')!.dataset.studySection!, detail.open])))
+  if (!current.value || !scroller.value || scroller.value.dataset.identity !== current.value.daily_study_identity) return
+  expanded.set(current.value.daily_study_identity, Object.fromEntries([...scroller.value.querySelectorAll('details')].map(detail => [detail.closest<HTMLElement>('[data-study-section]')!.dataset.studySection!, detail.open])))
   session.save(scroller.value.scrollTop)
 }
 function saveScroll() {
@@ -66,7 +66,7 @@ function saveScroll() {
 async function restore() {
   await nextTick()
   if (disposed || !landscape.value || !current.value || !scroller.value) return
-  const saved = expanded.get(current.value.sync_id)
+  const saved = expanded.get(current.value.daily_study_identity)
   scroller.value.querySelectorAll('details').forEach(detail => { detail.open = saved?.[detail.closest<HTMLElement>('[data-study-section]')!.dataset.studySection!] ?? true })
   scroller.value.scrollTop = Math.min(session.scrollTop, Math.max(0, scroller.value.scrollHeight - scroller.value.clientHeight))
   nav.value?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
@@ -79,10 +79,10 @@ async function go(index: number) {
   clearTimeout(saveTimer); capture(); cancelGesture()
   direction.value = index < value.index ? 'left' : 'right'
   switching.value = true
-  const old = current.value?.sync_id
+  const old = current.value?.daily_study_identity
   await session.select(index)
   if (disposed) return
-  if (state.value!.phase !== 'ready' || current.value?.sync_id === old || !landscape.value) unlock()
+  if (state.value!.phase !== 'ready' || current.value?.daily_study_identity === old || !landscape.value) unlock()
   else unlockTimer = setTimeout(unlock, 1500) // Also release if the WebView interrupts a transition.
 }
 async function retry() {
@@ -171,9 +171,9 @@ onBeforeUnmount(() => {
         <button v-if="windowRange.end < state!.items.length" class="nav-group" aria-label="后一组单词" :disabled="state!.busy || switching" @click="go(windowRange.end)"><ChevronRight :size="18" /></button>
       </nav>
       <Transition :name="'study-slide-' + direction" mode="out-in" @enter="restore" @after-enter="entered" @enter-cancelled="unlock" @leave-cancelled="unlock">
-        <article v-if="state!.phase === 'ready' && current" :key="current.sync_id" class="study-card card" :aria-busy="state!.busy" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerEnd" @lostpointercapture="cancelGesture">
+        <article v-if="state!.phase === 'ready' && current" :key="current.daily_study_identity" class="study-card card" :aria-busy="state!.busy" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerEnd" @lostpointercapture="cancelGesture">
           <header class="word-heading"><div><h1><VocabularyTerm :term="current.term" :frequent="current.is_frequent" /></h1><p v-if="current.phonetic || current.part_of_speech"><span>{{ current.phonetic }}</span><span v-if="current.part_of_speech" class="pos-badge">{{ current.part_of_speech }}</span></p></div><button class="button ghost expand-all" @click="expandAll">展开全部<ChevronDown :size="15" /></button></header>
-          <div ref="scroller" class="study-scroll content-scroll" :data-identity="current.sync_id" @scroll.passive="saveScroll">
+          <div ref="scroller" class="study-scroll content-scroll" :data-identity="current.daily_study_identity" @scroll.passive="saveScroll">
             <div class="reading-columns">
               <div v-for="(column, index) in columns" :key="index" class="reading-column">
                 <template v-for="key in column" :key="key">

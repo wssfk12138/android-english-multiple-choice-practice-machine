@@ -210,6 +210,7 @@ CREATE TABLE IF NOT EXISTS wrong_analysis_states (
 );
 CREATE TABLE IF NOT EXISTS vocabulary_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  daily_study_identity TEXT DEFAULT (lower(hex(randomblob(16)))),
   term TEXT NOT NULL,
   normalized_term TEXT NOT NULL UNIQUE,
   lemma TEXT NOT NULL DEFAULT '',
@@ -671,6 +672,24 @@ async function ensureColumn(
     await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`)
     names.add(column)
   }
+}
+
+// Device-local identity for daily-study resume/cache. LAN words continue to use
+// normalized_term; adding sync_id here would change the LAN merge algorithm.
+async function migrateVocabularyStudyIdentity(db: SQLiteDBConnection) {
+  await ensureColumn(db, 'vocabulary_entries', 'daily_study_identity', 'TEXT')
+  await db.execute(`
+    UPDATE vocabulary_entries SET daily_study_identity = lower(hex(randomblob(16)))
+      WHERE daily_study_identity IS NULL OR daily_study_identity = '';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_vocab_daily_study_identity
+      ON vocabulary_entries(daily_study_identity);
+    CREATE TRIGGER IF NOT EXISTS trg_vocab_daily_study_identity_insert
+    AFTER INSERT ON vocabulary_entries
+    WHEN NEW.daily_study_identity IS NULL OR NEW.daily_study_identity = ''
+    BEGIN
+      UPDATE vocabulary_entries SET daily_study_identity = lower(hex(randomblob(16))) WHERE id = NEW.id;
+    END;
+  `)
 }
 
 /**
@@ -1547,6 +1566,7 @@ async function rawAndroidDatabase(): Promise<SQLiteDBConnection> {
         await db.execute(`ALTER TABLE vocabulary_entries ADD COLUMN ${name} ${declaration}`)
         vocabNames.add(name)
       }
+      await migrateVocabularyStudyIdentity(db)
       const reviewNames = await tableColumnNames(db, 'vocabulary_reviews')
       if (!reviewNames.has('mode')) {
         await db.execute("ALTER TABLE vocabulary_reviews ADD COLUMN mode TEXT NOT NULL DEFAULT 'scheduled'")

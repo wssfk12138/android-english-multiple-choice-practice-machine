@@ -23,7 +23,7 @@ function fixture() {
     return originalSet.call(this, key, value)
   }
   const member = id => ({ id, term: id === 1203 ? 'pneumonoultramicroscopicsilicovolcanoconiosis' : 'evidence' + id, identity: 'stable-' + id })
-  const detail = id => ({ ...member(id), sync_id: 'stable-' + id, ...globalThis.reviewFields,
+  const detail = id => ({ ...member(id), daily_study_identity: 'stable-' + id, ...globalThis.reviewFields,
     translation_status: 'ready', common_meaning: '证据；根据 · revision ' + globalThis.revision,
     phonetic: '/ˈevɪdəns/', part_of_speech: 'n.', contextual_meaning: '用于判断与推理的事实依据',
     latest_sentence: 'Researchers compare evidence and revise their explanations when new observations become available. '.repeat(globalThis.longContent ? 12 : 1),

@@ -714,6 +714,7 @@ async function serializeLocalRow(
   lookup: SerializationLookup,
 ): Promise<JsonRecord> {
   const payload: JsonRecord = { ...item }
+  if (table === 'vocabulary_entries') delete payload.daily_study_identity
   if (table === 'wrong_stats' && !payload.attempt_ledger) Object.assign(payload, aggregateAttempts(payload))
   delete payload._sync_seq
   if (table === 'ai_profiles') {
@@ -1010,6 +1011,7 @@ async function upsertRemoteRow(db: QueryDb, table: string, payload: JsonRecord):
   for (const column of columnNames) {
     const name = String(column)
     if (name === 'id' || name.startsWith('_sync_')) continue
+    if (table === 'vocabulary_entries' && name === 'daily_study_identity') continue
     if (table === 'ai_profiles' && (name === 'api_key' || name === 'api_key_encrypted')) continue
     if (name === 'unit_ids') {
       const keys = payload.unit_ids_keys || []

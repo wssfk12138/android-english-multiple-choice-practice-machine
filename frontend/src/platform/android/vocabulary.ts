@@ -394,7 +394,7 @@ export async function dailyStudyCatalog(searchParams: URLSearchParams): Promise<
     const selection = vocabularySelection(searchParams, profileId, new Date().toISOString())
     const metadata = await dailyStudyMetadata(executor, searchParams, profileId)
     const items = await executor.rows<JsonRecord>(
-      'SELECT id, term, sync_id AS identity FROM vocabulary_entries WHERE ' + selection.conditions.join(' AND ') + ' ORDER BY ' + selection.orderBy,
+      'SELECT id, term, daily_study_identity AS identity FROM vocabulary_entries WHERE ' + selection.conditions.join(' AND ') + ' ORDER BY ' + selection.orderBy,
       selection.values,
     )
     return { ...metadata, items }

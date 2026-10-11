@@ -14,7 +14,7 @@ export const schema = source.statements.flatMap(s => ts.isVariableStatement(s) ?
 export function fixture() {
   const db = new DatabaseSync(':memory:')
   db.exec(schema)
-  for (const table of ['vocabulary_occurrences','vocabulary_entries','vocabulary_reviews']) {
+  for (const table of ['vocabulary_occurrences','vocabulary_reviews']) {
     if (!db.prepare(`PRAGMA table_info(${table})`).all().some(column => column.name === 'sync_id')) db.exec(`ALTER TABLE ${table} ADD COLUMN sync_id TEXT`)
   }
   db.exec("INSERT INTO ai_profiles(id,name,base_url,enabled,default_model) VALUES(1,'Synthetic','https://synthetic.invalid',1,'synthetic')")
@@ -89,7 +89,7 @@ export function fixture() {
     cache.set(name, api); return api
   }
   const seed = (count, status = 'pending', start = 1) => {
-    for (let id = start; id < start + count; id++) db.prepare('INSERT INTO vocabulary_entries(id,term,normalized_term,translation_status,sync_id) VALUES(?,?,?,?,?)').run(id, 'go', 'go' + id, status, 'word-' + id)
+    for (let id = start; id < start + count; id++) db.prepare('INSERT INTO vocabulary_entries(id,term,normalized_term,translation_status) VALUES(?,?,?,?)').run(id, 'go', 'go' + id, status)
   }
   return { db, raw, database, calls, state, load, seed, evaluate,
     setResponse: value => { response = value }, onRequest: value => { onRequest = value }, fault: value => { fault = value },

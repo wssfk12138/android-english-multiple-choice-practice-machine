@@ -38,7 +38,6 @@ try {
   const oldIdentity = chosen.items[0].identity
   f.db.exec("DELETE FROM vocabulary_entries WHERE id=1001")
   f.seed(1, 'ready', 1001)
-  f.db.exec("UPDATE vocabulary_entries SET sync_id='replacement' WHERE id=1001")
   assert.notEqual((await api.dailyStudyCatalog(new URLSearchParams())).items.find(x => x.id===1001).identity, oldIdentity)
   f.db.exec("UPDATE app_settings SET value='different-db' WHERE key='daily_study_database_id'")
   assert.notEqual((await api.dailyStudyStatus(new URLSearchParams())).scope_key, all.scope_key)
