@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>更新与远程题库 · 下载信息 UI 预览</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #edf2f6;
+      --surface: rgba(250, 252, 255, .94);
+      --surface-solid: #fafcff;
+      --surface-raised: #ffffff;
+      --ink: #29313c;
+      --muted: #616d7d;
+      --line: rgba(91, 110, 133, .18);
+      --line-strong: rgba(75, 95, 121, .28);
+      --primary: #416a9a;
+      --primary-hover: #315580;
+      --primary-soft: #dfeaf6;
+      --primary-faint: #edf3fa;
+      --lavender: #e9e4f5;
+      --apricot: #f7dfc6;
+      --blue: #dcecf4;
+      --danger: #b54f46;
+      --danger-soft: #fae3dd;
+      --success: #34785a;
+      --success-soft: #e2f2e9;
+      --focus: rgba(65, 106, 154, .3);
+      --shadow-sm: 0 4px 14px rgba(57, 66, 58, .075);
+      --shadow: 0 16px 42px rgba(57, 66, 58, .13);
+      --radius: 14px;
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #191b20;
+      --surface: rgba(37, 40, 47, .94);
+      --surface-solid: #25282f;
+      --surface-raised: #2b2f38;
+      --ink: #f0f1f5;
+      --muted: #b7bdc8;
+      --line: rgba(211, 216, 235, .15);
+      --line-strong: rgba(211, 216, 235, .25);
+      --primary: #a5c5ed;
+      --primary-hover: #c0d7f4;
+      --primary-soft: #334154;
+      --primary-faint: #2b3340;
+      --lavender: #38324f;
+      --apricot: #49382f;
+      --blue: #263c58;
+      --danger: #f0a097;
+      --danger-soft: #4c3038;
+      --success: #91d5ae;
+      --success-soft: #2e4739;
+      --focus: rgba(165, 197, 237, .34);
+      --shadow-sm: 0 5px 17px rgba(0, 0, 0, .2);
+      --shadow: 0 18px 48px rgba(0, 0, 0, .3);
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    .preview-toolbar {
+      min-height: 48px;
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-solid);
+    }
+    .preview-toolbar strong { font-size: 13px; }
+    .toolbar-actions, .scheme-tabs, .state-tabs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .toolbar-label { color: var(--muted); font-size: 12px; }
+    .tool-button, .scheme-tab, .state-tab {
+      min-height: 32px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--ink);
+      background: var(--surface-solid);
+    }
+    .scheme-tab.active, .state-tab.active { color: #fff; border-color: var(--primary); background: var(--primary); }
+    html[data-theme="dark"] .scheme-tab.active, html[data-theme="dark"] .state-tab.active { color: #191b20; }
+    .app-shell { min-height: calc(100vh - 49px); display: grid; grid-template-columns: 220px minmax(0, 1fr); }
+    .sidebar {
+      min-height: calc(100vh - 49px);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding: 20px 14px 14px;
+      border-right: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; padding: 4px 6px 12px; }
+    .brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; color: var(--primary); background: var(--primary-soft); font-size: 20px; font-weight: 800; }
+    .brand-copy { min-width: 0; display: grid; gap: 2px; }
+    .brand-copy strong { font-size: 15px; }
+    .brand-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+    .primary-nav { display: grid; gap: 4px; }
+    .primary-nav a { min-height: 42px; display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 11px; color: var(--muted); text-decoration: none; }
+    .primary-nav a:hover { color: var(--ink); background: var(--primary-faint); }
+    .primary-nav a.active { color: var(--primary); background: var(--primary-soft); font-weight: 700; }
+    .nav-icon { width: 20px; text-align: center; font-size: 16px; }
+    .sidebar-note { margin-top: auto; display: flex; align-items: flex-start; gap: 8px; padding: 10px 8px; color: var(--muted); font-size: 11px; }
+    .sidebar-note p { margin: 0; }
+    .theme-button { min-height: 40px; border: 1px solid var(--line); border-radius: 11px; color: var(--ink); background: var(--surface-solid); }
+    .main-content { min-width: 0; padding: 22px 24px 30px; overflow: auto; }
+    .page { width: min(1180px, 100%); margin: 0 auto; }
+    .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    .page-title-row { display: flex; align-items: center; min-width: 0; gap: 10px; }
+    .page-title-row h1 { margin: 0; font-size: 22px; line-height: 1.25; letter-spacing: -.02em; }
+    .back-button, .community-button { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: var(--surface-solid); }
+    .back-button:hover, .community-button:hover { color: var(--primary); border-color: var(--primary); background: var(--primary-faint); }
+    .community-actions { display: flex; align-items: center; gap: 8px; }
+    .community-button svg { width: 19px; height: 19px; fill: currentColor; }
+    .overview-strip { display: grid; grid-template-columns: 1.25fr repeat(3, minmax(110px, .62fr)); gap: 10px; margin-bottom: 13px; }
+    .overview-item { min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+    .overview-item strong { display: block; font-size: 16px; }
+    .overview-item span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .overview-item.primary { border-color: color-mix(in srgb, var(--primary) 45%, var(--line)); background: var(--primary-faint); }
+    .content-grid { display: grid; grid-template-columns: minmax(0, 1.38fr) minmax(330px, .92fr); gap: 13px; align-items: start; }
+    .card { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-sm); }
+    .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+    .card-head h2 { margin: 0; font-size: 17px; }
+    .card-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .head-actions { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+    .button { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--primary); border-radius: 10px; color: #fff; background: var(--primary); font-weight: 700; }
+    .button.secondary { color: var(--primary); border-color: var(--line-strong); background: var(--surface-solid); }
+    html[data-theme="dark"] .button:not(.secondary) { color: #191b20; }
+    .button.compact { min-height: 34px; padding: 6px 10px; font-size: 12px; }
+    .url-field { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .url-field label { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .url-field input { min-width: 0; width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--surface-solid); text-overflow: ellipsis; }
+    .download-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; padding: 10px 12px; border-radius: 11px; color: var(--ink); background: var(--primary-faint); }
+    .download-summary strong { font-size: 13px; }
+    .download-summary span { color: var(--muted); font-size: 12px; }
+    .bank-list, .version-list { display: grid; gap: 8px; }
+    .bank-row, .version-row { min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); }
+    .bank-row.selected, .version-row.available { border-color: color-mix(in srgb, var(--primary) 55%, var(--line)); background: color-mix(in srgb, var(--primary-faint) 70%, var(--surface-solid)); }
+    .bank-row-top, .version-row-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .row-title { min-width: 0; display: flex; align-items: flex-start; gap: 9px; }
+    .row-title input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--primary); }
+    .row-title strong, .version-row strong { display: block; overflow-wrap: anywhere; }
+    .row-meta, .version-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 3px 0 0 27px; color: var(--muted); font-size: 11px; }
+    .version-meta { margin-left: 0; }
+    .badge { flex: none; padding: 3px 8px; border-radius: 999px; color: var(--primary); background: var(--primary-soft); font-size: 11px; white-space: nowrap; }
+    .badge.success { color: var(--success); background: var(--success-soft); }
+    .badge.failed { color: var(--danger); background: var(--danger-soft); }
+    .download-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 9px 0 0 27px; }
+    .progress-track { height: 8px; overflow: hidden; border-radius: 99px; background: var(--line); }
+    .progress-value { height: 100%; border-radius: inherit; background: var(--primary); }
+    .progress-value.success { background: var(--success); }
+    .progress-value.failed { background: var(--danger); }
+    .download-stats { display: flex; justify-content: space-between; gap: 10px; margin: 5px 0 0 27px; color: var(--muted); font-size: 11px; }
+    .download-stats b { color: var(--ink); font-weight: 700; }
+    .card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); }
+    .card-footer .muted { color: var(--muted); font-size: 11px; }
+    .update-notes { margin: 8px 0 0; padding: 9px 10px; border-radius: 9px; color: var(--muted); background: var(--primary-faint); font-size: 12px; line-height: 1.55; }
+    .state-line { display: flex; align-items: center; gap: 7px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .state-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); }
+    .state-dot.success { background: var(--success); }
+    .state-dot.failed { background: var(--danger); }
+    .scheme-only { display: none; }
+    .scheme-only.active { display: block; }
+
+    /* A: information stays inside each downloadable row. */
+    .scheme-a .bank-row, .scheme-a .version-row { padding-bottom: 12px; }
+    .scheme-a .download-line { grid-template-columns: minmax(0,1fr) auto auto; }
+    .scheme-a .speed-chip { color: var(--primary); font-weight: 700; font-size: 11px; white-space: nowrap; }
+
+    /* B: a single summary block gives the user one download center. */
+    .scheme-b .download-center { display: grid; grid-template-columns: 112px minmax(0,1fr); gap: 16px; align-items: center; margin-bottom: 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--primary) 36%, var(--line)); border-radius: 13px; background: var(--primary-faint); }
+    .scheme-b .big-progress { width: 92px; height: 92px; display: grid; place-items: center; border-radius: 50%; background: conic-gradient(var(--primary) 68%, var(--line) 0); }
+    .scheme-b .big-progress::after { content: ""; width: 72px; height: 72px; border-radius: 50%; background: var(--surface-solid); }
+    .scheme-b .big-progress span { position: absolute; z-index: 1; font-size: 18px; font-weight: 800; }
+    .scheme-b .center-copy { min-width: 0; }
+    .scheme-b .center-copy strong { display: block; font-size: 15px; }
+    .scheme-b .center-copy p { margin: 3px 0 9px; color: var(--muted); font-size: 12px; }
+    .scheme-b .metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+    .scheme-b .metric { min-width: 0; padding: 7px 8px; border-radius: 9px; background: color-mix(in srgb, var(--surface-solid) 70%, transparent); }
+    .scheme-b .metric b { display: block; font-size: 13px; }
+    .scheme-b .metric span { color: var(--muted); font-size: 10px; }
+    .scheme-b .bank-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: center; }
+    .scheme-b .download-line { margin: 7px 0 0 27px; }
+    .scheme-b .download-stats { margin-left: 27px; }
+    .scheme-b .version-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; }
+    .scheme-b .version-row .update-notes { grid-column: 1 / -1; }
+
+    /* C: the currently active download is visually dominant, the queue is calm. */
+    .scheme-c .active-download { display: grid; grid-template-columns: 134px minmax(0,1fr); gap: 16px; align-items: center; margin-bottom: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-solid); }
+    .scheme-c .ring { width: 112px; height: 112px; display: grid; place-items: center; position: relative; border-radius: 50%; background: conic-gradient(var(--primary) 68%, var(--line) 0); }
+    .scheme-c .ring::after { content: ""; position: absolute; inset: 10px; border-radius: 50%; background: var(--surface-solid); }
+    .scheme-c .ring strong { position: relative; z-index: 1; font-size: 20px; }
+    .scheme-c .active-copy { min-width: 0; }
+    .scheme-c .active-copy h3 { margin: 0; font-size: 15px; }
+    .scheme-c .active-copy p { margin: 3px 0 9px; color: var(--muted); font-size: 12px; }
+    .scheme-c .active-metrics { display: flex; gap: 8px; flex-wrap: wrap; }
+    .scheme-c .metric-pill { padding: 5px 8px; border-radius: 8px; color: var(--primary); background: var(--primary-faint); font-size: 11px; }
+    .scheme-c .queue-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 7px; color: var(--muted); font-size: 11px; }
+    .scheme-c .queue-item { display: grid; grid-template-columns: 10px minmax(0,1fr) auto; gap: 9px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
+    .scheme-c .queue-item:first-of-type { border-top: 0; }
+    .scheme-c .queue-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line-strong); }
+    .scheme-c .queue-dot.active { background: var(--primary); box-shadow: 0 0 0 4px var(--primary-soft); }
+    .scheme-c .queue-dot.success { background: var(--success); }
+    .scheme-c .queue-item strong { display: block; overflow-wrap: anywhere; font-size: 12px; }
+    .scheme-c .queue-item small { color: var(--muted); font-size: 11px; }
+    .scheme-c .queue-percent { color: var(--muted); font-size: 11px; }
+
+    @media (max-width: 980px) {
+      .app-shell { grid-template-columns: 192px minmax(0,1fr); }
+      .main-content { padding: 18px; }
+      .overview-strip { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .overview-item.primary { grid-column: 1 / -1; }
+      .content-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 700px) {
+      .preview-toolbar { align-items: flex-start; flex-direction: column; }
+      .app-shell { display: block; }
+      .sidebar { min-height: auto; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .brand { padding-bottom: 4px; }
+      .primary-nav { grid-template-columns: repeat(4, minmax(0,1fr)); }
+      .primary-nav a { justify-content: center; padding: 8px 4px; }
+      .primary-nav a span { display: none; }
+      .sidebar-note, .theme-button { display: none; }
+      .main-content { padding: 14px; }
+      .page-head { align-items: flex-start; }
+      .page-title-row h1 { font-size: 19px; }
+      .url-field { grid-template-columns: 1fr; }
+      .head-actions { justify-content: flex-start; }
+      .scheme-b .download-center, .scheme-c .active-download { grid-template-columns: 1fr; }
+      .scheme-b .big-progress, .scheme-c .ring { margin: 0 auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-toolbar">
+    <div>
+      <strong>下载信息显示预览</strong>
+      <span class="toolbar-label"> · 目标视口：平板横屏 · 左侧栏保持原样</span>
+    </div>
+    <div class="toolbar-actions">
+      <span class="toolbar-label">方案</span>
+      <div class="scheme-tabs" role="tablist" aria-label="预览方案">
+        <button class="scheme-tab active" data-scheme="a">A · 行内状态</button>
+        <button class="scheme-tab" data-scheme="b">B · 下载总览</button>
+        <button class="scheme-tab" data-scheme="c">C · 当前任务</button>
+      </div>
+      <span class="toolbar-label">模拟状态</span>
+      <div class="state-tabs" role="tablist" aria-label="模拟下载状态">
+        <button class="state-tab active" data-state="downloading">下载中</button>
+        <button class="state-tab" data-state="done">已完成</button>
+        <button class="state-tab" data-state="failed">失败</button>
+      </div>
+      <button class="tool-button" id="theme-toggle" type="button">切换暗色</button>
+    </div>
+  </div>
+
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#"><span class="brand-mark">英</span><span class="brand-copy"><strong>英语刷题机</strong><small>考研英语一 · 本地题库</small></span></a>
+      <nav class="primary-nav" aria-label="主要导航">
+        <a href="#"><span class="nav-icon">⌂</span><span>首页</span></a>
+        <a href="#"><span class="nav-icon">▤</span><span>题库与练习</span></a>
+        <a href="#"><span class="nav-icon">▧</span><span>错题本</span></a>
+        <a href="#"><span class="nav-icon">Aa</span><span>单词本</span></a>
+        <a href="#"><span class="nav-icon">⇧</span><span>导入题库</span></a>
+        <a href="#"><span class="nav-icon">✦</span><span>AI 学习助手</span></a>
+        <a href="#"><span class="nav-icon">⚙</span><span>设置</span></a>
+        <a class="active" href="#"><span class="nav-icon">↓</span><span>更新</span></a>
+      </nav>
+      <div class="sidebar-note"><span>▥</span><p>慢一点读，答案常藏在句子之间。</p></div>
+      <button class="theme-button" type="button" id="sidebar-theme">☾&nbsp; 夜间模式</button>
+    </aside>
+
+    <main class="main-content">
+      <div class="page">
+        <header class="page-head">
+          <div class="page-title-row"><button class="back-button" type="button" aria-label="返回">←</button><h1>更新与远程题库</h1></div>
+          <div class="community-actions" aria-label="社区入口">
+            <a class="community-button" href="https://qm.qq.com/" target="_blank" rel="noreferrer" aria-label="QQ 群" title="QQ 群">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.4 15.1c-.2-.8-.5-1.5-.8-2.3l-1.1-2.7c0-.1.1-.6.1-.9C19.6 4.6 17.4 0 12 0S4.4 4.6 4.4 9.2c0 .3 0 .8.1.9l-1.1 2.7c-.3.8-.6 1.5-.8 2.3-1 3.3-.7 4.6-.4 4.7.5.1 2.1-2.5 2.1-2.5 0 1.5.8 3.4 2.4 4.8-.6.2-1.4.5-1.8.8-.4.3-.4.6-.3.8.3.6 5.9.4 7.5.2 1.6.2 7.1.4 7.5-.2.1-.1.1-.5-.3-.8-.5-.4-1.2-.6-1.8-.8 1.6-1.4 2.4-3.3 2.4-4.8 0 0 1.6 2.6 2.1 2.5.3 0 .6-1.4-.4-4.7Z"/></svg>
+            </a>
+            <a class="community-button" href="https://github.com/" target="_blank" rel="noreferrer" aria-label="GitHub 项目" title="GitHub 项目">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.4.7-4.1-1.6-4.1-1.6-.5-1.2-1.2-1.5-1.2-1.5-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3Z"/></svg>
+            </a>
+          </div>
+        </header>
+
+        <div class="overview-strip">
+          <div class="overview-item primary"><strong data-bind="summary">正在下载 1 个题库</strong><span data-bind="summary-detail">网络稳定 · 下载信息会持续更新</span></div>
+          <div class="overview-item"><strong data-bind="speed">1.42 MB/s</strong><span>当前速度</span></div>
+          <div class="overview-item"><strong data-bind="downloaded">24.6 / 36.0 MB</strong><span>已下载 / 总大小</span></div>
+          <div class="overview-item"><strong data-bind="eta">约 8 秒</strong><span>预计剩余</span></div>
+        </div>
+
+        <section class="scheme-only scheme-a active" data-scheme-panel="a">
+          <div class="content-grid">
+            <section class="card">
+              <div class="card-head"><div><h2>远程题库</h2><p>每个下载条目直接显示速度、进度和剩余时间</p></div><div class="head-actions"><button class="button secondary compact">保存目录地址</button><button class="button compact">检查远程题库</button></div></div>
+              <div class="url-field"><label>远程题库目录 URL</label><input value="https://github.com/.../question-bank-catalog.json" readonly><button class="button secondary compact">复制</button></div>
+              <div class="download-summary"><strong>发现 3 个可用题库 · 已选 2 个</strong><span>下载中 1 · 已完成 1</span></div>
+              <div class="bank-list">
+                <article class="bank-row selected" data-download-row="downloading"><div class="bank-row-top"><div class="row-title"><input type="checkbox" checked><div><strong>考研英语一 · 2026 题库</strong><div class="row-meta"><span>版本 2026.09</span><span>18 个年份</span><span>36.0 MB</span></div></div></div><span class="badge">下载中</span></div><div class="download-line"><div class="progress-track"><div class="progress-value" style="width:68%"></div></div><span class="speed-chip">1.42 MB/s</span><span class="badge">68%</span></div><div class="download-stats"><span><b>24.6 MB</b> / 36.0 MB</span><span>预计 8 秒 · 已校验 2/3</span></div></article>
+                <article class="bank-row selected" data-download-row="done"><div class="bank-row-top"><div class="row-title"><input type="checkbox" checked><div><strong>大学英语四级 · 高频词题库</strong><div class="row-meta"><span>版本 2026.08</span><span>6 个年份</span><span>12.4 MB</span></div></div></div><span class="badge success">已完成</span></div><div class="download-line"><div class="progress-track"><div class="progress-value success" style="width:100%"></div></div><span class="speed-chip">完成</span><span class="badge success">100%</span></div><div class="download-stats"><span><b>12.4 MB</b> / 12.4 MB</span><span>SHA-256 校验通过</span></div></article>
+                <article class="bank-row" data-download-row="queued"><div class="bank-row-top"><div class="row-title"><input type="checkbox"><div><strong>考研英语二 · 历年真题</strong><div class="row-meta"><span>版本 2026.09</span><span>14 个年份</span><span>28.8 MB</span></div></div></div><span class="badge">待下载</span></div><div class="download-stats"><span>等待当前任务完成</span><span>未开始</span></div></article>
+              </div>
+              <div class="card-footer"><span class="muted">下载完成后仍需进入导入预览确认</span><button class="button compact">安装选中题库（2）</button></div>
+            </section>
+            <section class="card"><div class="card-head"><div><h2>程序更新</h2><p>版本列表保留下载大小和校验进度</p></div><div class="head-actions"><button class="button secondary compact">检查程序更新</button></div></div>
+              <div class="version-list"><article class="version-row available"><div class="version-row-top"><div><strong>0.1.0-beta.11</strong><div class="version-meta"><span>versionCode 129</span><span>74.8 MB</span><span>发布于 2026-09-23</span></div></div><span class="badge">可更新</span></div><p class="update-notes">优化平板横屏更新页的信息层级，补充下载进度与网络状态反馈。</p><div class="download-line" style="margin-left:0"><div class="progress-track"><div class="progress-value" style="width:42%"></div></div><span class="badge">31.4 / 74.8 MB</span></div><div class="download-stats" style="margin-left:0"><span><b>2.08 MB/s</b> · 预计 21 秒</span><span>正在校验</span></div></article><article class="version-row"><div class="version-row-top"><div><strong>0.1.0-beta.10</strong><div class="version-meta"><span>当前已安装</span><span>74.7 MB</span></div></div><span class="badge success">已安装</span></div><div class="state-line"><span class="state-dot success"></span>当前版本运行正常</div></article></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="scheme-only scheme-b" data-scheme-panel="b">
+          <div class="content-grid">
+            <section class="card"><div class="card-head"><div><h2>远程题库</h2><p>先看全局下载状态，再看每个题库的排队情况</p></div><div class="head-actions"><button class="button secondary compact">保存目录地址</button><button class="button compact">检查远程题库</button></div></div>
+              <div class="url-field"><label>远程题库目录 URL</label><input value="https://github.com/.../question-bank-catalog.json" readonly><button class="button secondary compact">复制</button></div>
+              <div class="download-center"><div class="big-progress"><span>68%</span></div><div class="center-copy"><strong>正在下载：考研英语一 · 2026 题库</strong><p>下载中心把最关心的三个数字集中在同一处，列表负责查看队列。</p><div class="metric-grid"><div class="metric"><b>1.42 MB/s</b><span>当前速度</span></div><div class="metric"><b>24.6 / 36.0 MB</b><span>已下载</span></div><div class="metric"><b>约 8 秒</b><span>剩余时间</span></div></div></div></div>
+              <div class="download-summary"><strong>下载队列 3 个</strong><span>已完成 1 · 下载中 1 · 待下载 1</span></div>
+              <div class="bank-list"><article class="bank-row selected"><div><div class="row-title"><input type="checkbox" checked><div><strong>考研英语一 · 2026 题库</strong><div class="row-meta"><span>36.0 MB</span><span>18 个年份</span></div></div></div><div class="download-line"><div class="progress-track"><div class="progress-value" style="width:68%"></div></div><span class="badge">68%</span></div></div><span class="badge">下载中</span></article><article class="bank-row selected"><div><div class="row-title"><input type="checkbox" checked><div><strong>大学英语四级 · 高频词题库</strong><div class="row-meta"><span>12.4 MB</span><span>6 个年份</span></div></div></div><div class="download-line"><div class="progress-track"><div class="progress-value success" style="width:100%"></div></div><span class="badge success">100%</span></div></div><span class="badge success">已完成</span></article><article class="bank-row"><div><div class="row-title"><input type="checkbox"><div><strong>考研英语二 · 历年真题</strong><div class="row-meta"><span>28.8 MB</span><span>14 个年份</span></div></div></div></div><span class="badge">待下载</span></article></div>
+              <div class="card-footer"><span class="muted">速度和 ETA 放在上方，列表更适合比较题库</span><button class="button compact">安装选中题库（2）</button></div>
+            </section>
+            <section class="card"><div class="card-head"><div><h2>程序更新</h2><p>新版本列表和题库列表使用同一套状态语言</p></div><button class="button secondary compact">检查程序更新</button></div><div class="version-list"><article class="version-row available"><div class="version-row-top"><div><strong>0.1.0-beta.11</strong><div class="version-meta"><span>74.8 MB</span><span>versionCode 129</span></div></div><span class="badge">可更新</span></div><p class="update-notes">优化平板横屏更新页的信息层级，补充下载进度与网络状态反馈。</p><div class="download-summary"><strong>程序包下载中</strong><span>42% · 2.08 MB/s · 约 21 秒</span></div><div class="download-line" style="margin-left:0"><div class="progress-track"><div class="progress-value" style="width:42%"></div></div><span class="badge">31.4 / 74.8 MB</span></div></article><article class="version-row"><div class="version-row-top"><div><strong>0.1.0-beta.10</strong><div class="version-meta"><span>当前已安装</span><span>74.7 MB</span></div></div><span class="badge success">已安装</span></div></article></div></section>
+          </div>
+        </section>
+
+        <section class="scheme-only scheme-c" data-scheme-panel="c">
+          <div class="content-grid">
+            <section class="card"><div class="card-head"><div><h2>远程题库</h2><p>突出当前任务，其他题库保持安静的队列状态</p></div><div class="head-actions"><button class="button secondary compact">保存目录地址</button><button class="button compact">检查远程题库</button></div></div>
+              <div class="url-field"><label>远程题库目录 URL</label><input value="https://github.com/.../question-bank-catalog.json" readonly><button class="button secondary compact">复制</button></div>
+              <div class="active-download"><div class="ring"><strong>68%</strong></div><div class="active-copy"><h3>考研英语一 · 2026 题库</h3><p>当前正在下载 · 24.6 MB / 36.0 MB</p><div class="active-metrics"><span class="metric-pill">速度 1.42 MB/s</span><span class="metric-pill">剩余约 8 秒</span><span class="metric-pill">校验 2 / 3</span></div><div class="state-line"><span class="state-dot"></span>网络稳定，下载完成后自动进入校验</div></div></div>
+              <div class="queue-label"><span>下载队列</span><span>3 个题库 · 已选 2 个</span></div><div class="bank-list"><div class="queue-item"><span class="queue-dot active"></span><div><strong>考研英语一 · 2026 题库</strong><small>下载中 · 36.0 MB</small></div><span class="queue-percent">68%</span></div><div class="queue-item"><span class="queue-dot success"></span><div><strong>大学英语四级 · 高频词题库</strong><small>已完成 · SHA-256 校验通过</small></div><span class="queue-percent">100%</span></div><div class="queue-item"><span class="queue-dot"></span><div><strong>考研英语二 · 历年真题</strong><small>等待中 · 28.8 MB</small></div><span class="queue-percent">—</span></div></div>
+              <div class="card-footer"><span class="muted">当前任务始终只有一个视觉焦点</span><button class="button compact">安装选中题库（2）</button></div>
+            </section>
+            <section class="card"><div class="card-head"><div><h2>程序更新</h2><p>把版本更新作为另一条下载任务显示</p></div><button class="button secondary compact">检查程序更新</button></div><div class="active-download"><div class="ring" style="background:conic-gradient(var(--primary) 42%, var(--line) 0)"><strong>42%</strong></div><div class="active-copy"><h3>0.1.0-beta.11</h3><p>程序包正在下载 · 31.4 MB / 74.8 MB</p><div class="active-metrics"><span class="metric-pill">速度 2.08 MB/s</span><span class="metric-pill">剩余约 21 秒</span></div><div class="state-line"><span class="state-dot"></span>下载完成后将校验签名和 SHA-256</div></div></div><div class="version-list"><article class="version-row"><div class="version-row-top"><div><strong>0.1.0-beta.11</strong><div class="version-meta"><span>versionCode 129</span><span>74.8 MB</span></div></div><span class="badge">下载中</span></div><p class="update-notes">优化平板横屏更新页的信息层级，补充下载进度与网络状态反馈。</p></article><article class="version-row"><div class="version-row-top"><div><strong>0.1.0-beta.10</strong><div class="version-meta"><span>当前已安装</span><span>74.7 MB</span></div></div><span class="badge success">已安装</span></div></article></div></section>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const root = document.documentElement
+    const schemeTabs = [...document.querySelectorAll('[data-scheme]')]
+    const stateTabs = [...document.querySelectorAll('[data-state]')]
+    const panels = [...document.querySelectorAll('[data-scheme-panel]')]
+    const bind = (name) => [...document.querySelectorAll('[data-bind="' + name + '"]')]
+    function setScheme(name) {
+      schemeTabs.forEach(tab => tab.classList.toggle('active', tab.dataset.scheme === name))
+      panels.forEach(panel => panel.classList.toggle('active', panel.dataset.schemePanel === name))
+    }
+    function setState(state) {
+      stateTabs.forEach(tab => tab.classList.toggle('active', tab.dataset.state === state))
+      const values = {
+        downloading: { summary: '正在下载 1 个题库', detail: '网络稳定 · 下载信息会持续更新', speed: '1.42 MB/s', downloaded: '24.6 / 36.0 MB', eta: '约 8 秒' },
+        done: { summary: '题库下载已完成', detail: '3 个题库均已校验，可进入导入预览', speed: '—', downloaded: '36.0 / 36.0 MB', eta: '已完成' },
+        failed: { summary: '下载遇到问题', detail: '可重试，已完成的题库不会重复下载', speed: '0 MB/s', downloaded: '24.6 / 36.0 MB', eta: '等待重试' },
+      }[state]
+      Object.entries(values).forEach(([key, value]) => bind(key).forEach(el => el.textContent = value))
+      document.querySelectorAll('[data-download-row="downloading"]').forEach(row => {
+        const badge = row.querySelector('.badge:last-child')
+        const track = row.querySelector('.progress-value')
+        const speed = row.querySelector('.speed-chip')
+        const stat = row.querySelector('.download-stats span:last-child')
+        if (!badge || !track) return
+        if (state === 'done') { badge.textContent = '已完成'; badge.className = 'badge success'; track.style.width = '100%'; track.className = 'progress-value success'; if (speed) speed.textContent = '完成'; if (stat) stat.textContent = 'SHA-256 校验通过' }
+        else if (state === 'failed') { badge.textContent = '失败'; badge.className = 'badge failed'; track.style.width = '68%'; track.className = 'progress-value failed'; if (speed) speed.textContent = '已暂停'; if (stat) stat.textContent = '网络中断，可重试' }
+        else { badge.textContent = '下载中'; badge.className = 'badge'; track.style.width = '68%'; track.className = 'progress-value'; if (speed) speed.textContent = '1.42 MB/s'; if (stat) stat.textContent = '预计 8 秒 · 已校验 2/3' }
+      })
+    }
+    schemeTabs.forEach(tab => tab.addEventListener('click', () => setScheme(tab.dataset.scheme)))
+    stateTabs.forEach(tab => tab.addEventListener('click', () => setState(tab.dataset.state)))
+    function toggleTheme() {
+      const dark = root.dataset.theme === 'dark'
+      root.dataset.theme = dark ? 'light' : 'dark'
+      document.querySelectorAll('#theme-toggle, #sidebar-theme').forEach(btn => btn.textContent = dark ? '切换暗色' : '切换亮色')
+    }
+    document.querySelector('#theme-toggle').addEventListener('click', toggleTheme)
+    document.querySelector('#sidebar-theme').addEventListener('click', toggleTheme)
+  </script>
+</body>
+</html>
