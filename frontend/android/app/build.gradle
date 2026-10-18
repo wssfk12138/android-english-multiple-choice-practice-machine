@@ -29,10 +29,20 @@ android {
         versionName providers.gradleProperty("appVersionName").getOrElse("0.1.0-alpha")
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         resValue 'bool', 'webview_debugging_enabled', 'false'
+        // Real Android phones and tablets are arm64 today; keep the older
+        // 32-bit ARM slice for compatibility. Emulator-only x86 libraries are
+        // omitted because the bundled speech engine is large and there is no
+        // emulator target in this build.
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+            // Sherpa opens the ONNX model through AssetManager; keep it
+            // directly addressable instead of relying on compressed assets.
+            noCompress 'onnx'
         }
     }
     signingConfigs {
@@ -101,6 +111,10 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+    // Sherpa-ONNX is not published on Maven; the verified release AAR is
+    // vendored by frontend/scripts/prepare-tts-assets.ps1.
+    implementation files('libs/sherpa-onnx-1.13.8.aar')
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.24'
     // Native, offline text extraction for the same DOC/DOCX/PDF import flow
     // used by the Windows edition. PDFBox is only used for PDFs with a text
     // layer; image-only scans are detected and sent to manual review.

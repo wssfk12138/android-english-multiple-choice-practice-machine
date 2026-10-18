@@ -16,10 +16,12 @@ const stripTypes = new Set([
   'lan-categories.mjs',
   'lan-sync-pairing.mjs',
   'practice-snapshots.mjs',
+  'vocabulary-review-groups.mjs',
   'vocabulary-identity.mjs',
 ])
 const prereq = new Set([
   'daily-study-browser.mjs',
+  'daily-study-visual.mjs',
   'practice-timer-browser.mjs',
   'assistant-agent.mjs',
   'barcode-scanner-layout.mjs',
@@ -64,6 +66,7 @@ for (const test of tests) {
   const result = spawnSync(runner[0], [...runner.slice(1)], { cwd: here, encoding: 'utf8', timeout: 300000, env })
   const ms = Date.now() - t0
   const failed = result.status !== 0
+  if (failed) process.stderr.write(`\n${test}:\n${result.stdout || ''}${result.stderr || ''}${result.error ? String(result.error) : ''}\n`)
   rows.push({
     test,
     status: failed ? 'FAIL' : 'PASS',
@@ -79,4 +82,4 @@ const pass = rows.filter(r => r.status === 'PASS').length
 const pre = rows.filter(r => r.status === 'PREREQ').length
 const totalSec = ((Date.now() - startedAt) / 1000).toFixed(1)
 console.log(`==== ${pass} passed, ${fail} failed, ${pre} prereq-skipped, ${rows.length} total, ${totalSec}s${strict ? ' (strict)' : ''}`)
-process.exit(fail ? 1 : strict && pre ? 1 : 0)
+process.exit(!rows.length || fail ? 1 : strict && pre ? 1 : 0)

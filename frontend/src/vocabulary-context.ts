@@ -66,6 +66,7 @@ export function morphologyLabel(value: unknown): string {
     'uncountable noun': '不可数',
     'mass noun': '不可数',
     '3rd person singular': '第三人称单数',
+    'fixed phrase': '固定短语',
   }
   if (Object.values(labels).includes(label) || label === '词形待确认') return label
   return labels[key] || '词形待确认'

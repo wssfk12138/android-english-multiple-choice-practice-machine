@@ -182,7 +182,15 @@ try {
       assert.ok(measured.title.right <= measured.card.right-measured.padding+1)
       assert.ok(measured.title.bottom <= measured.tools.top+1 || measured.title.right <= measured.tools.left+1, 'word and tools must not overlap')
       if(width===1280&&word==='evidence') assert.ok(measured.tools.top < measured.title.bottom, 'short-word header retains its existing single row')
-      if((width===1120||width===960)&&word==='evidence') assert.ok(measured.card.top>measured.layout.top+100, 'legacy narrow-window detail placement remains unchanged')
+      if(width>=1200&&width>height) {
+        const bounds=await page.evaluate(()=>{
+          const list=document.querySelector('.vocab-list').getBoundingClientRect()
+          const detail=[...document.querySelectorAll('.desktop-vocab-detail')].find(element=>element.getBoundingClientRect().width>0)?.getBoundingClientRect()
+          return detail?{listTop:list.top,listBottom:list.bottom,detailTop:detail.top,detailBottom:detail.bottom}:null
+        })
+        assert.ok(bounds&&Math.abs(bounds.listTop-bounds.detailTop)<=1&&Math.abs(bounds.listBottom-bounds.detailBottom)<=1,label+': landscape columns share top and bottom bounds '+JSON.stringify(bounds))
+      }
+      if((width===1120||width===960)&&word==='evidence') assert.ok(measured.card.top>measured.layout.top+100, 'narrow landscape keeps the existing stacked placement')
       const visibleDetail=page.locator('.desktop-vocab-detail:visible, .portrait-vocab-detail:visible')
       await visibleDetail.getByRole('button',{name:'编辑',exact:true}).click()
       await visibleDetail.locator('.vocab-edit').waitFor()
@@ -284,6 +292,103 @@ try {
     assert.deepEqual(errors,[])
     console.log(label+': word containment, edit reachability, theme and both scrolling review modes passed')
     await page.close()
+  }
+  // Landscape vocabulary home: both columns share one row height and each
+  // scrolls on its own. Use a synthetic long list so the check exercises the
+  // actual overflow path rather than a short page that never scrolls.
+  {
+    const page=await browser.newPage({viewport:{width:1280,height:800}})
+    const errors=[];page.on('pageerror',error=>errors.push(error.message))
+    await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.abort())
+    await page.addInitScript(()=>Object.defineProperty(screen.orientation,'type',{get:()=>innerHeight>innerWidth?'portrait-primary':'landscape-primary'}))
+    await page.goto(server.resolvedUrls.local[0]+'__vocabulary-layout')
+    await page.locator('.vocab-list-item').first().waitFor()
+    await page.evaluate(()=>{const base=globalThis.fixtureWords[0];for(let i=0;i<60;i++)globalThis.fixtureWords.push({...base,id:1000+i,term:'synthetic'+i,common_meaning:'Synthetic long definition for equal-height layout. '.repeat(40),latest_sentence:base.latest_sentence.repeat(20)})})
+    await page.locator('.search-field input').fill('synthetic')
+    await page.waitForFunction(()=>document.querySelectorAll('.vocab-list-item').length>25)
+    await page.locator('.vocab-list-item').filter({hasText:/^synthetic30/}).click()
+    await page.locator('.desktop-vocab-detail h2:visible').waitFor()
+    await page.locator('.vocab-list').evaluate(element=>{element.scrollTop=element.scrollHeight})
+    await page.waitForFunction(()=>document.querySelectorAll('.vocab-list-item').length>50)
+    const measured=await page.evaluate(()=>{
+      const box=element=>{const r=element.getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:r.height,scrollHeight:element.scrollHeight,clientHeight:element.clientHeight,overflow:getComputedStyle(element).overflowY}}
+      return {list:box(document.querySelector('.vocab-list')),detail:box(document.querySelector('.desktop-vocab-detail'))}
+    })
+    assert.ok(Math.abs(measured.list.top-measured.detail.top)<=1,JSON.stringify(measured))
+    assert.ok(Math.abs(measured.list.bottom-measured.detail.bottom)<=1,JSON.stringify(measured))
+    assert.ok(measured.list.scrollHeight>measured.list.clientHeight,'left list scrolls inside the shared row')
+    assert.ok(measured.detail.scrollHeight>measured.detail.clientHeight,'right detail scrolls independently')
+    assert.ok(['auto','scroll'].includes(measured.list.overflow)&&['auto','scroll'].includes(measured.detail.overflow))
+    assert.deepEqual(errors,[])
+    await page.close()
+    console.log('Vocabulary landscape columns: equal top/bottom bounds with independent scrolling')
+  }
+  // The pronunciation contract uses the text actually shown (term), never a
+  // lemma substitution such as further -> far.
+  {
+    const page=await browser.newPage({viewport:{width:1280,height:800}})
+    const errors=[];page.on('pageerror',error=>errors.push(error.message))
+    await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.abort())
+    await page.addInitScript(()=>Object.defineProperty(screen.orientation,'type',{get:()=>innerHeight>innerWidth?'portrait-primary':'landscape-primary'}))
+    await page.goto(server.resolvedUrls.local[0]+'__vocabulary-layout')
+    await page.locator('.vocab-list-item').first().waitFor()
+    await page.evaluate(()=>{const base=globalThis.fixtureWords[0];globalThis.fixtureWords.push({...base,id:2000,term:'further',normalized_term:'further',lemma:'far',phonetic:'/ˈfɜːðə/'})})
+    await page.locator('.search-field input').fill('further')
+    await page.locator('.vocab-list-item').filter({hasText:'further'}).click()
+    await page.locator('.desktop-vocab-detail h2:visible').waitFor()
+    assert.match(await page.locator('.desktop-vocab-detail h2:visible').innerText(),/further/)
+    const labels=await page.locator('.desktop-vocab-detail .voice-button').evaluateAll(items=>items.map(item=>item.getAttribute('aria-label')))
+    assert.deepEqual(labels,['美式发音：further','英式发音：further'])
+    assert.equal(await page.locator('.vocab-list-item .pronunciation').count(),0,'list rows never carry pronunciation buttons')
+    assert.deepEqual(errors,[])
+    await page.close()
+    console.log('Vocabulary pronunciation: selected term (not lemma) drives both accent buttons')
+  }
+  // A shape-similar pair is labelled without revealing its partner, then the
+  // optional comparison opens only after both words have their own rating.
+  {
+    const page=await browser.newPage({viewport:{width:1280,height:800}})
+    const errors=[];page.on('pageerror',error=>errors.push(error.message))
+    await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.abort())
+    await page.addInitScript(()=>Object.defineProperty(screen.orientation,'type',{get:()=>innerHeight>innerWidth?'portrait-primary':'landscape-primary'}))
+    await page.goto(server.resolvedUrls.local[0]+'__vocabulary-layout')
+    await page.locator('.vocab-list-item').first().waitFor()
+    await page.evaluate(()=>{
+      const base=globalThis.fixtureWords[0]
+      globalThis.fixtureWords.push({...base,id:3001,term:'affect',normalized_term:'affect',common_meaning:'影响',phonetic:'/əˈfekt/'})
+      globalThis.fixtureWords.push({...base,id:3002,term:'effect',normalized_term:'effect',common_meaning:'效果',phonetic:'/ɪˈfekt/'})
+    })
+    await page.locator('.page-head button').filter({hasText:'每日一背'}).click()
+    await page.locator('.vocabulary-review-card:not([aria-busy="true"]) .reveal-button').waitFor()
+    assert.match(await page.locator('.review-term').innerText(),/affect/)
+    assert.equal((await page.locator('.review-group-badge').innerText()).trim(),'形近词组 · 1/2')
+    await page.locator('.reveal-button').click()
+    await page.evaluate(()=>{globalThis.releaseRating=null})
+    await page.getByRole('button',{name:'认识',exact:true}).click()
+    await page.waitForFunction(()=>typeof globalThis.releaseRating==='function')
+    await page.evaluate(()=>globalThis.releaseRating())
+    await page.waitForFunction(()=>document.querySelector('.review-term')?.textContent.includes('effect'))
+    assert.equal((await page.locator('.review-group-badge').innerText()).trim(),'形近词组 · 2/2')
+    await page.locator('.reveal-button').click()
+    await page.evaluate(()=>{globalThis.releaseRating=null})
+    await page.getByRole('button',{name:'认识',exact:true}).click()
+    await page.waitForFunction(()=>typeof globalThis.releaseRating==='function')
+    await page.evaluate(()=>globalThis.releaseRating())
+    await page.getByRole('button',{name:'查看辨析',exact:true}).waitFor()
+    await page.getByRole('button',{name:'查看辨析',exact:true}).click()
+    await page.getByRole('dialog',{name:'形近词辨析'}).waitFor()
+    assert.equal(await page.locator('.review-discrimination-grid article').count(),2)
+    const dialogText=await page.getByRole('dialog',{name:'形近词辨析'}).innerText()
+    for(const text of ['affect','effect','影响','效果'])assert.ok(dialogText.includes(text))
+    assert.ok(await page.locator('.review-spelling-diff .changed').count()>=2)
+    assert.equal(await page.getByRole('dialog',{name:'形近词辨析'}).locator('.voice-button').count(),4)
+    await page.getByRole('button',{name:'返回复习',exact:true}).click()
+    await page.waitForFunction(()=>!document.querySelector('.review-discrimination-overlay'))
+    assert.equal(await page.getByRole('button',{name:'查看辨析',exact:true}).count(),0)
+    assert.equal(await page.locator('.review-group-badge').count(),0,'unrelated next card has no group label')
+    assert.deepEqual(errors,[])
+    await page.close()
+    console.log('Vocabulary review groups: label, per-word ratings, optional comparison and dismissal')
   }
   // 首屏响应尚未返回时不得渲染终态：既不显示“没有单词”，也不把计数显示成 0。
   {

@@ -62,6 +62,10 @@ export type VocabularyReviewSnapshot = {
     relearning: string[]
     ordinarySinceRelearning: number
   }
+  groupSource?: any[]
+  ratedGroupKeys?: string[]
+  dismissedGroups?: string[]
+  completedGroupId?: string
 }
 
 export function loadVocabularyReviewSnapshot(scope: string, kind: Exclude<SnapshotKind, 'list'>) {

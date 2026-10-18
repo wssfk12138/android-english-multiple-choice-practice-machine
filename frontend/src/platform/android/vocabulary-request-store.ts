@@ -51,6 +51,16 @@ export async function vocabularyRequestStatus() {
     retryIds: { translation: retryTranslation, enrichment: retryEnrichment } }
 }
 
+// The frequently polled progress notice needs a small, read-only snapshot,
+// not all pending IDs or diagnostic history.
+export async function vocabularyRequestQueueState() {
+  const gate = await row<RecordValue>('SELECT reason,allowed_run FROM vocabulary_request_gate WHERE id=1')
+  const current = await row<{task:string}>("SELECT task FROM vocabulary_request_runs WHERE state='running' AND (?='' OR id=?) ORDER BY started_at,id LIMIT 1", [gate?.reason || '', gate?.allowed_run || ''])
+  const unknown = await row("SELECT 1 FROM vocabulary_request_attempts WHERE state='unknown' LIMIT 1")
+  const profile = await row("SELECT id FROM ai_profiles WHERE enabled=1 AND TRIM(default_model)<>'' LIMIT 1")
+  return { reason: unknown ? 'unknown' : String(gate?.reason || ''), active: Boolean(current), task: current?.task || '', waitingConfiguration: !profile }
+}
+
 /** A command freezes the validated member set. Automatic events never expand a live run. */
 export async function createVocabularyRun(task: VocabularyTask, ids: number[] | undefined, config: VocabularyConfiguration,
   source: string, explicit = false, retry = false, commandId: string = crypto.randomUUID(), transmissionActive = false): Promise<string | null> {
@@ -61,6 +71,30 @@ export async function createVocabularyRun(task: VocabularyTask, ids: number[] | 
       if (signature !== prior.command_signature) throw new LocalApiError(409, '该操作标识已用于其他范围')
       return prior.id
     }
+    const bulkRetry = explicit && retry && task === 'translation' && source === 'retry-all' && ids === undefined
+    if (bulkRetry) {
+      const gate = (await sql.row<RecordValue>('SELECT * FROM vocabulary_request_gate WHERE id=1'))!
+      const active = await sql.row<RecordValue>("SELECT * FROM vocabulary_request_runs WHERE state='running' AND (?='' OR id=?) ORDER BY started_at,id LIMIT 1", [gate.reason, gate.allowed_run || ''])
+      if (active) {
+        if (active.config_hash !== config.hash) throw new LocalApiError(409, '模型配置已变化，请先停止当前任务')
+        if (await sql.row("SELECT 1 FROM vocabulary_request_attempts WHERE state='unknown' LIMIT 1")) throw new LocalApiError(409, '上次请求结果未知，请先核查费用和结果')
+        const members = await eligible(sql, task, undefined, true)
+        const receipt = crypto.randomUUID()
+        // Record each explicit command without renewing the live segment's budget.
+        // Translation joins its current run; enrichment keeps its transmission slot
+        // and the translation run follows it under the same shared budget.
+        const target = active.task === task ? active.id : receipt
+        await sql.run('INSERT INTO vocabulary_request_runs(id,command_id,command_signature,task,config_hash,config_summary,source,started_at,explicit,state) VALUES(?,?,?,?,?,?,?,?,?,?)',
+          [receipt, commandId, signature, task, config.hash, config.summary, source, active.started_at, 0, active.task === task ? 'done' : 'running'])
+        for (const entryId of members) {
+          await sql.run("UPDATE vocabulary_request_members SET state='superseded' WHERE entry_id=? AND state='queued' AND run_id<>? AND run_id IN (SELECT id FROM vocabulary_request_runs WHERE task=?)", [entryId, target, task])
+          await sql.run("INSERT INTO vocabulary_request_members(run_id,entry_id) VALUES(?,?) ON CONFLICT(run_id,entry_id) DO UPDATE SET state='queued'", [target, entryId])
+          await sql.run("UPDATE vocabulary_entries SET translation_status='queued',translation_error='' WHERE id=? AND user_edited=0", [entryId])
+        }
+        await sql.run("UPDATE vocabulary_request_gate SET reason='' WHERE id=1")
+        return target
+      }
+    }
     if (transmissionActive) {
       if (explicit) throw new LocalApiError(409, '当前请求尚未结束，请稍后操作')
       return null
@@ -70,7 +104,7 @@ export async function createVocabularyRun(task: VocabularyTask, ids: number[] | 
       if (explicit) throw new LocalApiError(409, '当前请求尚未结束，请稍后重试')
       return null
     }
-    const scopedRetry = explicit && retry && ids !== undefined
+    const scopedRetry = explicit && retry && (ids !== undefined || bulkRetry)
     const unknown = await sql.rows<{id:string;task:string;ids:string}>("SELECT id,task,ids FROM vocabulary_request_attempts WHERE state='unknown'")
     if (unknown.length && !scopedRetry) {
       if (explicit) throw new LocalApiError(409, '上次请求结果未知，已停止；如需重发，请点击重试按钮，可能重复产生费用')
@@ -127,13 +161,15 @@ export async function invalidateVocabularyConfiguration() {
   })
 }
 async function stop(sql: Executor, runId: string, reason: string) {
-  runClocks.delete(runId)
-  await sql.run("UPDATE vocabulary_request_runs SET state='stopped' WHERE id=?", [runId])
+  // Both tasks can share this segment after an explicit bulk retry. A shared
+  // gate stop must also stop the deferred run, so a later retry can renew it.
+  runClocks.clear()
+  await sql.run("UPDATE vocabulary_request_runs SET state='stopped' WHERE state='running' OR id=?", [runId])
   await sql.run("UPDATE vocabulary_request_gate SET reason=CASE WHEN reason='user' THEN reason ELSE ? END,allowed_run=NULL WHERE id=1", [reason])
 }
 
 export async function claimVocabularyBatch(config: VocabularyConfiguration): Promise<VocabularyClaim | null> {
-  return atomic(async sql => {
+  const result = await atomic(async sql => {
     const gate = (await sql.row<RecordValue>('SELECT * FROM vocabulary_request_gate WHERE id=1'))!
     if (await sql.row("SELECT 1 FROM vocabulary_request_attempts WHERE state IN ('intent','inflight') LIMIT 1")) return null
     const current = await sql.row<RecordValue>("SELECT * FROM vocabulary_request_runs WHERE state='running' AND (?='' OR id=?) ORDER BY started_at,id LIMIT 1", [gate.reason, gate.allowed_run || ''])
@@ -155,7 +191,7 @@ export async function claimVocabularyBatch(config: VocabularyConfiguration): Pro
       await sql.run("UPDATE vocabulary_request_runs SET state='done',finished_at=? WHERE id=?", [now, current.id])
       await sql.run('UPDATE vocabulary_request_gate SET allowed_run=NULL WHERE allowed_run=?', [current.id])
       runClocks.delete(current.id)
-      return null
+      return 'next' as const
     }
     const claimed = ids.slice(0, current.task === 'translation' ? VOCABULARY_TRANSLATION_BATCH : 1)
     const id = crypto.randomUUID()
@@ -170,8 +206,9 @@ export async function claimVocabularyBatch(config: VocabularyConfiguration): Pro
     await sql.run("INSERT INTO vocabulary_request_attempts(id,run_id,task,state,ids,fingerprints,created_at) VALUES(?,?,?,'intent',?,?,?)", [id, current.id, current.task, JSON.stringify(claimed), JSON.stringify(fingerprints), now])
     await sql.run('UPDATE vocabulary_request_runs SET used=used+1 WHERE id=?', [current.id])
     await sql.run('UPDATE vocabulary_request_gate SET used=used+1 WHERE id=1')
-    return { id, runId: current.id, task: current.task, ids: claimed, configHash: current.config_hash }
+    return { id, runId: current.id, task: current.task as VocabularyTask, ids: claimed, configHash: current.config_hash }
   })
+  return result === 'next' ? claimVocabularyBatch(config) : result
 }
 
 export async function markVocabularySent(claim: VocabularyClaim, config: VocabularyConfiguration) {

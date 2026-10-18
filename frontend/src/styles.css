@@ -6950,6 +6950,16 @@ html[data-platform=android] .library-bank-switcher .bank-switcher-main>* { min-w
 }
 
 html[data-platform=android] .vocab-detail-head > div:first-child { min-width:0; max-width:100%; }
+/* Shared phonetic line: pronunciation controls sit beside the displayed
+   phonetic and remain available when a word has no phonetic. */
+.tts-phonetic-line { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; min-width:0; }
+.tts-phonetic-line > span:first-child:not(.pronunciation) { min-width:0; overflow-wrap:anywhere; }
+.tts-phonetic-line .pronunciation { vertical-align:middle; }
+.vocab-term-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 16px; min-width:0; }
+.vocab-term-meta { display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; margin:0; color:var(--muted); font-size:13px; line-height:1.5; }
+.vocab-term-meta .vocab-term-pos { padding:2px 8px; border-radius:6px; background:var(--primary-soft); color:var(--ink); font-size:13px; line-height:1.4; }
+.vocab-term-row .vocab-term-meta { margin-left:auto; }
+.review-phonetic.tts-phonetic-line { justify-content:center; }
 @media(max-width:900px),(orientation:portrait) {
  html[data-platform=android] .vocab-detail-head { flex-wrap:wrap; }
  html[data-platform=android] .vocab-detail-head > div:first-child { flex:1 1 100%; }
@@ -6958,6 +6968,42 @@ html[data-platform=android] .vocab-detail-head > div:first-child { min-width:0; 
 .vocab-enrichment-status { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:12px; border:1px solid var(--line); border-radius:12px; margin-bottom:12px; overflow-wrap:anywhere; }
 .vocab-enrichment-status small { color:var(--muted); }
 .vocab-enrichment-status .error { flex-basis:100%; margin:0; }
+
+/* Landscape vocabulary home: the list and detail cards share one row height
+   and scroll independently. Portrait keeps the existing stacked layout. */
+/* Only the existing two-column Android layout (>=1200px) is stretched.
+   The 600-1199px layout intentionally remains stacked. */
+@media (min-width: 1200px) and (orientation: landscape) {
+  html[data-platform="android"] .vocabulary-layout {
+    align-items: stretch;
+    grid-template-rows: minmax(0, 1fr);
+    height: max(440px, calc(100vh - 280px));
+    height: max(440px, calc(100dvh - 280px));
+  }
+  html[data-platform="android"] .vocab-list-column {
+    height: 100%;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+    align-content: stretch;
+  }
+  html[data-platform="android"] .vocab-list {
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    margin-bottom: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  html[data-platform="android"] .desktop-vocab-detail {
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    position: relative;
+    top: auto;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+}
 
 /* 程序更新卡片：结果面板排在按钮上方、末行整体贴到卡片底部。
    这里用到 :has()，scoped 样式经 @vue/compiler-sfc 处理会失效，因此放在全局样式末尾。 */

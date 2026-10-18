@@ -7,9 +7,11 @@ import { claimVocabularyBatch, markVocabularySent, currentVocabularyAttempt, com
 
 // One physical transmission slot for both task types. Logical deadlines never release it.
 let worker: Promise<void> | null = null
+let wakeRequested = false
 let transmissionActive = false
 let localFailure = false
 export function vocabularyTransmissionActive() { return transmissionActive }
+export function vocabularyWorkerFailed() { return localFailure }
 async function work() {
   if (localFailure) return
   while (true) {
@@ -82,7 +84,17 @@ async function work() {
   }
 }
 export function startVocabularyRequestWorker(): Promise<void> {
-  if (!worker) worker = work().catch(() => { localFailure = true }).finally(() => { worker = null })
+  wakeRequested = true
+  if (!worker) worker = (async () => {
+    do {
+      wakeRequested = false
+      await work()
+    } while (wakeRequested && !localFailure)
+  })().catch(() => { localFailure = true }).finally(() => {
+    worker = null
+    // A wake can also arrive between the loop's last check and this finally.
+    if (wakeRequested && !localFailure) void startVocabularyRequestWorker()
+  })
   return worker
 }
 export async function requestVocabularyRun(task: VocabularyTask, ids?: number[], options: {

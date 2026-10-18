@@ -268,8 +268,11 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
     const enrichment = await rows<{status:string;count:number}>(
       "SELECT state AS status,COUNT(*) AS count FROM vocabulary_enrichment_jobs GROUP BY state",
     )
-    return Object.fromEntries([...groups.map(group => [group.status, Number(group.count)]),
-      ...enrichment.map(group => ['enrichment_' + group.status, Number(group.count)])]) as T
+    const { vocabularyRequestQueueState } = await import('./vocabulary-request-store')
+    const { vocabularyWorkerFailed } = await import('./vocabulary-request-runner')
+    return { ...Object.fromEntries([...groups.map(group => [group.status, Number(group.count)]),
+      ...enrichment.map(group => ['enrichment_' + group.status, Number(group.count)])]),
+      scheduler: { ...await vocabularyRequestQueueState(), localFailure: vocabularyWorkerFailed() } } as T
   }
   if (pathname === '/vocabulary/translation-runs' && method === 'POST') {
     let ids = (body?.entry_ids || []).map(Number).filter(Boolean)
@@ -289,12 +292,13 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
     else if (body?.action === 'acknowledge') {
       if (body.confirmed !== true || typeof body.attempt_id !== 'string') throw new LocalApiError(400, '请确认已知会该批次可能已产生费用')
       await store.acknowledgeVocabularyUnknown(body.attempt_id)
-    } else if (body?.action === 'continue' || body?.action === 'retry') {
+    } else if (body?.action === 'continue' || body?.action === 'retry' || body?.action === 'retry-all') {
       if (!['translation','enrichment'].includes(body.task)) throw new LocalApiError(400, '请明确任务类型')
       if (typeof body.command_id !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.command_id)) throw new LocalApiError(400, '缺少有效的操作标识')
       if (body.action === 'retry' && !Array.isArray(body.entry_ids)) throw new LocalApiError(400, '请列明重试对象')
+      if (body.action === 'retry-all' && (body.task !== 'translation' || body.entry_ids !== undefined)) throw new LocalApiError(400, '全部重试仅用于翻译队列')
       if (body.entry_ids !== undefined && (!Array.isArray(body.entry_ids) || body.entry_ids.some((id: unknown) => !Number.isSafeInteger(id) || Number(id) <= 0))) throw new LocalApiError(400, '词条编号无效')
-      await runner.requestVocabularyRun(body.task, body.entry_ids, { explicit: true, retry: body.action === 'retry', commandId: body.command_id, source: body.action })
+      await runner.requestVocabularyRun(body.task, body.entry_ids, { explicit: true, retry: body.action !== 'continue', commandId: body.command_id, source: body.action })
     } else throw new LocalApiError(400, '未知词汇任务操作')
     return { ...await store.vocabularyRequestStatus(), transmissionActive: runner.vocabularyTransmissionActive() } as T
   }

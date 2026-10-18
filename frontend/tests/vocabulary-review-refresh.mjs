@@ -12,7 +12,7 @@ assert.match(source, /else \{\s*await load\(\)\s*if \(!reviewDisposed && !review
   '普通进入单词本必须先完成首屏读取，再安排后台维护')
 const ast = ts.createSourceFile('view.ts', source, ts.ScriptTarget.Latest, true)
 const names = ['persistDueQueue','reviewRevision','refreshDueQueue','loadDueQueue','refreshReviewOnForeground','rate',
-  'beginReview','startReview','startReinforcement','loadReinforcement','snapshotOf','refreshReviewSnapshot','persistReviewSnapshot','schedulePersistReviewSnapshot','cacheReviewDetail','reviewDetailOf','loadReviewDetail','ensureReviewDetails','applyCounts','displayCount']
+  'beginReview','startReview','startReinforcement','loadReinforcement','snapshotOf','refreshReviewSnapshot','persistReviewSnapshot','schedulePersistReviewSnapshot','cacheReviewDetail','reviewDetailOf','loadReviewDetail','ensureReviewDetails','applyCounts','displayCount','resetReviewGroups','markReviewGroupRated']
 const queueNames = ['dueQueueUrl','duePageSignature','setScheduledWords','applyDueQueue','dueFillWanted','finishFill',
   'extractReviewRows','readWholeDueQueue','fillDueQueue','topUpDueQueue','fillDueQueueForRating']
 // 直接取源码文本：早期版本在这里做了一次 '\\n' -> 换行的二次反转义，会把函数体里
@@ -26,6 +26,8 @@ function setup() {
     reinforcementWords:value([]), reinforcementSize:value(10), filter:value('all'), reviewLoading:value(false),
     reviewDetails:value({}), reviewDetailError:value(''), reviewSnapshot:value(null),
     countsLoaded:value(false), listLoaded:value(false), listLoading:value(false), listRevision:value('v2:1'),
+    reviewGroupSource:value([]), ratedReviewKeys:value([]), dismissedReviewGroups:value([]), completedReviewGroupId:value(''),
+    reviewGroupPlan:{value:[]}, discriminationOpen:value(false), discriminationLoading:value(false), discriminationMembers:value([]), discriminationToken:0,
     counts:value({}), document:{visibilityState:'visible'}, localStorage:{getItem:()=>null,setItem:()=>{}}, load:async()=>{ctx.loadCalls++} }
   ctx.savedReviewSnapshots=[]
   ctx.reviewSnapshotToLoad=null

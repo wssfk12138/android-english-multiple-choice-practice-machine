@@ -42,3 +42,11 @@ assert.equal(validSourceSentence({...a, context_sentence:'went.', source_kind:'o
 assert.equal(validSourceSentence({surface_form:'well-known',context_sentence:'She is well-known.'}), true)
 assert.equal(validSourceSentence({surface_form:"don't",context_sentence:'They don’t care.'}), true)
 console.log('PASS selected occurrence offset, explicit source categories, short full sentences and punctuation')
+
+// A fixed phrase is a known, unchanged form, not an ambiguous unknown label.
+const fixedPhrase={morphology:{lemma:'as a result',currentForm:'固定短语',ambiguous:false,note:'连接结果的固定短语。',forms:[]},generatedExample:{sentence:'As a result, we stayed home.',translation:'因此，我们待在家里。'}}
+assert.equal(context.exports.morphologyLabel('fixed phrase'),'固定短语')
+assert.equal(context.exports.validVocabularyEnhancements(fixedPhrase,'As a result',false),true)
+assert.equal(context.exports.validVocabularyEnhancements({...fixedPhrase,morphology:{...fixedPhrase.morphology,currentForm:'unrecognized form'}},'As a result',false),false)
+assert.equal(context.exports.validVocabularyEnhancements({...fixedPhrase,generatedExample:{sentence:'We stayed home.',translation:'我们待在家里。'}},'As a result',false),false)
+console.log('PASS valid fixed phrases retain required fields, source term and example protections')

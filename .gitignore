@@ -11,6 +11,9 @@ frontend/android/app/src/main/assets/public/
 frontend/android/app/src/main/assets/capacitor.config.json
 frontend/android/app/src/main/assets/capacitor.plugins.json
 frontend/android/app/src/main/res/xml/config.xml
+frontend/android/app/libs/*.aar
+frontend/android/app/src/main/assets/tts/
+frontend/.tts-cache/
 
 # Local runtime data and private development artifacts
 work/

@@ -544,6 +544,7 @@ CREATE INDEX IF NOT EXISTS idx_wrong_count ON wrong_stats(wrong_count DESC);
 CREATE INDEX IF NOT EXISTS idx_vocab_priority ON vocabulary_entries(encounter_count DESC, last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_vocab_occurrences_entry ON vocabulary_occurrences(entry_id, id);
 CREATE INDEX IF NOT EXISTS idx_vocab_reviews_entry ON vocabulary_reviews(entry_id);
+CREATE INDEX IF NOT EXISTS idx_vocab_reviews_latest ON vocabulary_reviews(entry_id, mode, reviewed_at, id);
 CREATE INDEX IF NOT EXISTS idx_trash_purge ON trash_entries(purge_after, restored_at);
 CREATE INDEX IF NOT EXISTS idx_vocab_status ON vocabulary_entries(translation_status, next_review_at);
 CREATE INDEX IF NOT EXISTS idx_events_question ON practice_answer_events(question_id, changed_at DESC);

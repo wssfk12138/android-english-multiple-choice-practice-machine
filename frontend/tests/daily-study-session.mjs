@@ -60,4 +60,54 @@ const boundedReading = JSON.parse(records.get(DAILY_STUDY_STORAGE))[scope]
 assert.equal(Object.keys(boundedReading.positions).length, 200, 'long-term reading positions are bounded')
 assert.equal(boundedReading.positions[members[204].identity], 204, 'current position retained')
 bounded.dispose()
+// Navigation commits only a successfully validated detail, never a requested index.
+let finishRead, readFails = false, wrongIdentity = false
+const navigationStorage = new Map()
+const transactional = new DailyStudySession({ ...dependencies,
+  catalog: async () => ({ scope_key: 'navigation', revision: 'v1', items: members.slice(0, 4) }),
+  storage: { getItem: key => navigationStorage.get(key), setItem: (key, value) => navigationStorage.set(key, value) },
+  detail: async id => {
+    if (id === 4) { await new Promise(resolve => finishRead = resolve); if (readFails) throw Error('offline') }
+    return { id, daily_study_identity: wrongIdentity && id === 4 ? 'reused' : members[id - 1].identity }
+  },
+})
+await transactional.open(); transactional.save(91)
+const slow = transactional.select(3)
+assert.equal(transactional.state.index, 0); assert.equal(transactional.state.entry.id, 1)
+transactional.save(91)
+assert.equal(JSON.parse(navigationStorage.get(DAILY_STUDY_STORAGE)).navigation.id, 1, 'pending reads preserve stable reading identity')
+readFails = true; finishRead(); await slow
+assert.equal(transactional.state.index, 0); assert.equal(transactional.state.phase, 'ready')
+assert.equal(transactional.scrollTop, 91); assert.match(transactional.state.error, /读取失败/)
+readFails = false
+const retryPending = transactional.retry(); finishRead(); await retryPending
+assert.equal(transactional.state.entry.id, 4); assert.equal(transactional.state.index, 3, 'retry remembers failed target')
+assert.equal(transactional.peek(3).id, 4); assert.equal(transactional.peek(5), null)
+transactional.dispose()
+const mismatchSession = new DailyStudySession({ ...dependencies, catalog: async () => ({ scope_key: 'mismatch', revision: 'v1', items: members.slice(0, 4) }),
+  detail: async id => ({ id, daily_study_identity: id === 4 ? 'reused' : members[id - 1].identity }),
+})
+await mismatchSession.open(); await mismatchSession.select(3)
+assert.equal(mismatchSession.state.entry.id, 3); assert.equal(mismatchSession.state.items.length, 3)
+assert.equal(mismatchSession.peek(3), null, 'reused identity never enters adjacent display cache')
+mismatchSession.dispose()
+// A slow catalogue from an earlier filter must never replace the newly chosen
+// range. The real page relies on this when two filters are tapped quickly.
+const pendingCatalog = []
+const raceSession = new DailyStudySession({
+  ...dependencies,
+  catalog: () => new Promise(resolve => pendingCatalog.push(resolve)),
+  detail: async id => ({ id, daily_study_identity: 'race-' + id }),
+  storage: { getItem: () => null, setItem: () => undefined },
+})
+const firstOpen = raceSession.open()
+const secondOpen = raceSession.open()
+pendingCatalog[1]({ scope_key: 'race-second', revision: 'v1', items: [{ id: 2, term: 'second', identity: 'race-2' }] })
+await secondOpen
+pendingCatalog[0]({ scope_key: 'race-first', revision: 'v1', items: [{ id: 1, term: 'first', identity: 'race-1' }] })
+await firstOpen
+assert.equal(raceSession.state.items[0].term, 'second', 'late catalogue cannot overwrite the active filter')
+assert.equal(raceSession.state.entry.id, 2)
+assert.equal(raceSession.state.busy, false)
+raceSession.dispose()
 console.log('PASS daily study session: persistence, deletion, identity reuse, frozen order, revisions, bounded cache, disposal and gestures')

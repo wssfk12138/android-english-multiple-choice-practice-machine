@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { morphologyLabel } from '../vocabulary-context'
 
-defineProps<{ entry: any; showMorphology: boolean; showSentence: boolean }>()
+defineProps<{ entry: any; showMorphology: boolean; showSentence: boolean; completeMorphology?: boolean }>()
 </script>
 <template>
-  <section v-if="showMorphology && entry.morphology?.currentForm" class="detail-section morphology-section">
+  <section v-if="showMorphology && (entry.morphology?.currentForm || (completeMorphology && (entry.morphology?.forms?.length || entry.morphology?.note)))" class="detail-section morphology-section">
     <label>单词词形</label>
-    <p>{{ entry.term }} → {{ entry.morphology.lemma || entry.lemma || entry.term }} · {{ morphologyLabel(entry.morphology.currentForm) }}</p>
-    <p v-if="entry.morphology.ambiguous">可能有多种形态：{{ entry.morphology.note }}</p>
+    <p v-if="!completeMorphology || (entry.morphology.currentForm && entry.morphology.currentForm !== '词形待确认')">{{ entry.term }} → {{ entry.morphology.lemma || entry.lemma || entry.term }} · {{ morphologyLabel(entry.morphology.currentForm) }}</p>
+    <p v-if="entry.morphology.ambiguous || (completeMorphology && entry.morphology.note)">{{ entry.morphology.ambiguous ? '可能有多种形态：' : '' }}{{ entry.morphology.note }}</p>
     <ul v-if="entry.morphology.forms?.length"><li v-for="(form, index) in entry.morphology.forms" :key="index">{{ morphologyLabel(form.label) }}：{{ form.word }}</li></ul>
   </section>
   <section v-if="showSentence && !entry.latest_sentence && entry.generated_example?.sentence" class="detail-section model-example">

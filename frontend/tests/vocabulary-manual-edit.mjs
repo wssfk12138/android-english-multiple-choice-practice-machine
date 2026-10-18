@@ -11,6 +11,11 @@ const read = path => readFileSync(new URL('../src/' + path, import.meta.url), 'u
 const compile = source => ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText
+const queueStatusModule = { exports: {} }
+vm.runInNewContext(compile(read('services/vocabularyQueueStatus.ts')), {
+  exports: queueStatusModule.exports,
+  module: queueStatusModule,
+})
 const databaseSource = ts.createSourceFile('database.ts', read('platform/android/database.ts'), ts.ScriptTarget.Latest, true)
 const schema = databaseSource.statements.flatMap(statement => ts.isVariableStatement(statement)
   ? [...statement.declarationList.declarations] : [])
@@ -189,6 +194,12 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
       }
       if (name === '../components/VocabularyTerm.vue') return { default: { props:['term'], setup:p=>()=>vue.h('span',p.term) } }
       if (name === '../components/VocabularyMemoryContent.vue') return { default: { props:['entry'], setup:p=>()=>vue.h('div',[p.entry.common_meaning,p.entry.contextual_meaning,p.entry.note]) } }
+      if (name === '../components/PronunciationButtons.vue') return { default: { props:['text','ownerId','disabled'], setup:p=>()=>vue.h('span',{class:'pronunciation-stub'},p.text) } }
+      if (name === '../vocabulary-review-groups') return {
+        planReviewGroups: () => [],
+        reviewGroupKey: word => word?.normalized_term || String(word?.term || '').toLowerCase(),
+        spellingDiff: () => ({ left: [], right: [] }),
+      }
       if (name === '../components/VocabularyEnrichment.vue') return { default: {
         name: 'VocabularyEnrichmentStub',
         setup() { return () => vue.h('span', { class: 'vocabulary-enrichment-stub' }) },
@@ -207,6 +218,7 @@ async function fixture(orientation, initialStatus, { existing = {}, second = fal
         saveVocabularyListSnapshot() {},
         saveVocabularyReviewSnapshot() {},
       }
+      if (name === '../services/vocabularyQueueStatus') return queueStatusModule.exports
       assert.equal(name, '../api')
       return api
     },

@@ -50,6 +50,7 @@ export class DailyStudySession {
   private positions: Record<string, number> = {}
   private stable: StudyMember | null = null
   private stableIndex = 0
+  private failedIndex: number | null = null
   private cache = new Map<string, Detail>()
   private generation = 0
   private epoch = 0
@@ -63,6 +64,11 @@ export class DailyStudySession {
   private changed() { this.dependencies.changed() }
   get scopeKey() { return this.catalog?.scope_key || '' }
   get cacheSize() { return this.cache.size }
+  // Adjacent cards may only display already validated bounded-cache content.
+  peek(index: number): Detail | null {
+    const member = this.state.items[index]
+    return member ? this.cache.get(member.identity) || null : null
+  }
   get scrollTop() { return this.state.entry ? this.positions[String(this.state.entry.daily_study_identity)] || 0 : 0 }
   save(top?: number) {
     if (top !== undefined && this.state.entry && Number.isFinite(top)) {
@@ -88,7 +94,7 @@ export class DailyStudySession {
       this.catalog = catalog; this.cache.clear(); this.epoch++
       this.state.items = catalog.items
       const saved = loadStudyReading(this.dependencies.storage, catalog.scope_key)
-      this.positions = saved?.positions || {}; this.stable = null
+      this.positions = saved?.positions || {}; this.stable = null; this.failedIndex = null
       this.state.index = restoredStudyIndex(this.state.items, saved)
       this.state.entry = null; this.state.busy = false
       await this.select(this.state.index, true)
@@ -110,10 +116,11 @@ export class DailyStudySession {
       return
     }
     const token = ++this.generation
-    this.state.index = index; this.state.busy = true; this.state.error = ''; this.changed()
+    let target = index
+    this.failedIndex = null; this.state.busy = true; this.state.error = ''; this.changed()
     try {
       while (this.state.items.length) {
-        const member = this.state.items[this.state.index]!
+        const member = this.state.items[target]!
         let entry: Detail | null = null
         try { entry = this.cache.get(member.identity) || await this.dependencies.detail(member.id) }
         catch (cause) { if ((cause as { status?: number }).status !== 404) throw cause }
@@ -121,18 +128,22 @@ export class DailyStudySession {
         if (!entry || entry.daily_study_identity !== member.identity) {
           this.cache.delete(member.identity); delete this.positions[member.identity]
           this.state.items = this.state.items.filter(item => item.identity !== member.identity)
-          this.state.index = Math.min(this.state.index, Math.max(0, this.state.items.length - 1))
+          target = Math.min(target, Math.max(0, this.state.items.length - 1))
+          if (this.stable) {
+            const stableIndex = this.state.items.findIndex(item => item.identity === this.stable!.identity)
+            if (stableIndex >= 0) this.state.index = this.stableIndex = stableIndex
+          }
           continue
         }
         this.remember(member.identity, entry)
-        this.state.entry = entry; this.state.phase = 'ready'
+        this.state.index = target; this.state.entry = entry; this.state.phase = 'ready'
         this.stable = member; this.stableIndex = this.state.index; this.save()
         this.prefetch(token)
         return
       }
       this.state.entry = null; this.state.phase = 'empty'
     } catch {
-      if (token === this.generation && !this.disposed) { this.state.phase = 'error'; this.state.error = '单词详情读取失败' }
+      if (token === this.generation && !this.disposed) { this.failedIndex = target; this.state.phase = this.state.entry ? 'ready' : 'error'; this.state.error = '单词详情读取失败' }
     } finally {
       if (token === this.generation && !this.disposed) { this.state.busy = false; this.changed() }
     }
@@ -164,6 +175,6 @@ export class DailyStudySession {
       if (!this.disposed && token === this.generation) { this.state.error = '内容更新读取失败，可重新读取'; this.changed() }
     } finally { this.refreshing = false }
   }
-  retry() { return this.catalog ? this.select(this.state.index, true) : this.open() }
+  retry() { return this.catalog ? this.select(this.failedIndex ?? this.state.index, true) : this.open() }
   dispose() { this.save(); this.disposed = true; this.generation++; this.cache.clear() }
 }

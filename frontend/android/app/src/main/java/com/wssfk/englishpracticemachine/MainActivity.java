@@ -13,6 +13,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DiagnosticLogPlugin.class);
         registerPlugin(DocumentExtractorPlugin.class);
         registerPlugin(DatabaseExportPlugin.class);
+        registerPlugin(MotionPreferencesPlugin.class);
+        registerPlugin(TtsPlugin.class);
         super.onCreate(savedInstanceState);
         android.webkit.WebView.setWebContentsDebuggingEnabled(
                 getResources().getBoolean(R.bool.webview_debugging_enabled));

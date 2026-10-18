@@ -355,6 +355,19 @@ function vocabularySelection(searchParams: URLSearchParams, profileId: number | 
     values.push(profileId)
   }
   if (status === 'frequent') conditions.push('(encounter_count >= 2 OR manually_frequent = 1)')
+  else if (status === 'new') {
+    // A word is still unlearned until its latest formal scheduled review is
+    // fluent. Invalid dates are kept conservative: they must not silently turn
+    // an older fluent row into the latest rating.
+    conditions.push(`COALESCE((
+      SELECT CASE WHEN datetime(NULLIF(r.reviewed_at, '')) IS NULL THEN 'unknown' ELSE r.rating END
+      FROM vocabulary_reviews r
+      WHERE r.entry_id = vocabulary_entries.id AND r.mode = 'scheduled'
+      ORDER BY CASE WHEN datetime(NULLIF(r.reviewed_at, '')) IS NULL THEN 0 ELSE 1 END,
+        datetime(r.reviewed_at) DESC, r.id DESC
+      LIMIT 1
+    ), '') IS NOT 'fluent'`)
+  }
   else if (status === 'review') {
     conditions.push("(next_review_at IS NULL OR next_review_at <= ?)")
     conditions.push("translation_status = 'ready'")
@@ -366,9 +379,11 @@ function vocabularySelection(searchParams: URLSearchParams, profileId: number | 
     conditions.push('(term LIKE ? OR lemma LIKE ? OR contextual_meaning LIKE ? OR common_meaning LIKE ?)')
     values.push(...Array(4).fill('%' + search + '%'))
   }
-  const orderBy = status === 'review'
-    ? "CASE WHEN last_reviewed_at IS NULL OR last_reviewed_at = '' THEN 0 ELSE 1 END, datetime(NULLIF(last_reviewed_at, '')), datetime(COALESCE(NULLIF(next_review_at, ''), NULLIF(created_at, ''))), lower(COALESCE(NULLIF(normalized_term, ''), term)), id"
-    : "CASE WHEN datetime(last_seen_at) >= datetime('now', '-7 days') THEN 0 ELSE 1 END, CASE WHEN encounter_count >= 2 OR manually_frequent = 1 THEN 1 ELSE 0 END DESC, encounter_count DESC, last_seen_at DESC, id"
+  const orderBy = status === 'new'
+    ? "datetime(NULLIF(created_at, '')) DESC, daily_study_identity DESC, id DESC"
+    : status === 'review'
+      ? "CASE WHEN last_reviewed_at IS NULL OR last_reviewed_at = '' THEN 0 ELSE 1 END, datetime(NULLIF(last_reviewed_at, '')), datetime(COALESCE(NULLIF(next_review_at, ''), NULLIF(created_at, ''))), lower(COALESCE(NULLIF(normalized_term, ''), term)), id"
+      : "CASE WHEN datetime(last_seen_at) >= datetime('now', '-7 days') THEN 0 ELSE 1 END, CASE WHEN encounter_count >= 2 OR manually_frequent = 1 THEN 1 ELSE 0 END DESC, encounter_count DESC, last_seen_at DESC, id"
   return { conditions, values, orderBy, status, search }
 }
 
@@ -380,7 +395,10 @@ async function dailyStudyMetadata(executor: ReturnType<typeof dbExecutor>, searc
   if (!metadata?.database_id || (profileId !== null && !metadata.bank_id)) throw new LocalApiError(409, '题库已变化，请返回单词本重新打开')
   const selection = vocabularySelection(searchParams, profileId, new Date().toISOString())
   return {
-    scope_key: JSON.stringify(['daily-study', 1, metadata.database_id, profileId === null ? 'all' : [profileId, metadata.bank_id], selection.status, selection.search, 'browse-order-v1']),
+    // New membership and its newest-first order were introduced after the
+    // original browse scope, so keep one distinct cache identity for them.
+    // Existing filter scopes retain their reading positions.
+    scope_key: JSON.stringify(['daily-study', 1, metadata.database_id, profileId === null ? 'all' : [profileId, metadata.bank_id], selection.status, selection.search, selection.status === 'new' ? 'new-v1' : 'browse-order-v1']),
     revision: 'v2:' + String(metadata.revision || '0'),
   }
 }
