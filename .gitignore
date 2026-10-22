@@ -47,3 +47,12 @@ Thumbs.db
 
 # Local agent working notes and device evidence
 .codex-local/
+
+# Ad-hoc previews, probes, build captures and local backups (never publish).
+# Real source, tests, docs and frontend/scripts/tts-licenses/ stay tracked.
+tmp-*
+tmp_*.py
+preview-*
+frontend/.tts-cache/
+*.bak.*
+*.pre_batch*

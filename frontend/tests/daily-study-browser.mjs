@@ -77,14 +77,17 @@ try {
   assert.equal(await page.locator('.study-scroll[data-identity]').evaluate(element => element.scrollTop), top)
   // Reopening VocabularyView is allowed its existing maintenance calls; the study interval itself is read-only.
   const studyWriteBaseline = await writes()
+  await swipe(120)
+  await page.waitForFunction(()=>document.querySelector('.study-deck').dataset.gesture==='idle')
+  assert.equal(await current(),'stable-1','right swipe at the first word rebounds')
   await page.keyboard.press('ArrowRight'); await ready(2)
-  await swipe(-100); await ready(1); await swipe(100); await ready(2)
+  await swipe(100); await ready(1); await swipe(-100); await ready(2)
   for (const args of [[72,0], [100,100], [100,0,'cancel'], [100,0,'multi'], [100,0,'normal','.study-footer button']]) {
     await swipe(...args); await page.waitForTimeout(100); assert.equal(await current(), 'stable-2', 'gesture exclusion ' + args)
   }
   await page.locator('.word-heading h1').evaluate(element => { const range=document.createRange();range.selectNodeContents(element);getSelection().removeAllRanges();getSelection().addRange(range) })
   await swipe(100); assert.equal(await current(), 'stable-2'); await page.evaluate(() => getSelection().removeAllRanges())
-  await swipe(100); await ready(3) // outside release did not leave a stuck pointer
+  await swipe(-100); await ready(3) // outside release did not leave a stuck pointer
   // Chromium's native touch input, not dispatchEvent, proves the actual pointer chain.
   const cdp = await page.context().newCDPSession(page)
   const touch = async (type, points) => cdp.send('Input.dispatchTouchEvent', {type, touchPoints:points})
@@ -94,6 +97,9 @@ try {
   await page.waitForFunction(()=>Number(document.querySelector('.study-deck').dataset.offset)>30)
   assert.equal(await current(), 'stable-3', 'native drag moves before releasing without committing')
   assert.equal(await page.locator('.adjacent-card[aria-hidden="true"][inert]').count(),1)
+  assert.equal(await page.locator('.adjacent-card .word-heading h1').innerText(),'evidence2','right drag previews the previous word')
+  const previewBox=await page.locator('.adjacent-card').boundingBox()
+  assert.ok(previewBox.x<origin.x,'previous word enters from the left')
   const nativeOffset = await page.locator('.study-deck').getAttribute('data-offset')
   const requestsDuringDrag = await page.evaluate(()=>globalThis.calls.length)
   await touch('touchMove',[{...point,x:point.x + 60}])
@@ -101,13 +107,13 @@ try {
   await touch('touchEnd',[])
   await page.waitForFunction(()=>document.querySelector('.study-deck').dataset.gesture==='idle')
   assert.equal(await current(),'stable-3','native short drag rebounds')
-  await touch('touchStart',[point]);await touch('touchMove',[{...point,x:point.x + 140}]);await touch('touchEnd',[]);await ready(4)
-  await touch('touchStart',[point]);await touch('touchMove',[{...point,x:point.x - 140}]);await touch('touchEnd',[]);await ready(3)
+  await touch('touchStart',[point]);await touch('touchMove',[{...point,x:point.x - 140}]);await touch('touchEnd',[]);await ready(4)
+  await touch('touchStart',[point]);await touch('touchMove',[{...point,x:point.x + 140}]);await touch('touchEnd',[]);await ready(3)
   await touch('touchStart',[point]);await touch('touchMove',[{...point,x:point.x + 100}]);await touch('touchCancel',[])
   await page.waitForFunction(()=>document.querySelector('.study-deck').dataset.gesture==='idle');assert.equal(await current(),'stable-3')
   await touch('touchStart',[point]);await touch('touchMove',[{...point,y:point.y + 90}]);await touch('touchEnd',[])
   assert.equal(await current(),'stable-3','native vertical input does not navigate')
-  await swipe(120,0,'outside');await ready(4);await previous();await ready(3)
+  await swipe(-120,0,'outside');await ready(4);await previous();await ready(3)
   // Blur/capture loss/rotation interrupt a drag without leaving an offset or lock.
   for(const cancel of ['blur','lostpointercapture','resize']) {
     await page.locator('.study-card').first().evaluate((el,cancel)=>{

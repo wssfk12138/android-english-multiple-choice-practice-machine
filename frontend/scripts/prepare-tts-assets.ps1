@@ -13,7 +13,8 @@ $aarUrl = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherp
 $aarHash = '633C24321E06B1FE79FEAFA03EA16CBC0F8A286641E2DA3559BAC91BDB13BD96'
 $models = @(
     @{ Name = 'vits-piper-en_US-ljspeech-medium-int8'; Target = 'en_US'; Model = 'en_US-ljspeech-medium.onnx'; Url = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-ljspeech-medium-int8.tar.bz2'; Hash = '24DC3BD77DD48C291E52C297878D3437C9492F245D823D7F6A06C4BBB67F4B6B' },
-    @{ Name = 'vits-piper-en_GB-cori-medium-int8'; Target = 'en_GB'; Model = 'en_GB-cori-medium.onnx'; Url = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_GB-cori-medium-int8.tar.bz2'; Hash = '169CA8AFF3ADB271F009A4924C99928A811DBF2B52EACA2DBB460E8C34478C93' }
+    # Cori prolongs final /d/; Alan medium passed listening acceptance and keeps 22.05 kHz audio.
+    @{ Name = 'vits-piper-en_GB-alan-medium-int8'; Target = 'en_GB'; Model = 'en_GB-alan-medium.onnx'; Url = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_GB-alan-medium-int8.tar.bz2'; Hash = 'F0B2526C9600657141CCBBE412F6159DCEEDAB5BAB4BA4E8857D9443ACB50DE4' }
 )
 
 New-Item -ItemType Directory -Force -Path $libs, $assets, $cache | Out-Null
@@ -50,6 +51,9 @@ foreach ($item in $models) {
     Copy-Item -LiteralPath (Join-Path $source $item.Model) -Destination (Join-Path $target 'model.onnx')
     Copy-Item -LiteralPath (Join-Path $source 'tokens.txt') -Destination (Join-Path $target 'tokens.txt')
     Copy-Item -LiteralPath (Join-Path $source 'MODEL_CARD') -Destination (Join-Path $target 'MODEL_CARD')
+    if ($item.Target -eq 'en_GB') {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'tts-licenses\en_GB-alan-LICENSE.txt') -Destination (Join-Path $target 'LICENSE')
+    }
     $json = Get-ChildItem -LiteralPath $source -Filter '*.onnx.json' | Select-Object -First 1
     if ($json) { Copy-Item -LiteralPath $json.FullName -Destination (Join-Path $target 'model.onnx.json') }
     Copy-Item -LiteralPath (Join-Path $source 'espeak-ng-data') -Destination (Join-Path $target 'espeak-ng-data') -Recurse

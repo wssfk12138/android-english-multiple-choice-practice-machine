@@ -80,7 +80,7 @@ function fixture() {
     window: { setInterval: () => 1, clearInterval: () => {} },
     require: name => ({
       vue: { ...vue, onMounted: () => {}, onUnmounted: () => {} },
-      'vue-router': { useRoute: () => ({ query: {} }), useRouter: () => ({}) },
+      'vue-router': { useRoute: () => ({ query: {} }), useRouter: () => ({ push: async () => {} }) },
       '../api': methods,
       '../services/questionBankProfiles': {
         loadQuestionBankProfiles: async () => {},

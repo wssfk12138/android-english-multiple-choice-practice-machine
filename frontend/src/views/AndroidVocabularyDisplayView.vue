@@ -39,7 +39,7 @@ function setGroup(group: DisplayGroup, value: boolean) {
       <div class="settings-hub-group-head"><h2 id="offline-voice-title" class="settings-hub-group-title"><Volume2 :size="19" />离线发音</h2><span class="voice-ready"><Check :size="16" />已内置</span></div>
       <div class="settings-hub-rows">
         <div class="settings-hub-row voice-row"><span><strong>美式英语</strong><small>LJSpeech · 已随应用安装</small></span><span class="voice-ready">可用</span></div>
-        <div class="settings-hub-row voice-row"><span><strong>英式英语</strong><small>Cori · 已随应用安装</small></span><span class="voice-ready">可用</span></div>
+        <div class="settings-hub-row voice-row"><span><strong>英式英语</strong><small>Alan · 已随应用安装</small></span><span class="voice-ready">可用</span></div>
       </div>
     </section>
     <section v-for="group in displayGroups" :key="group.title" class="settings-hub-group" :class="{ 'single-option': group.options.length === 1, 'scheme-c-group': landscape }"><div class="settings-hub-group-head"><h2 class="settings-hub-group-title">{{ group.title }}</h2><div v-if="landscape" class="scheme-c-group-actions"><button type="button" @click="setGroup(group, true)">全部开启</button><button type="button" @click="setGroup(group, false)">全部关闭</button></div></div><div class="settings-hub-rows"><label v-for="option in group.options" :key="option.key" class="settings-hub-row selection-option"><span><strong>{{ option.label }}</strong></span><input type="checkbox" :checked="config[option.key]" @change="toggle(option.key)"></label></div></section>

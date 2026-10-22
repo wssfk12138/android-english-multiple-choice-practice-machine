@@ -38,7 +38,7 @@ export function studyNavigationWindow(index: number, count: number, size = 41) {
 }
 
 export function studySwipe(dx: number, dy: number): number {
-  return Math.abs(dx) > 72 && Math.abs(dx) > Math.abs(dy) * 1.6 ? (dx < 0 ? -1 : 1) : 0
+  return Math.abs(dx) > 72 && Math.abs(dx) > Math.abs(dy) * 1.6 ? (dx < 0 ? 1 : -1) : 0
 }
 
 // The directory is frozen for this visit. Content revisions invalidate only the

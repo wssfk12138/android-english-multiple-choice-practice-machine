@@ -41,7 +41,7 @@ assert.equal(restoredStudyIndex(members, { id: 2, identity: 'reused', index: 50 
 let release; delayed = { id: 800, promise: new Promise(resolve => release = resolve) }
 const pending = restored.select(799); restored.dispose(); release(); await pending
 assert.notEqual(restored.state.entry.id, 800, 'late completion cannot update disposed page')
-assert.equal(studySwipe(-73, 10), -1); assert.equal(studySwipe(73, 10), 1)
+assert.equal(studySwipe(-73, 10), 1); assert.equal(studySwipe(73, 10), -1)
 assert.equal(studySwipe(72, 0), 0); assert.equal(studySwipe(73, 50), 0)
 const window = studyNavigationWindow(1100, members.length)
 assert.ok(window.end-window.start <= 41 && window.start <= 1100 && window.end > 1100)

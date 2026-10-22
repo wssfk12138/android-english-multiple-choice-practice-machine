@@ -184,7 +184,14 @@ html:root.dark body {
 /* Final landscape review: reserve the real answer before revealing it. */
 html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card { width:min(680px,100%); min-height:min(432.67px,100%); padding:20px; }
 html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-content { position:relative; flex:1 1 auto; padding:8px 0; }
-html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .reveal-button { position:absolute; top:110px; left:50%; transform:translateX(-50%); margin:0; z-index:1; }
+/* Reveal and rate in the same bottom action row; reserve its size in both states. */
+html:root[data-platform="android"] .vocabulary-review-card .review-controls { display:grid; flex:0 0 auto; min-width:0; }
+html:root[data-platform="android"] .vocabulary-review-card .review-controls > * { grid-area:1 / 1; min-width:0; }
+html:root[data-platform="android"] .vocabulary-review-card .review-controls .reveal-button { place-self:end center; margin:0; z-index:1; }
+html:root[data-platform="android"] .vocabulary-review-card .review-controls .answer-reserved { visibility:hidden; pointer-events:none; }
+@media (orientation:portrait) {
+  html:root[data-platform="android"] .vocabulary-review-card .review-controls .reveal-button { margin-bottom:calc(10px + env(safe-area-inset-bottom)); }
+}
 html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-answer { margin-top:8px; display:block; }
 html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .answer-reserved { visibility:hidden; pointer-events:none; }
 html:root[data-platform="android"][data-orientation="landscape"] .vocabulary-review-card .review-meaning-block { margin:8px 0; text-align:center; }

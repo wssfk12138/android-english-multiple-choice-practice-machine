@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import {
-  Check, FileArchive, FileCheck2, FileKey2, FileUp, Lock, Pause,
+  ArrowLeft, History, Check, FileArchive, FileCheck2, FileKey2, FileUp, Lock, Pause,
   Play, RefreshCw, Save, Search, Settings, Sparkles, Trash2, X,
 } from 'lucide-vue-next'
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, del, get, patch, post, put } from '../api'
 import { confirmDialog } from '../platform/dialogs'
@@ -29,6 +29,28 @@ type LabelRow = {
 
 const route = useRoute()
 const router = useRouter()
+type ImportSection = 'home' | 'document' | 'esq' | 'history' | 'labeling'
+const sectionTitles: Record<ImportSection, string> = { home: '导入题库', document: '从文档导入', esq: '导入 ESQ 题库', history: '导入记录', labeling: '智能标注中心' }
+const section = computed<ImportSection>(() => {
+  const value = String(route.query.section || '')
+  return ['document', 'esq', 'history', 'labeling'].includes(value) ? value as ImportSection : 'home'
+})
+function goToSection(value: ImportSection) {
+  if (busy.value) return
+  const query = { ...route.query }
+  delete query.esqImportId
+  if (value === 'home') delete query.section
+  else query.section = value
+  void router.push({ path: route.path, query })
+}
+watch(section, async value => {
+  await nextTick()
+  window.scrollTo({ top: 0, behavior: 'instant' })
+  if (value === 'labeling') {
+    try { await loadQuestionLabelingStatus(selectedLabelScope()) }
+    catch (cause) { error.value = String(cause) }
+  }
+})
 const levelOptions = [
   { value: 'low', label: '低' },
   { value: 'medium', label: '中' },
@@ -74,6 +96,10 @@ const importDestinationMode = ref<'new_profile' | 'existing_profile'>('new_profi
 const importProfileName = ref('')
 const existingProfileId = ref(0)
 const importDestinationError = ref('')
+const recentImports = computed(() => [
+  ...jobs.value.map(job => ({ kind: 'document', job })),
+  ...esqJobs.value.map(job => ({ kind: 'esq', job })),
+].sort((a, b) => String(b.job.created_at || '').localeCompare(String(a.job.created_at || '')) || b.job.id - a.job.id))
 const esqDestinationName = computed(() => questionBankProfilesState.items.find(
   profile => Number(profile.id) === Number(esqCurrent.value?.profile_id),
 )?.name || '目标配置不可用')
@@ -114,7 +140,10 @@ async function resumeStagedTask(task: any) {
   error.value = ''
   notice.value = ''
   try {
-    await post('/question-banks/imports/staged/resume', { stage_id: task.stage_id })
+    const result: any = await post('/question-banks/imports/staged/resume', { stage_id: task.stage_id })
+    targetProfileId.value = Number(result.profile_id)
+    await loadQuestionBankProfiles()
+    await openEsqJob(result.id)
     notice.value = '已继续解析该题库包，请在下方预览中确认发布'
     await Promise.all([loadEsqJobs(), loadStagedEsqTasks()])
   } catch (cause) { error.value = String(cause) }
@@ -250,9 +279,18 @@ async function performDocumentUpload(profileId: number) {
   finally { busy.value = false; uploadStage.value = '' }
 }
 
+function openLabelingCenter() {
+  if (!questionLabelingState.isRunning && !questionLabelingState.isPausing) labelScope.value = null
+  goToSection('labeling')
+}
+function selectDocumentJob(id: number) {
+  if (current.value?.id === id && current.value?.draft) goToSection('document')
+  else void openJob(id)
+}
 async function openJob(id: number) {
   const result: any = await get(`/imports/${id}`)
   current.value = { ...result, draft: result.draft_data }
+  goToSection('document')
   expandedUnits.value = Object.fromEntries(
     (current.value.draft?.units || []).map((_: any, index: number) => [index, index === 0]),
   )
@@ -382,6 +420,7 @@ async function promptLabeling(scope: LabelScope) {
 }
 
 function beginLabeling() {
+  goToSection('labeling')
   if (!labelScope.value) return
   labelPromptOpen.value = false
   void startQuestionLabeling(labelScope.value, overwriteUnlocked.value)
@@ -443,7 +482,9 @@ async function performEsqUpload(profileId: number) {
 }
 
 async function openEsqJob(id: number) {
+  if (esqCurrent.value?.id === id) { goToSection('esq'); return }
   esqCurrent.value = await get(`/question-banks/imports/${id}`)
+  goToSection('esq')
   esqResolutions.value = {}
 }
 
@@ -501,13 +542,15 @@ async function removeImportJob(job: any, esq = false) {
 
 <template>
   <div class="page import-page">
-    <div class="page-head">
-      <div>
-        <h1>导入题库</h1>
+    <div class="page-head import-page-head">
+      <div class="import-page-title">
+        <button v-if="section !== 'home'" class="button ghost compact" type="button" :disabled="busy" @click="goToSection('home')"><ArrowLeft :size="17" />导入题库</button>
+        <h1>{{ sectionTitles[section] }}</h1>
       </div>
-      <button class="button secondary" type="button" @click="promptLabeling({kind:'all',title:'全部题库',year:null,paperIds:[],questionBankProfileId:targetProfileId})">
-        <Sparkles :size="17" />智能标注中心
-      </button>
+      <div class="import-nav">
+        <button v-if="section !== 'history'" class="button secondary" type="button" :disabled="busy" @click="goToSection('history')"><History :size="17" />导入记录</button>
+        <button v-if="section !== 'labeling'" class="button secondary" type="button" :disabled="busy" @click="openLabelingCenter"><Sparkles :size="17" />智能标注中心</button>
+      </div>
     </div>
     <QuestionBankSwitcher @changed="handleProfileChanged" />
 
@@ -516,48 +559,61 @@ async function removeImportJob(job: any, esq = false) {
     <div v-if="uploadStage" class="import-progress" role="status"><RefreshCw class="spin" :size="18" />{{ uploadStage }}</div>
     <div v-if="publishStage" class="import-publish-toast" role="status" aria-live="polite"><RefreshCw class="spin" :size="17" /><span><b>{{ publishStage }}</b><small>{{ publishSeconds < 5 ? '大题库包发布可能需要数分钟，请保持本页开启。' : `已进行 ${publishSeconds} 秒；大题库包发布可能需要数分钟，请保持本页开启。` }}</small></span></div>
 
-    <section class="import-source-grid">
-      <article class="card import-source-card">
-        <div class="source-heading"><FileUp :size="22" /><div><h2>Word / PDF 辅助导入</h2></div></div>
+    <section v-if="section === 'home'" class="import-home">
+      <div class="import-entrances">
+        <button class="card import-entrance" type="button" :disabled="busy" @click="goToSection('document')"><span class="import-entrance-heading"><FileUp :size="28" /><h2>从文档导入</h2></span><small>试卷 · 答案 · 听力附件</small></button>
+        <button class="card import-entrance" type="button" :disabled="busy" @click="goToSection('esq')"><span class="import-entrance-heading"><FileArchive :size="28" /><h2>导入 ESQ 题库</h2></span><small>题库包校验 · 年份冲突处理</small></button>
+      </div>
+      <div v-if="stagedEsqTasks.length" class="import-resume"><span>{{ stagedEsqTasks.length }} 个题库包尚未完成解析</span><button class="button secondary" type="button" @click="goToSection('esq')">继续处理</button></div>
+    </section>
+
+    <section v-if="section === 'home' || section === 'history'" class="card import-records">
+      <div class="review-head"><h2>{{ section === 'home' ? '最近导入' : '全部导入记录' }}</h2><button v-if="section === 'home'" class="button ghost compact" type="button" @click="goToSection('history')">查看全部</button></div>
+      <div v-if="!jobs.length && !esqJobs.length" class="empty-copy">暂无导入记录</div>
+      <div v-for="entry in (section === 'home' ? recentImports.slice(0, 4) : recentImports)" :key="entry.kind + entry.job.id" class="import-record-row">
+        <button class="import-record-open" type="button" :disabled="busy" @click="entry.kind === 'esq' ? openEsqJob(entry.job.id) : selectDocumentJob(entry.job.id)"><FileArchive v-if="entry.kind === 'esq'" :size="20" /><FileUp v-else :size="20" /><span><b>{{ entry.job.display_name || entry.job.filename }}</b><small>{{ entry.kind === 'esq' ? 'ESQ' : '文档' }} · {{ importStatusText(entry.job.status) }}<template v-if="entry.kind === 'document' && entry.job.status !== 'published'"> · {{ entry.job.warnings?.length || 0 }} 项待处理</template></small></span></button>
+        <button v-if="section === 'history' && entry.job.status !== 'published'" class="button ghost danger compact" type="button" :disabled="busy" :aria-label="'移入回收站：' + (entry.job.display_name || entry.job.filename)" @click="removeImportJob(entry.job, entry.kind === 'esq')"><Trash2 :size="16" /></button>
+      </div>
+    </section>
+
+    <section v-show="section === 'document' || section === 'esq'" class="import-source-grid">
+      <article v-show="section === 'document'" class="card import-source-card">
+        <details :open="!current" class="document-upload-details"><summary><span class="source-heading"><FileUp :size="22" /><h2>Word / PDF 辅助导入</h2></span></summary><div class="document-upload-fields">
         <label class="field"><span>试卷文件</span><input type="file" accept=".doc,.docx" @change="selectedFile=($event.target as HTMLInputElement).files?.[0]||null"></label>
+        <details class="import-attachments"><summary>答案与听力附件（可选）<small v-if="selectedAnswerFile || selectedAudioFiles.length"> · 已选 {{ (selectedAnswerFile ? 1 : 0) + selectedAudioFiles.length }} 个文件</small></summary><div class="document-upload-fields">
         <label class="field"><span>答案文件（可选）</span><input type="file" accept=".doc,.docx,.pdf" @change="selectedAnswerFile=($event.target as HTMLInputElement).files?.[0]||null"></label>
         <label class="field"><span>听力音频（可选，可多选）</span><input type="file" accept=".mp3,.m4a,.wav,.ogg,audio/mpeg,audio/mp4,audio/wav,audio/ogg" multiple @change="selectedAudioFiles=Array.from(($event.target as HTMLInputElement).files || [])"><small v-if="selectedAudioFiles.length">已选择 {{ selectedAudioFiles.length }} 个音频文件</small></label>
+        </div></details>
         <label class="check-row"><input v-model="useModelAssist" type="checkbox"><span><b>上传时使用模型辅助定位题目与答案</b></span></label>
         <label class="check-row"><input v-model="modelAssistRewrite" type="checkbox"><span><b>允许模型修正题干和选项归属</b></span></label>
         <button class="button" type="button" :disabled="busy || !selectedFile" @click="upload">
           <Sparkles v-if="useModelAssist" :size="17" /><FileUp v-else :size="17" />{{ busy ? '正在处理…' : '生成结构化草稿' }}
         </button>
+        </div></details>
       </article>
 
-      <article class="card import-source-card">
-        <div class="source-heading"><FileArchive :size="22" /><div><h2>ESQ 分享题库</h2></div></div>
+      <article v-show="section === 'esq'" class="card import-source-card">
+        <details :open="!esqCurrent" class="document-upload-details"><summary><span class="source-heading"><FileArchive :size="22" /><h2>ESQ 分享题库</h2></span></summary><div class="document-upload-fields">
         <label class="field"><span>ESQ 文件</span><input type="file" accept=".esq" @change="selectedEsqFile=($event.target as HTMLInputElement).files?.[0]||null"></label>
         <button class="button secondary" type="button" :disabled="busy || !selectedEsqFile" @click="uploadEsq"><FileArchive :size="17" />校验题库包</button>
           <div v-if="stagedEsqTasks.length" style="display:grid;gap:8px;margin-top:10px">
             <p style="margin:0;font-size:13px;color:var(--muted)">有 {{ stagedEsqTasks.length }} 个未完成的题库暂存任务：大题库包不会自动解析，避免占满内存导致闪退。</p>
-            <div v-for="task in stagedEsqTasks" :key="task.stage_id" style="display:flex;gap:8px;align-items:center;justify-content:space-between">
+            <div v-for="task in stagedEsqTasks" :key="task.stage_id" class="staged-task-row">
               <span style="display:grid;gap:2px;min-width:0">
                 <b style="overflow-wrap:anywhere">{{ task.filename }}</b>
                 <small>{{ stagedTaskSize(task.archive_bytes) }} · {{ stagedTaskPhase(task) }}</small>
               </span>
-              <span style="display:flex;gap:6px;flex:none">
+              <span class="staged-task-actions">
                 <button class="button secondary compact" type="button" :disabled="busy" @click="resumeStagedTask(task)">继续解析</button>
                 <button class="button ghost danger compact" type="button" :disabled="busy" @click="discardStagedTask(task)"><Trash2 :size="14" />删除</button>
               </span>
             </div>
           </div>
-        <div class="history-mini">
-          <div v-for="job in esqJobs.slice(0,4)" :key="job.id" style="display:flex;gap:6px">
-            <button type="button" style="flex:1" @click="openEsqJob(job.id)">
-              <span>{{ job.display_name || job.filename }}</span><small>{{ importStatusText(job.status) }}</small>
-            </button>
-            <button v-if="job.status!=='published'" class="button ghost danger compact" type="button" @click="removeImportJob(job,true)"><Trash2 :size="14" /></button>
-          </div>
-        </div>
+        </div></details>
       </article>
     </section>
 
-    <section v-if="esqCurrent" class="card review-card">
+    <section v-show="section === 'esq'" v-if="esqCurrent" class="card review-card esq-review-card">
       <p>导入目标题库：{{ esqDestinationName }}</p>
       <div class="review-head"><div><span class="pill">ESQ 1.0</span><h2>{{ esqCurrent.preview.title }}</h2><p>{{ esqCurrent.preview.totals.questions }} 道题 · {{ esqCurrent.preview.totals.units }} 篇</p></div><div class="review-actions"><button class="button" :disabled="busy" @click="publishEsq"><FileCheck2 :size="17" />发布题库包</button><button class="button secondary" type="button" :disabled="busy" @click="closeEsqPreview"><X :size="17" />关闭预览</button></div></div>
       <div v-for="conflict in esqCurrent.preview.conflicts.filter((item:any)=>item.existing)" :key="conflict.paperKey" class="conflict-row">
@@ -568,19 +624,7 @@ async function removeImportJob(job: any, esq = false) {
       </div>
     </section>
 
-    <section class="workspace-grid">
-      <aside class="card history-panel">
-        <div class="section-title"><h3>Word 导入记录</h3><RefreshCw :size="16" /></div>
-        <div v-for="job in jobs" :key="job.id" style="display:flex;gap:6px">
-          <button type="button" style="flex:1" :class="{active:current?.id===job.id}" @click="openJob(job.id)">
-            <span><b>{{ job.detected_year || '待识别' }} 年</b>{{ job.filename }}</span>
-            <small>{{ job.status === 'published' ? '已入库' : `${job.warnings?.length || 0} 项待处理` }}</small>
-          </button>
-          <button v-if="job.status!=='published'" class="button ghost danger compact" type="button" @click="removeImportJob(job)"><Trash2 :size="14" /></button>
-        </div>
-        <p v-if="!jobs.length" class="empty-copy">暂无导入记录</p>
-      </aside>
-
+    <section v-show="section === 'document'" class="workspace-grid">
       <main v-if="current?.draft" class="review-stack">
         <article class="card review-card">
           <div class="review-head">
@@ -632,10 +676,10 @@ async function removeImportJob(job: any, esq = false) {
           </div>
         </article>
       </main>
-      <div v-else class="card empty-workspace"><FileUp :size="34" /><h2>选择导入记录开始校对</h2></div>
+      <div v-else class="card empty-workspace"><div class="source-heading empty-workspace-heading"><FileUp :size="28" /><h2>选择导入记录开始校对</h2></div></div>
     </section>
 
-    <section class="card label-center">
+    <section v-show="section === 'labeling'" class="card label-center">
       <div class="review-head"><div><h2>题库智能标注</h2><p>{{ questionLabelingState.status?.labeled || 0 }} / {{ questionLabelingState.status?.total || 0 }} 道已完成</p></div><div class="review-actions"><button v-if="questionLabelingState.isRunning" class="button secondary" @click="pauseQuestionLabeling"><Pause :size="16" />当前篇后暂停</button><button v-else class="button" @click="promptLabeling(selectedLabelScope())"><Play :size="16" />开始标注</button><button class="button secondary" @click="loadLabels"><Search :size="16" />查看与人工校正</button></div></div>
       <div class="label-progress" role="progressbar" :aria-valuenow="questionLabelingState.status?.percentage||0" aria-valuemin="0" aria-valuemax="100"><span :style="{width:`${questionLabelingState.status?.percentage||0}%`}"></span></div>
       <p v-if="questionLabelingState.message">{{ questionLabelingState.message }}</p>
@@ -648,8 +692,7 @@ async function removeImportJob(job: any, esq = false) {
 
     <section v-if="labelPromptOpen" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="label-prompt-title">
       <div class="card modal-card">
-        <Sparkles :size="28" />
-        <h2 id="label-prompt-title">立即智能标注本次题库吗？</h2>
+        <div class="source-heading"><Sparkles :size="28" /><h2 id="label-prompt-title">立即智能标注本次题库吗？</h2></div>
         <p>模型会读取完整篇章、题干、选项和答案，生成考点与注意事项。此操作会消耗 API Token，可在当前篇完成后暂停。</p>
         <label class="check-row"><input v-model="overwriteUnlocked" type="checkbox"><span><b>重新标注已明确解除锁定的旧标签</b><small>模型成功写入后会自动锁定；已锁定标签不会被覆盖。</small></span></label>
         <div class="review-actions"><button ref="laterButton" class="button secondary" @click="labelPromptOpen=false">稍后再说</button><button class="button" @click="beginLabeling"><Sparkles :size="16" />立即开始</button></div>
@@ -718,7 +761,7 @@ async function removeImportJob(job: any, esq = false) {
 </template>
 
 <style scoped>
-.import-page{padding-bottom:48px}.import-source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:18px}.import-source-card{display:flex;flex-direction:column;gap:14px}.source-heading,.review-head,.review-actions,.question-editor-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.source-heading{justify-content:flex-start;align-items:flex-start}.source-heading h2,.review-head h2{margin:0}.source-heading p,.review-head p{margin:4px 0 0;color:var(--muted)}.field{display:flex;flex-direction:column;gap:7px}.field span,.compact-field span{font-size:12px;color:var(--muted);font-weight:700}.field input,.field textarea,.field select,.compact-field input,.compact-field select,.label-search input{width:100%;border:1px solid var(--line);border-radius:10px;background:var(--surface-solid);color:var(--ink);padding:11px 12px;font:inherit}.check-row{display:flex;gap:10px;align-items:flex-start;padding:11px;border:1px solid var(--line);border-radius:12px}.check-row input{margin-top:4px;min-width:20px;min-height:20px}.check-row span{display:flex;flex-direction:column;gap:3px}.check-row small{color:var(--muted)}.history-mini,.history-panel,.label-list{display:flex;flex-direction:column;gap:8px}.history-mini button,.history-panel>button,.label-list>button{min-height:48px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-solid);color:var(--ink);display:flex;justify-content:space-between;text-align:left}.history-mini span,.history-panel span,.label-list span{display:flex;flex-direction:column;gap:3px}.history-mini small,.history-panel small,.label-list small{color:var(--muted)}.workspace-grid{display:grid;grid-template-columns:240px minmax(0,1fr);gap:18px;align-items:start}.history-panel{position:sticky;top:18px}.history-panel>button.active{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}.review-stack{display:flex;flex-direction:column;gap:16px}.review-card,.unit-editor{overflow:hidden}.draft-meta-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.draft-meta-grid .wide{grid-column:span 2}.assist-summary,.import-progress,.success-note{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:12px;margin:12px 0;background:color-mix(in srgb,var(--accent) 12%,var(--surface-solid));color:var(--ink)}.assist-summary.failed{background:color-mix(in srgb,var(--danger) 10%,var(--surface-solid))}.assist-summary span{flex:1}.unit-editor-head{width:100%;min-height:64px;padding:14px 16px;border:0;background:transparent;color:var(--ink);display:flex;justify-content:space-between;text-align:left}.unit-editor-head span:first-child{display:flex;flex-direction:column;gap:4px}.unit-editor-head small{color:var(--muted)}.unit-editor-body{border-top:1px solid var(--line);padding:16px}.question-editor{padding:16px 0;border-top:1px solid var(--line)}.compact-field{display:flex;align-items:center;gap:7px}.compact-field input,.compact-field select{width:90px}.option-editor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}.option-editor{display:grid;grid-template-columns:28px 1fr;gap:8px;align-items:start}.option-editor b{width:28px;height:28px;border-radius:8px;background:var(--accent-soft);display:grid;place-items:center}.option-editor textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--surface-solid);color:var(--ink);font:inherit}.empty-workspace{text-align:center;padding:52px 24px}.label-center{margin-top:18px}.label-progress{height:9px;border-radius:999px;background:var(--line);overflow:hidden;margin:16px 0}.label-progress span{display:block;height:100%;background:var(--accent);transition:width .2s}.label-search{display:flex;gap:8px}.label-search input{flex:1}.modal-overlay{position:fixed;inset:0;z-index:1000;background:rgba(12,20,17,.55);display:grid;place-items:center;padding:24px}.modal-card{width:min(620px,100%);max-height:90vh;overflow:auto}.label-editor-modal{display:flex;flex-direction:column;gap:13px}.conflict-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--line)}.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media(max-width:900px){.import-source-grid,.workspace-grid{grid-template-columns:1fr}.history-panel{position:static}.draft-meta-grid,.option-editor-grid{grid-template-columns:1fr}.draft-meta-grid .wide{grid-column:auto}.review-head{align-items:flex-start;flex-direction:column}}@media(prefers-reduced-motion:reduce){.spin{animation:none}.label-progress span{transition:none}}
+.import-page{padding-bottom:48px}.import-source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:18px}.import-source-card{display:flex;flex-direction:column;gap:14px}.source-heading,.review-head,.review-actions,.question-editor-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.source-heading{justify-content:flex-start;align-items:center}.source-heading h2,.review-head h2{margin:0}.source-heading p,.review-head p{margin:4px 0 0;color:var(--muted)}.field{display:flex;flex-direction:column;gap:7px}.field span,.compact-field span{font-size:12px;color:var(--muted);font-weight:700}.field input,.field textarea,.field select,.compact-field input,.compact-field select,.label-search input{width:100%;border:1px solid var(--line);border-radius:10px;background:var(--surface-solid);color:var(--ink);padding:11px 12px;font:inherit}.check-row{display:flex;gap:10px;align-items:flex-start;padding:11px;border:1px solid var(--line);border-radius:12px}.check-row input{margin-top:4px;min-width:20px;min-height:20px}.check-row span{display:flex;flex-direction:column;gap:3px}.check-row small{color:var(--muted)}.history-mini,.history-panel,.label-list{display:flex;flex-direction:column;gap:8px}.history-mini button,.history-panel>button,.label-list>button{min-height:48px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-solid);color:var(--ink);display:flex;justify-content:space-between;text-align:left}.history-mini span,.history-panel span,.label-list span{display:flex;flex-direction:column;gap:3px}.history-mini small,.history-panel small,.label-list small{color:var(--muted)}.workspace-grid{display:grid;grid-template-columns:240px minmax(0,1fr);gap:18px;align-items:start}.history-panel{position:sticky;top:18px}.history-panel>button.active{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}.review-stack{display:flex;flex-direction:column;gap:16px}.review-card,.unit-editor{overflow:hidden}.draft-meta-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.draft-meta-grid .wide{grid-column:span 2}.assist-summary,.import-progress,.success-note{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:12px;margin:12px 0;background:color-mix(in srgb,var(--accent) 12%,var(--surface-solid));color:var(--ink)}.assist-summary.failed{background:color-mix(in srgb,var(--danger) 10%,var(--surface-solid))}.assist-summary span{flex:1}.unit-editor-head{width:100%;min-height:64px;padding:14px 16px;border:0;background:transparent;color:var(--ink);display:flex;justify-content:space-between;text-align:left}.unit-editor-head span:first-child{display:flex;flex-direction:column;gap:4px}.unit-editor-head small{color:var(--muted)}.unit-editor-body{border-top:1px solid var(--line);padding:16px}.question-editor{padding:16px 0;border-top:1px solid var(--line)}.compact-field{display:flex;align-items:center;gap:7px}.compact-field input,.compact-field select{width:90px}.option-editor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}.option-editor{display:grid;grid-template-columns:28px 1fr;gap:8px;align-items:start}.option-editor b{width:28px;height:28px;border-radius:8px;background:var(--accent-soft);display:grid;place-items:center}.option-editor textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--surface-solid);color:var(--ink);font:inherit}.empty-workspace{text-align:center;padding:52px 24px}.label-center{margin-top:18px}.label-progress{height:9px;border-radius:999px;background:var(--line);overflow:hidden;margin:16px 0}.label-progress span{display:block;height:100%;background:var(--accent);transition:width .2s}.label-search{display:flex;gap:8px}.label-search input{flex:1}.modal-overlay{position:fixed;inset:0;z-index:1000;background:rgba(12,20,17,.55);display:grid;place-items:center;padding:24px}.modal-card{width:min(620px,100%);max-height:90vh;overflow:auto}.label-editor-modal{display:flex;flex-direction:column;gap:13px}.conflict-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--line)}.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media(max-width:900px){.import-source-grid,.workspace-grid{grid-template-columns:1fr}.history-panel{position:static}.draft-meta-grid,.option-editor-grid{grid-template-columns:1fr}.draft-meta-grid .wide{grid-column:auto}.review-head{align-items:flex-start;flex-direction:column}}@media(prefers-reduced-motion:reduce){.spin{animation:none}.label-progress span{transition:none}}
 </style>
 
 <style scoped>
@@ -731,4 +774,17 @@ async function removeImportJob(job: any, esq = false) {
 @media (max-width: 480px) {
   .assist-actions { grid-column: 1 / -1; }
 }
+</style>
+
+<style scoped>
+.import-page .review-stack>.review-card,.import-page .esq-review-card{width:100%;max-width:none;text-align:left}.import-attachments summary{cursor:pointer;min-height:44px;align-content:center}.document-upload-details summary>.source-heading{display:inline-flex;vertical-align:middle}.empty-workspace-heading{justify-content:center}.staged-task-row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.staged-task-actions{display:flex;gap:8px;flex-wrap:wrap}.import-page-title{display:grid;justify-items:start;gap:12px;min-width:0}.import-page-title h1{margin:0}.import-nav{flex-wrap:wrap;justify-content:flex-end}.import-home{margin-bottom:18px}.import-entrances{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.import-entrance{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:12px;text-align:left;color:var(--ink);font:inherit;min-height:148px;width:100%;cursor:pointer}.import-entrance-heading{display:flex;align-items:center;gap:14px}.import-entrance-heading>svg{color:var(--primary);flex-shrink:0}.import-entrance span{min-width:0}.import-entrance h2{margin:0}.import-entrance small{color:var(--muted)}.import-entrance:hover,.import-entrance:focus-visible{border-color:var(--primary)}.import-resume{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px}.import-records{display:grid;gap:12px;margin-bottom:18px}.import-record-row{display:flex;align-items:center;gap:10px;min-width:0;border-top:1px solid var(--line);padding-top:12px}.import-record-open{display:flex;align-items:center;gap:12px;flex:1;min-width:0;text-align:left;color:var(--ink);background:transparent;border:0;padding:8px 0;font:inherit;cursor:pointer;min-height:48px}.import-record-open>svg{flex-shrink:0;color:var(--primary)}.import-record-open span{display:grid;gap:5px;min-width:0}.import-record-open small{color:var(--muted)}.import-page .import-source-grid,.import-page .workspace-grid{grid-template-columns:minmax(0,1fr)}.document-upload-details summary{font-weight:700;cursor:pointer;min-height:44px;display:list-item;align-content:center}.document-upload-fields{display:grid;gap:14px;padding-top:12px}.import-page .review-head,.import-page .review-actions{flex-wrap:wrap}.import-page .review-actions{justify-content:flex-start}.import-page .review-head>div{min-width:0}.import-page .review-head h2,.import-page .import-record-open b,.import-page .import-resume span,.import-page .conflict-row,.import-page .field input[type=file]{overflow-wrap:anywhere}.import-page .review-actions .button{max-width:100%;white-space:normal}.import-page .esq-review-card{margin-bottom:18px}.import-page .label-center{margin-top:0}.import-page .conflict-row label{display:flex;align-items:center;gap:8px;min-height:44px}.import-page .conflict-row input{width:20px;height:20px;flex-shrink:0}.import-page .unit-editor-head{gap:12px}.import-page .unit-editor-head span{min-width:0;overflow-wrap:anywhere}.import-page .unit-editor-head span:last-child{flex-shrink:0}
+@media(max-width:700px){.import-entrances{grid-template-columns:1fr}.import-entrance{min-height:124px}.import-resume{align-items:flex-start;flex-wrap:wrap}.import-nav{justify-content:flex-start}.import-page .unit-editor-head{flex-wrap:wrap}}
+</style>
+
+<style scoped>
+.import-page>.page-head.import-page-head{display:flex;justify-content:space-between;align-items:center;gap:18px}
+.import-page>.import-page-head>.import-page-title{flex:1 1 auto;min-width:0}
+.import-page>.import-page-head>.import-nav{display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;flex-wrap:nowrap;gap:12px;width:auto;max-width:none;margin:0}
+.import-page>.import-page-head>.import-nav .button{flex:0 0 auto;min-width:0;max-width:100%}
+@media(max-width:600px){.import-page>.page-head.import-page-head{flex-wrap:wrap;gap:12px}.import-page>.import-page-head>.import-page-title{flex-basis:100%}.import-page>.import-page-head>.import-nav{margin-left:auto;max-width:100%;gap:8px;flex-wrap:wrap}}
 </style>

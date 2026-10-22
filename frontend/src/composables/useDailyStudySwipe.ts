@@ -44,7 +44,7 @@ export function useDailyStudySwipe(options: {
     }
     if (phase.value === 'dragging') {
       event.preventDefault()
-      const step = dx < 0 ? -1 : 1, bounded = Math.min(Math.abs(dx), options.width.value)
+      const step = dx < 0 ? 1 : -1, bounded = Math.min(Math.abs(dx), options.width.value)
       offset.value = Math.sign(dx) * bounded * (options.canMove(step) ? 1 : .22)
     }
   }

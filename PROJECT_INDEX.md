@@ -12,12 +12,14 @@ Android 独立产品，Vue/TypeScript/Capacitor/SQLite/Java。本仓为开发权
 
 | 当前需要 | 入口 |
 | --- | --- |
+| 桌面横屏一致性修复与 A/P 推送前准备 | 2026-10-23：A01–A04 已修复；平板 17 页、W/P 各 15 页逐页横屏对照，电脑无横向溢出，现用桌面前端已更新并验证；两版桌面 UI 回归各 60 项通过。A/P 忽略规则、敏感信息扫描与构建已完成，三树已本地提交但未推送。Alan 英音公版再分发许可仍阻塞 Android 公开发布。见[本轮回执](docs/context/2026-10-23-desktop-horizontal-parity-and-github-prep.md) |
+| Android 横屏向电脑两树统筹移植 | 2026-10-22：D01–D18 适用代码已实装，自动化核心、隔离交付及现用两版桌面部署通过。首页列表已移除，导出按钮与舒适比例已实装；W 双音，P 仅美音。主观比例和听感待用户确认。见[实施回执](docs/context/2026-10-22-desktop-port-implementation.md)、[统筹方案](docs/context/2026-10-21-android-desktop-port-plan.md) |
 | 接续工作/排期/待验收 | [NOW](docs/context/NOW.md) |
 | 路径/版本/同步/发布 | [MAP](docs/context/MAP.md) |
 | 运行/构建/验收步骤 | [RUNBOOK](docs/context/RUNBOOK.md) |
 | 设计冲突/相关高风险操作 | [决策](docs/context/DECISIONS.md)、[风险](docs/context/RISKS.md) |
 | 导入题库方案一及图标标题同行 | 两树实现与平板核验通过，实际 alpha.128/143、beta.21/139。真实组件 74 个状态与相关持久化/兼容检查通过；主观视觉确认待用户，未正式发布。页头导航位置已修正，见[最新回执](docs/context/2026-10-import-header-position-verification.md)、[原方案回执](docs/context/2026-10-import-ui-scheme1-verification.md) |
-| 单词本离线发音、每日一学筛选与成人复习 | 2026-10-18：两套语音模型内置 APK、每日一学固定 new、七项筛选、评分衍生未学习范围、首页横屏双列等高、不认识改为 again、轻量形近词组与可选辨析。alpha.130 / 145 已覆盖安装到 HEY2-W09，美英发音实际播放通过；真机修复 espeak 数据路径和 AudioTrack 状态判断，详情页与每日一学排版已调整。完整 strict 回归 98/99，唯一失败为无关导入页旧断言；未推送/发布/跨仓同步。见[方案](docs/context/2026-10-vocabulary-offline-audio-study-review-plan.md)、[实施回执](docs/context/2026-10-vocabulary-offline-audio-study-review-verification.md) |
+| 单词本离线发音、每日一学筛选与成人复习 | 2026-10-19：alpha.132 / 147 已安装平板。英音改为用户选中并真机确认清晰的 Alan 男声；左滑下一词、右滑上一词；每日一背揭示按钮移到底部评分行。168 场景布局、66 次语音合成及会话/触摸回归通过，数据库快照未变。未提交/发布/同步；Alan 公开再分发许可待解决。见[最新回执](docs/context/2026-10-tablet-audio-swipe-review-fixes.md)、[原方案](docs/context/2026-10-vocabulary-offline-audio-study-review-plan.md) |
 | 每日一学最终预览移植与翻译队列停滞修复 | 实际 alpha.123/138 已保留数据覆盖安装，strict 98/98、批量重试与真机队列核验通过；337 词全部翻译完成，0 排队/0 失败。每日一学主观视觉确认 WAIT_USER；定时唤醒已按用户要求删除；未提交、同步或发布。见[本轮回执](docs/context/2026-10-daily-study-ui-port-verification.md)、[方案](docs/context/2026-10-daily-study-ui-port-plan.md) |
 | 每日一学、练习计时与翻译队列综合开发 | 当前状态以[阶段回执](docs/context/2026-10-integrated-progress.md)为准：S0–S4 与质量收口已完成；每日一学原生数据库身份修复已随公测 beta.16 / 134、内测 alpha.120 / 135 安装平板，最新执行回执为 strict 96/96；该修复已提交（`a8282d7`，2026-10-11）。续接[执行方案](docs/context/2026-10-s0-s4-closeout-plan.md)中的 S5 剩余联合验收，不重开已解决门禁。原需求见[修订方案](docs/context/2026-10-integrated-development-plan.md)，S4 开发历史见[S4 回执](docs/context/2026-10-s4-verification.md)。付费供应商、同步和发布分别核对授权 |
 | 9 月平板横屏整改追溯 | [最后预览与最终方案](docs/design-review-2026-09-16/selected-revision/README.md)、[实施核对记录](docs/context/history/2026-09-16-landscape-remediation-implementation.md)：保留当时源码与验证结果，不作为最新安装状态；当前接手入口见 NOW |

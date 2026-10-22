@@ -40,10 +40,10 @@ const swipe = useDailyStudySwipe({ width, enabled: () => landscape.value && docu
   reducedMotion: () => reducedMotion.value,
 })
 const { offset, phase: gesturePhase } = swipe
-const neighborIndex = computed(() => destination.value ?? (offset.value ? state.value!.index + (offset.value < 0 ? -1 : 1) : -1))
+const neighborIndex = computed(() => destination.value ?? (offset.value ? state.value!.index + (offset.value < 0 ? 1 : -1) : -1))
 const neighbor = computed(() => neighborIndex.value >= 0 ? session.peek(neighborIndex.value) : null)
 const neighborMember = computed(() => state.value!.items[neighborIndex.value])
-const neighborOffset = computed(() => offset.value + (destination.value !== null ? destination.value < state.value!.index ? width.value : -width.value : offset.value < 0 ? width.value : -width.value))
+const neighborOffset = computed(() => offset.value + (destination.value !== null ? destination.value > state.value!.index ? width.value : -width.value : offset.value < 0 ? width.value : -width.value))
 // During committed navigation index already refers to the destination; preserve its side.
 const navigationSign = ref(1)
 const adjacentTransform = computed(() => switching.value ? offset.value - navigationSign.value * width.value : neighborOffset.value)
@@ -102,7 +102,7 @@ async function go(index: number) {
   if (!landscape.value || value.busy || switching.value || index === value.index || index < 0 || index >= value.items.length) return
   clearTimeout(saveTimer); capture(); swipe.hold()
   const token = ++navigationToken, old = current.value?.daily_study_identity
-  navigationSign.value = index < value.index ? -1 : 1
+  navigationSign.value = index < value.index ? 1 : -1
   destination.value = index; frozen.value = current.value; switching.value = true
   // Hold the visible old card while loading. A requested index is never a loaded identity.
   await session.select(index)

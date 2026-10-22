@@ -132,7 +132,7 @@ async function inspectReview(page) {
   return page.evaluate(() => {
     const box = selector => { const element=document.querySelector(selector);if(!element)return null;const r=element.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height} }
     const content=document.querySelector('.review-content')
-    return {card:box('.vocabulary-review-card'),term:box('.review-term'),header:box('.review-header'),actions:box('.review-actions'),close:box('.review-close'),content:box('.review-content'),scrollHeight:content.scrollHeight,clientHeight:content.clientHeight}
+    return {card:box('.vocabulary-review-card'),term:box('.review-term'),phonetic:box('.review-phonetic'),reveal:box('.reveal-button'),header:box('.review-header'),actions:box('.review-actions'),close:box('.review-close'),content:box('.review-content'),scrollHeight:content.scrollHeight,clientHeight:content.clientHeight}
   })
 }
 let browser
@@ -221,6 +221,12 @@ try {
         assert.ok(Math.max(...tops)-Math.min(...tops)<2,'rating buttons stay in one row')
       }
       const measured=await inspectReview(page)
+      if(state==='hidden') {
+        const rating=await page.locator('.review-actions button').nth(1).boundingBox()
+        assert.ok(Math.abs(measured.reveal.bottom-rating.y-rating.height)<=1, label+': reveal button shares the bottom rating row '+JSON.stringify({measured,rating}))
+        assert.ok(Math.abs(measured.reveal.left+measured.reveal.width/2-(rating.x+rating.width/2))<=1, label+': reveal button is centered on the middle rating button')
+        assert.ok(measured.reveal.top>=measured.phonetic.bottom+16, label+': pronunciation and reveal remain separate')
+      }
       evidence.push({label,state,...measured})
       if(output) await page.screenshot({path:join(output,label+'-compact-'+state+'.png')})
       if(width>height && height>=600 && fontScale===1) {

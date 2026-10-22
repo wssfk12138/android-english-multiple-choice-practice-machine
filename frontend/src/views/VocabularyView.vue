@@ -1271,8 +1271,8 @@ function filterCount(key: string) {
         <div class="review-content">
           <div class="review-term">…</div>
           <div class="review-phonetic"></div>
-          <button class="button secondary reveal-button" type="button" disabled>显示释义和原句</button>
         </div>
+        <footer class="review-controls"><button class="button secondary reveal-button" type="button" disabled>显示释义和原句</button></footer>
       </div>
       <div v-else-if="reviewWord" class="review-card vocabulary-review-card" data-review-fullscreen>
         <header class="review-header">
@@ -1285,17 +1285,19 @@ function filterCount(key: string) {
           <span v-if="currentReviewGroup" class="review-group-badge">形近词组 · {{ currentReviewGroupPosition }}/{{ currentReviewGroup.keys.length }}</span>
           <div v-if="completedReviewGroup" class="review-discrimination-entry"><button class="button secondary compact" type="button" :disabled="reviewSaving" @click="openReviewDiscrimination">查看辨析</button><span>本组两个词已完成本次作答</span></div>
           <div class="review-phonetic tts-phonetic-line"><span v-if="reviewSnapshot.phonetic">{{ reviewSnapshot.phonetic }}</span><PronunciationButtons :text="reviewSnapshot.term" :owner-id="'review-' + reviewSnapshot.id" :disabled="reviewSaving" /></div>
-          <button v-if="landscape || !reveal" :class="{ 'answer-reserved': reveal }" :inert="reveal" :aria-hidden="reveal" class="button secondary reveal-button" @click="reveal=true">显示释义和原句</button>
           <div v-if="landscape || reveal" class="review-answer" :class="{ 'answer-reserved': !reveal }" :inert="!reveal" :aria-hidden="!reveal">
             <p v-if="!reviewDetailOf(reviewWord)" class="muted" aria-live="polite">正在读取释义与原句…</p>
             <VocabularyMemoryContent v-else :entry="reviewSnapshot" :config="reviewDisplayConfig" />
             <p v-if="reviewDetailError" class="error" role="alert">{{ reviewDetailError }}<button class="button ghost compact" type="button" @click="loadReviewDetail(reviewWord, true)">重试</button></p>
           </div>
         </div>
-        <footer v-if="landscape || reveal" class="review-actions" :class="{ 'answer-reserved': !reveal }" :inert="!reveal" :aria-hidden="!reveal" :aria-busy="reviewSaving">
+        <footer class="review-controls">
+          <button v-if="!reveal" class="button secondary reveal-button" @click="reveal=true">显示释义和原句</button>
+          <div class="review-actions" :class="{ 'answer-reserved': !reveal }" :inert="!reveal" :aria-hidden="!reveal" :aria-busy="reviewSaving">
           <button class="button secondary" :disabled="reviewSaving" @click="rate('again')">不认识</button>
           <button class="button secondary" :disabled="reviewSaving" @click="rate('know')">认识</button>
           <button class="button" :disabled="reviewSaving" @click="rate('fluent')">熟练</button>
+          </div>
         </footer>
       </div>
       <div v-else class="card empty vocab-review-empty">

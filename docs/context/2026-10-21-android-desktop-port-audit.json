@@ -1,0 +1,2667 @@
+{
+  "date": "2026-10-21",
+  "mode": "read-only-source-audit; runtime and real databases not accessed",
+  "roots": {
+    "android": "E:/EnglishPracticeMachine/Codex/english-multiple-choice-practice-machine-android",
+    "dev": "E:/EnglishPracticeMachine/Codex/2026-08-02/ba",
+    "pub": "E:/EnglishPracticeMachine/Codex/english-practice-machine-github"
+  },
+  "sourceCounts": {
+    "android": 146,
+    "dev": 67,
+    "pub": 70
+  },
+  "frontend": {
+    "androidVsDev": {
+      "same": [
+        "components/AppDialogHost.vue",
+        "components/ContentBlocks.vue",
+        "components/OptionSheet.vue",
+        "components/PassageBlank.vue",
+        "components/QuestionBankSwitcher.vue",
+        "components/StudyTodos.vue",
+        "components/VocabularyTerm.vue",
+        "composables/useThemeState.ts",
+        "dashboard-glass.css",
+        "passage-blanks.ts",
+        "platform/dialogs.ts",
+        "platform/overlay-history.ts",
+        "services/documentAgent.ts",
+        "services/practiceTimer.ts",
+        "services/wrongAnalysisSessions.ts",
+        "vocabulary-due-queue.ts"
+      ],
+      "changed": [
+        "api.ts",
+        "App.vue",
+        "components/AiAssistant.vue",
+        "components/DailyStudyContent.vue",
+        "components/ListeningPlayer.vue",
+        "components/NamedModelKeys.vue",
+        "components/PracticeContentChoice.vue",
+        "components/VocabularyEnrichment.vue",
+        "components/VocabularyMaintenance.vue",
+        "components/VocabularyMemoryContent.vue",
+        "composables/useDailyStudySwipe.ts",
+        "composables/useReducedMotion.ts",
+        "env.d.ts",
+        "main.ts",
+        "router.ts",
+        "services/assistantSession.ts",
+        "services/configAutosave.ts",
+        "services/dailyStudy.ts",
+        "services/dailyStudyContent.ts",
+        "services/keyDrafts.ts",
+        "services/profileDrafts.ts",
+        "services/questionBankProfiles.ts",
+        "services/questionLabeling.ts",
+        "services/saveAssistantDocument.ts",
+        "services/vocabularyDisplayConfig.ts",
+        "services/vocabularySnapshots.ts",
+        "services/wrongListReturn.ts",
+        "settings-hub.css",
+        "study-theme.css",
+        "styles.css",
+        "views/DailyStudyView.vue",
+        "views/DashboardView.vue",
+        "views/HelpView.vue",
+        "views/ImportView.vue",
+        "views/LibraryView.vue",
+        "views/PracticeView.vue",
+        "views/SettingsView.vue",
+        "views/TrashView.vue",
+        "views/VocabularyView.vue",
+        "views/WrongAnalysisView.vue",
+        "views/WrongView.vue",
+        "vocabulary-context.ts"
+      ],
+      "onlyAndroid": [
+        "components/LanQuestionBanks.vue",
+        "components/LanSyncScanner.vue",
+        "components/PronunciationButtons.vue",
+        "components/StudyFilter.vue",
+        "composables/useAndroidLandscape.ts",
+        "platform/android/ai-adapters.ts",
+        "platform/android/ai.ts",
+        "platform/android/app-settings.ts",
+        "platform/android/app-update.ts",
+        "platform/android/attempt-stats.ts",
+        "platform/android/barcode-scan-session.ts",
+        "platform/android/candidate-order-policy.ts",
+        "platform/android/content-remediation.ts",
+        "platform/android/database-export.ts",
+        "platform/android/database.ts",
+        "platform/android/diagnostics.ts",
+        "platform/android/document-extractor.ts",
+        "platform/android/document-import.ts",
+        "platform/android/errors.ts",
+        "platform/android/esq-format.ts",
+        "platform/android/esq-stage.ts",
+        "platform/android/exam-templates.ts",
+        "platform/android/import-destination.ts",
+        "platform/android/lan-categories.ts",
+        "platform/android/lan-pairing.ts",
+        "platform/android/lan-question-banks.ts",
+        "platform/android/lan-recovery.ts",
+        "platform/android/lan-sync-compat.ts",
+        "platform/android/lan-sync-errors.ts",
+        "platform/android/lan-sync-qr.ts",
+        "platform/android/lan-sync-serialization.ts",
+        "platform/android/lan-sync-validation.ts",
+        "platform/android/lan-sync-versions.ts",
+        "platform/android/lan-sync.ts",
+        "platform/android/lan-transport.ts",
+        "platform/android/learning-history-diagnostics-core.ts",
+        "platform/android/learning-history-diagnostics.ts",
+        "platform/android/learning-history-rebind.ts",
+        "platform/android/local-api.ts",
+        "platform/android/model-key-store.ts",
+        "platform/android/model-key-sync.ts",
+        "platform/android/native-http.ts",
+        "platform/android/ordering-fixed-slots.ts",
+        "platform/android/practice-session-resume.ts",
+        "platform/android/practice-snapshots.ts",
+        "platform/android/practice.ts",
+        "platform/android/question-bank-profiles.ts",
+        "platform/android/question-bank.ts",
+        "platform/android/question-labeling.ts",
+        "platform/android/serial-queue.ts",
+        "platform/android/study-todos.ts",
+        "platform/android/sync-coordinator.ts",
+        "platform/android/sync-retry-policy.ts",
+        "platform/android/sync-scheduler.ts",
+        "platform/android/update-settings.ts",
+        "platform/android/vocabulary-enrichment-fields.ts",
+        "platform/android/vocabulary-enrichment-runner.ts",
+        "platform/android/vocabulary-native-http.ts",
+        "platform/android/vocabulary-network-policy.ts",
+        "platform/android/vocabulary-request-config.ts",
+        "platform/android/vocabulary-request-recovery.ts",
+        "platform/android/vocabulary-request-result.ts",
+        "platform/android/vocabulary-request-runner.ts",
+        "platform/android/vocabulary-request-store.ts",
+        "platform/android/vocabulary-translation-runner.ts",
+        "platform/android/vocabulary.ts",
+        "platform/android/wrong-analysis-history.ts",
+        "platform/json-response.ts",
+        "platform/model-keys.ts",
+        "platform/official-download-sources.ts",
+        "platform/question-bank-limits.ts",
+        "platform/runtime.ts",
+        "platform/secure-store.ts",
+        "platform/types.ts",
+        "platform/updates.ts",
+        "practice-swipe.ts",
+        "resume-title.ts",
+        "services/pronunciation.ts",
+        "services/vocabularyQueueStatus.ts",
+        "services/vocabularyTranslationConfig.ts",
+        "views/AndroidAppearanceView.vue",
+        "views/AndroidDiagnosticsView.vue",
+        "views/AndroidSyncView.vue",
+        "views/AndroidUpdatesView.vue",
+        "views/AndroidVocabularyDisplayView.vue",
+        "views/MobileSettingsView.vue",
+        "views/NotesHubView.vue",
+        "vocabulary-review-groups.ts"
+      ],
+      "onlyTarget": [
+        "components/LanPairedDevices.vue",
+        "components/LanQuestionBankSharing.vue",
+        "components/VocabularyDisplaySettings.vue",
+        "desktop-settings.css",
+        "services/adaptiveZoom.ts",
+        "views/DiagnosticsSettingsView.vue",
+        "views/SettingsHubView.vue",
+        "views/SyncSettingsView.vue",
+        "views/UpdatesSettingsView.vue"
+      ]
+    },
+    "windowsCommonChanged": [
+      {
+        "p": "api.ts",
+        "type": "changed"
+      },
+      {
+        "p": "App.vue",
+        "type": "changed"
+      },
+      {
+        "p": "components/ListeningPlayer.vue",
+        "type": "changed"
+      },
+      {
+        "p": "components/StudyTodos.vue",
+        "type": "changed"
+      },
+      {
+        "p": "router.ts",
+        "type": "changed"
+      },
+      {
+        "p": "styles.css",
+        "type": "changed"
+      },
+      {
+        "p": "views/DashboardView.vue",
+        "type": "changed"
+      },
+      {
+        "p": "views/DiagnosticsSettingsView.vue",
+        "type": "changed"
+      },
+      {
+        "p": "views/HelpView.vue",
+        "type": "changed"
+      },
+      {
+        "p": "views/ImportView.vue",
+        "type": "changed"
+      },
+      {
+        "p": "views/LibraryView.vue",
+        "type": "changed"
+      },
+      {
+        "p": "views/PracticeView.vue",
+        "type": "changed"
+      },
+      {
+        "p": "views/SettingsHubView.vue",
+        "type": "changed"
+      },
+      {
+        "p": "views/SyncSettingsView.vue",
+        "type": "changed"
+      },
+      {
+        "p": "views/TrashView.vue",
+        "type": "changed"
+      },
+      {
+        "p": "views/UpdatesSettingsView.vue",
+        "type": "changed"
+      }
+    ],
+    "windowsPublicOnly": [
+      "dailyStudy.ts",
+      "platform/diagnostics.ts",
+      "views/RemoteQuestionBanksView.vue"
+    ]
+  },
+  "backend": {
+    "windowsCommonChanged": [
+      "config.py",
+      "database.py",
+      "lan_sync_host.py",
+      "lan_tls_host.py",
+      "main.py",
+      "routers/dashboard.py",
+      "routers/papers.py",
+      "routers/question_banks.py",
+      "routers/sync.py",
+      "routers/updates.py",
+      "routers/vocabulary.py",
+      "schemas.py",
+      "services/ai_client.py",
+      "services/esq.py",
+      "services/model_key_transaction.py",
+      "services/model_snapshot.py",
+      "services/practice.py",
+      "services/practice_snapshots.py",
+      "services/question_bank_catalog.py",
+      "services/question_labeling.py",
+      "services/study_todos.py",
+      "services/sync.py",
+      "services/trash.py",
+      "services/updates.py",
+      "services/vocabulary.py"
+    ],
+    "devOnly": [
+      "services/diagnostics.py",
+      "version.py"
+    ],
+    "pubOnly": [
+      "routers/remote_question_banks.py",
+      "services/bundled_banks.py"
+    ]
+  },
+  "files": {
+    "android": [
+      {
+        "path": "frontend/src/api.ts",
+        "sha256": "8d0e615b4ce0d6694d1cf72399e0a0e11dc641b01e5113b1b66e99be714700e0",
+        "bytes": 5076
+      },
+      {
+        "path": "frontend/src/App.vue",
+        "sha256": "e9d8951482f5cd434c7315c67ffa11cd489010599de7f6ec91c03c807149e993",
+        "bytes": 14169
+      },
+      {
+        "path": "frontend/src/components/AiAssistant.vue",
+        "sha256": "644a63145510225a3dfb4aa47dcbfb60aeee9f4b3030cc1c8b93c0cf837e6bef",
+        "bytes": 24627
+      },
+      {
+        "path": "frontend/src/components/AppDialogHost.vue",
+        "sha256": "b21a6be8891d19ab9074304518bbda85fae60873c25feff6a08ec86f55808ea1",
+        "bytes": 3338
+      },
+      {
+        "path": "frontend/src/components/ContentBlocks.vue",
+        "sha256": "55bf08d8754d7b4f8ea393e2b41639de65fe18bcd28ad8752f9ced163d94e771",
+        "bytes": 2684
+      },
+      {
+        "path": "frontend/src/components/DailyStudyContent.vue",
+        "sha256": "73dba00be1fb540ae6226beeb5984ce987f3f8a9de3c27936401a06ccf95bf62",
+        "bytes": 4082
+      },
+      {
+        "path": "frontend/src/components/LanQuestionBanks.vue",
+        "sha256": "bd02722bf2f41f495e8efb0301cb144f1c48037bcc8e5dc198475d237def7a6d",
+        "bytes": 3980
+      },
+      {
+        "path": "frontend/src/components/LanSyncScanner.vue",
+        "sha256": "9550c3a1e5026b6ac889dacd116c6e23c858e9c2b83eb0005e5ea544424dce9d",
+        "bytes": 7011
+      },
+      {
+        "path": "frontend/src/components/ListeningPlayer.vue",
+        "sha256": "e254c4834bbc519f2db7181f014c0c05d02b90bb6bed8cd3db5f661333e9d770",
+        "bytes": 15644
+      },
+      {
+        "path": "frontend/src/components/NamedModelKeys.vue",
+        "sha256": "f6c84b1500f02de5d42fb2a520adfca9f0b11ab590e452fa4c1df5de8f7795f9",
+        "bytes": 19970
+      },
+      {
+        "path": "frontend/src/components/OptionSheet.vue",
+        "sha256": "ac122e089ced2a44700f26c3974cf92e8f06843aa5cae20b428152c258c9b27c",
+        "bytes": 4128
+      },
+      {
+        "path": "frontend/src/components/PassageBlank.vue",
+        "sha256": "3d5b3c624598dea50a97f0cb0673be9b1be8c611071005986243c8c1cfe84887",
+        "bytes": 212
+      },
+      {
+        "path": "frontend/src/components/PracticeContentChoice.vue",
+        "sha256": "4152035cf414a2cc486f663fd24fb1dd170e3d5c62851c2fcd0a00553359a4e1",
+        "bytes": 1514
+      },
+      {
+        "path": "frontend/src/components/PronunciationButtons.vue",
+        "sha256": "283be37ded6045941ee014ec3d53d9fd69a611d6ca47947b8b1f5bb790101e03",
+        "bytes": 2984
+      },
+      {
+        "path": "frontend/src/components/QuestionBankSwitcher.vue",
+        "sha256": "d7bb732e3bd2816e291f97549c945190d1b20464515ba71578b56443838b0fbc",
+        "bytes": 4339
+      },
+      {
+        "path": "frontend/src/components/StudyFilter.vue",
+        "sha256": "8877673b5c5445ab2fd36f58764a1a2741ece0391df9effabe9426426031b2c5",
+        "bytes": 2839
+      },
+      {
+        "path": "frontend/src/components/StudyTodos.vue",
+        "sha256": "bd2e4f2b2089515dbe1a18c44875f71a445289e9a99ebe4b73a900040fbbeef4",
+        "bytes": 4102
+      },
+      {
+        "path": "frontend/src/components/VocabularyEnrichment.vue",
+        "sha256": "fafb106fba2a3356211dcd6db3ed8a5c87b022764aa3bd921870fa1bed3d8eb8",
+        "bytes": 1505
+      },
+      {
+        "path": "frontend/src/components/VocabularyMaintenance.vue",
+        "sha256": "ee2cd4f037bf511078073bd047e3bd775d910e58194a1f0f1b2ce074d8f4d1bb",
+        "bytes": 6385
+      },
+      {
+        "path": "frontend/src/components/VocabularyMemoryContent.vue",
+        "sha256": "8b689de98f30c07f234b8f561d180285c46639780064be008d2ac8dbce27e95b",
+        "bytes": 4675
+      },
+      {
+        "path": "frontend/src/components/VocabularyTerm.vue",
+        "sha256": "68a354b668dbe78e9d7a9392bf02473f9d39bfe8e9d334eeb1abce6666ec462a",
+        "bytes": 1718
+      },
+      {
+        "path": "frontend/src/composables/useAndroidLandscape.ts",
+        "sha256": "21a1b25631eb7e997add26258764be016a44bd9306c43973e033a59cbaac5a2f",
+        "bytes": 674
+      },
+      {
+        "path": "frontend/src/composables/useDailyStudySwipe.ts",
+        "sha256": "c8cfb31f6486dbaa554bd99f63fd24c9f0aa2de06c185160cc42021b79ab8ce7",
+        "bytes": 3680
+      },
+      {
+        "path": "frontend/src/composables/useReducedMotion.ts",
+        "sha256": "d62022ba41f7606b5c75863d359f1668675cd3f33fe68141828df0f69c7c69e5",
+        "bytes": 1455
+      },
+      {
+        "path": "frontend/src/composables/useThemeState.ts",
+        "sha256": "8dd7b189a340a87aba86e212e22832181850ea0883c993fe539ca733188d2460",
+        "bytes": 452
+      },
+      {
+        "path": "frontend/src/dashboard-glass.css",
+        "sha256": "6e250f78eef402d3e27e8af2dc96dfbcc1fd41bc984625d369a81f090f48a54e",
+        "bytes": 7383
+      },
+      {
+        "path": "frontend/src/env.d.ts",
+        "sha256": "1dd9f80925cbd71dfb6fab20a32ffc552dfa9d847d59be45313e5a26d03b0089",
+        "bytes": 426
+      },
+      {
+        "path": "frontend/src/main.ts",
+        "sha256": "b50874ecfa6ee45871bf73a2b9f31b8a09f0a5a5baba174daf8a8a648f961fe0",
+        "bytes": 3277
+      },
+      {
+        "path": "frontend/src/passage-blanks.ts",
+        "sha256": "a70658f0d733dad24339fa0f6673c1d72d8d965b74996021f22be2da3577fd43",
+        "bytes": 1098
+      },
+      {
+        "path": "frontend/src/platform/android/ai-adapters.ts",
+        "sha256": "6a867d99dfe85e677909ebdc4a3b669c2782b3be3d140066fceaa63f97141c1c",
+        "bytes": 20326
+      },
+      {
+        "path": "frontend/src/platform/android/ai.ts",
+        "sha256": "33411f08119fc63046cc6e60d6bb796a5702462cbd51a10b40e2fa4f8032a65b",
+        "bytes": 47278
+      },
+      {
+        "path": "frontend/src/platform/android/app-settings.ts",
+        "sha256": "626ae0f185afd935f67f689605df2f8d7414e15343f723e7bb632e8958ab184a",
+        "bytes": 2022
+      },
+      {
+        "path": "frontend/src/platform/android/app-update.ts",
+        "sha256": "5798157049d585a0dffa8693fcb241de4e5ee729e3470166c563f0c9f40e1ca0",
+        "bytes": 7966
+      },
+      {
+        "path": "frontend/src/platform/android/attempt-stats.ts",
+        "sha256": "e380beaca1a703bb539136b4e63fc3f8f8e3d3630dc435d3a8bd1777660d2e27",
+        "bytes": 4672
+      },
+      {
+        "path": "frontend/src/platform/android/barcode-scan-session.ts",
+        "sha256": "31c5d75d1e5a12b43358768ffa7490501142cbedd17b91d75db34f2fd4e09d37",
+        "bytes": 2538
+      },
+      {
+        "path": "frontend/src/platform/android/candidate-order-policy.ts",
+        "sha256": "eeff763e7cf162e6064e4bb6b07a330233e7e8716aa5541a1c536cccdd498c2f",
+        "bytes": 699
+      },
+      {
+        "path": "frontend/src/platform/android/content-remediation.ts",
+        "sha256": "f8da5743a901dfe59753c27b1cde9343f849544a12f5fe2ba678be32b8c6b75d",
+        "bytes": 18245
+      },
+      {
+        "path": "frontend/src/platform/android/database-export.ts",
+        "sha256": "b849928b6773c6e5ca3522a737eda625f5cb890816a1ab3c9996f783014757f7",
+        "bytes": 2698
+      },
+      {
+        "path": "frontend/src/platform/android/database.ts",
+        "sha256": "63f7e78fa9e229672a4ed932ce1139f48806ef75a92d9b23436355fe6c94bcda",
+        "bytes": 78373
+      },
+      {
+        "path": "frontend/src/platform/android/diagnostics.ts",
+        "sha256": "f1d32189fbc322bf376cfdb5a9322642af9dd0bdb32381d22359acee2c6d8ff8",
+        "bytes": 10875
+      },
+      {
+        "path": "frontend/src/platform/android/document-extractor.ts",
+        "sha256": "d4518fb7d891f8a98b94a8e48bcd6329d33bf950eb2d83474ae42fb99398b0ef",
+        "bytes": 921
+      },
+      {
+        "path": "frontend/src/platform/android/document-import.ts",
+        "sha256": "9ae6585f8388d980d2fda0632c7ba40e0b22bc6e08c5d8561cd20c99d8282454",
+        "bytes": 67038
+      },
+      {
+        "path": "frontend/src/platform/android/errors.ts",
+        "sha256": "1389fd9498d8f206b8acd583ea6f97a3df1921f1368d3673fa67473824bfeda5",
+        "bytes": 664
+      },
+      {
+        "path": "frontend/src/platform/android/esq-format.ts",
+        "sha256": "b04f3444df9fcb2a0ba31aaf4d355736fde9b0a8247c6d7e22a2569921fadbbf",
+        "bytes": 2338
+      },
+      {
+        "path": "frontend/src/platform/android/esq-stage.ts",
+        "sha256": "4da4499d0479083665ce3bf1c70e58fe92c1c358aa3adb76ab0c94371bda4132",
+        "bytes": 1195
+      },
+      {
+        "path": "frontend/src/platform/android/exam-templates.ts",
+        "sha256": "3ad3dc1ceff815c80250b4401f883850460c74e271e7616c6291a0873574c6fb",
+        "bytes": 4680
+      },
+      {
+        "path": "frontend/src/platform/android/import-destination.ts",
+        "sha256": "07caf548d16af980ffaeb62cf17a8b2fb2074c8c1054fd2b8180937695653b88",
+        "bytes": 1687
+      },
+      {
+        "path": "frontend/src/platform/android/lan-categories.ts",
+        "sha256": "f2df039b5bf6f8159c798fd0ea0e88f36954453e562da1a2b664cf22d8e02d5b",
+        "bytes": 3748
+      },
+      {
+        "path": "frontend/src/platform/android/lan-pairing.ts",
+        "sha256": "d61cf344fcdc5f7c45a89a8bc572ec7dd1149ade94ecc7df31b6f93355df7d7c",
+        "bytes": 2117
+      },
+      {
+        "path": "frontend/src/platform/android/lan-question-banks.ts",
+        "sha256": "ceb6a7cbff7602caeabc912916335ea5b0e7639e1dbf354ed819b56e78ea0384",
+        "bytes": 5283
+      },
+      {
+        "path": "frontend/src/platform/android/lan-recovery.ts",
+        "sha256": "6746bc1a9aefad6574ea27eafe3f8facdd8c06c0c1c5be375465147457e17fd2",
+        "bytes": 1088
+      },
+      {
+        "path": "frontend/src/platform/android/lan-sync-compat.ts",
+        "sha256": "7421162cdc29ea3009f217fa29a9d999f85a7112992a4ec33b8fce0f1870d689",
+        "bytes": 985
+      },
+      {
+        "path": "frontend/src/platform/android/lan-sync-errors.ts",
+        "sha256": "38fa757061da4320a00bb6b80bc848213115cea0fe3ee5925ceacf077b0ec13b",
+        "bytes": 3532
+      },
+      {
+        "path": "frontend/src/platform/android/lan-sync-qr.ts",
+        "sha256": "eae60b028fcd8e02e2492eb9956cae4168c6e252ff5aeefbb0b05f94512a048c",
+        "bytes": 4564
+      },
+      {
+        "path": "frontend/src/platform/android/lan-sync-serialization.ts",
+        "sha256": "771cad2d2e1cc45522d7aab312df67f963bade8a7dae5cb223266d8adcc4c9bb",
+        "bytes": 1701
+      },
+      {
+        "path": "frontend/src/platform/android/lan-sync-validation.ts",
+        "sha256": "307818259c4245e3267df838110d83096b7469b53e8b0dd58e91b503455a6afa",
+        "bytes": 7093
+      },
+      {
+        "path": "frontend/src/platform/android/lan-sync-versions.ts",
+        "sha256": "ff5f3720e35378f6e3aa12e26428cfdde6bc08aa993db91cfe67e31eec798a3f",
+        "bytes": 5920
+      },
+      {
+        "path": "frontend/src/platform/android/lan-sync.ts",
+        "sha256": "27abf8622abb8a0ccce498deb75d35eede2922defdc6ded8d7a1d2b46053c5d9",
+        "bytes": 65653
+      },
+      {
+        "path": "frontend/src/platform/android/lan-transport.ts",
+        "sha256": "735730939cb089d3a7201bed3e2a7ce9299f88946857f631831f76482d983293",
+        "bytes": 1128
+      },
+      {
+        "path": "frontend/src/platform/android/learning-history-diagnostics-core.ts",
+        "sha256": "28a3c9a9bd6a514543158363eab653622dcec9cb1d580b1658ecad68c8068d9b",
+        "bytes": 4003
+      },
+      {
+        "path": "frontend/src/platform/android/learning-history-diagnostics.ts",
+        "sha256": "4c815f673b2d6040c6dce23436257e74579ead453f0545213215ed37916b1e2b",
+        "bytes": 995
+      },
+      {
+        "path": "frontend/src/platform/android/learning-history-rebind.ts",
+        "sha256": "920944b05c68e28d5edcd2eaaeb1ee9b1aef848b3235e15c73dfcafd1f106f44",
+        "bytes": 26038
+      },
+      {
+        "path": "frontend/src/platform/android/local-api.ts",
+        "sha256": "912431dbc89b9691cc1145a1fca066464539e3bbc254b4555be24a0bb009f2a2",
+        "bytes": 24600
+      },
+      {
+        "path": "frontend/src/platform/android/model-key-store.ts",
+        "sha256": "62dc27ea88f74f63746d0c41a0c33e969c695eb3a395d90e7ff3c467dcea4f21",
+        "bytes": 6980
+      },
+      {
+        "path": "frontend/src/platform/android/model-key-sync.ts",
+        "sha256": "d37fc61cc56cb4ce7bc5e0023207d302fa62888c9a0bb752577f3b7252954644",
+        "bytes": 8470
+      },
+      {
+        "path": "frontend/src/platform/android/native-http.ts",
+        "sha256": "b567f4d266acf8084dae60588c6b3b2e1c4d2fee9c5e1b432c1ba264b4f3ec59",
+        "bytes": 2638
+      },
+      {
+        "path": "frontend/src/platform/android/ordering-fixed-slots.ts",
+        "sha256": "a082a9df5dabc658ae4e0dd3ba13e7348cb24587d1842fbecc2d40f476ac1167",
+        "bytes": 4941
+      },
+      {
+        "path": "frontend/src/platform/android/practice-session-resume.ts",
+        "sha256": "4f442d7375775b47b55cf91b3f6d3e161d15c723dba423c715864771c90fe607",
+        "bytes": 1787
+      },
+      {
+        "path": "frontend/src/platform/android/practice-snapshots.ts",
+        "sha256": "b3e85ccc5848a2b46d111220137d74d574ab650e7120e8fc540bece54a3af8d3",
+        "bytes": 20697
+      },
+      {
+        "path": "frontend/src/platform/android/practice.ts",
+        "sha256": "5d1948cbb1058fe03222a5aa3235ade60be0bac805cd4cb7ba54a6dd9b97338c",
+        "bytes": 52231
+      },
+      {
+        "path": "frontend/src/platform/android/question-bank-profiles.ts",
+        "sha256": "f5cf908e96de3d22bdb34f970524d4cb2fdca0ccfcad02ead9bfff13ef01d6ed",
+        "bytes": 23300
+      },
+      {
+        "path": "frontend/src/platform/android/question-bank.ts",
+        "sha256": "1e42443aab224464dec23678a26bca00857df23a742734a140767e123aca6bc2",
+        "bytes": 48930
+      },
+      {
+        "path": "frontend/src/platform/android/question-labeling.ts",
+        "sha256": "06b220fc281e6c94a9ab08a977ccc8a6f81ce650fea6b688015aa9e54bef97ee",
+        "bytes": 20630
+      },
+      {
+        "path": "frontend/src/platform/android/serial-queue.ts",
+        "sha256": "58c0fbd4d4249f692af3d84009aae6a321c685275e3b0cca55ec3da8f40c8d2b",
+        "bytes": 410
+      },
+      {
+        "path": "frontend/src/platform/android/study-todos.ts",
+        "sha256": "2967e0b20ecc0267f97485d435d829d5490926e649b066cdae68cd92df47fbec",
+        "bytes": 6242
+      },
+      {
+        "path": "frontend/src/platform/android/sync-coordinator.ts",
+        "sha256": "2e7f9b3eb6129ef8e2e6d5167a356b5b1eafb8431d30a8a92b70f15a5b044236",
+        "bytes": 1034
+      },
+      {
+        "path": "frontend/src/platform/android/sync-retry-policy.ts",
+        "sha256": "1e9e25f18dc33508290cdd4e9cb85de54357a7f46c77e07ed3f84bb6b5fad93b",
+        "bytes": 336
+      },
+      {
+        "path": "frontend/src/platform/android/sync-scheduler.ts",
+        "sha256": "8e5f30ddafc04537586e037974d2adb49a7fbc66727213662ffb09a609fefc50",
+        "bytes": 6106
+      },
+      {
+        "path": "frontend/src/platform/android/update-settings.ts",
+        "sha256": "4fa017ed0e9900585ae85571baf9707174e2ffb5a9610c25f6e7ebeb82562ff4",
+        "bytes": 368
+      },
+      {
+        "path": "frontend/src/platform/android/vocabulary-enrichment-fields.ts",
+        "sha256": "dafcebda28ab9d33027d4a475cdf61a302de107338da093c5a8865e14fb93fed",
+        "bytes": 2798
+      },
+      {
+        "path": "frontend/src/platform/android/vocabulary-enrichment-runner.ts",
+        "sha256": "4f0418e198b40ce338c031327b85e5cae23bd8994cd0a3f9fd476bc1b67ecf68",
+        "bytes": 6121
+      },
+      {
+        "path": "frontend/src/platform/android/vocabulary-native-http.ts",
+        "sha256": "1ee8edfabae241b9e5c5ca3fb15cf640af167db9a407a5a4f9a83a903ca84477",
+        "bytes": 1684
+      },
+      {
+        "path": "frontend/src/platform/android/vocabulary-network-policy.ts",
+        "sha256": "b0dc77314897eb85074ed74ee592690e007e9950e6c2a5e8849c698514c7d5be",
+        "bytes": 434
+      },
+      {
+        "path": "frontend/src/platform/android/vocabulary-request-config.ts",
+        "sha256": "d83460102f8a94cf65ce2d128e675e15cb03256095a77cec43d23294785a8122",
+        "bytes": 1291
+      },
+      {
+        "path": "frontend/src/platform/android/vocabulary-request-recovery.ts",
+        "sha256": "06bdaafa708af2c63c9c821a41b4f71291b96014545ae07606d49da4a304896e",
+        "bytes": 2958
+      },
+      {
+        "path": "frontend/src/platform/android/vocabulary-request-result.ts",
+        "sha256": "7bd5718612e8e182ab14c2a546585f66872e3cc719038e1a1df1e3d5a4a26f65",
+        "bytes": 1158
+      },
+      {
+        "path": "frontend/src/platform/android/vocabulary-request-runner.ts",
+        "sha256": "ce648f31cac490782db94a9464b75e084de656795213819fa0178844879414b8",
+        "bytes": 5634
+      },
+      {
+        "path": "frontend/src/platform/android/vocabulary-request-store.ts",
+        "sha256": "703b15498c941f046d0b3775186b5215c1b8716b39bd3f2fcfcc8c83fdb2e22e",
+        "bytes": 24819
+      },
+      {
+        "path": "frontend/src/platform/android/vocabulary-translation-runner.ts",
+        "sha256": "a1d51dc85e58c73dd8beea37af0c154ad68e9436f30cecffea5c282540229ad1",
+        "bytes": 769
+      },
+      {
+        "path": "frontend/src/platform/android/vocabulary.ts",
+        "sha256": "a15e72f8cd7e92f2c44e305d07ddb9221f910ecb79a8b82d2d29cac7d0f963bc",
+        "bytes": 34831
+      },
+      {
+        "path": "frontend/src/platform/android/wrong-analysis-history.ts",
+        "sha256": "39c3495241122d1c59ddb5472db65e515ae3ea4ae393fd345e3d23418e84693b",
+        "bytes": 6113
+      },
+      {
+        "path": "frontend/src/platform/dialogs.ts",
+        "sha256": "f44ad4338b5b65e85004e6e5d48fe3296eeb90343bbf60de09d9f30da20abe34",
+        "bytes": 3067
+      },
+      {
+        "path": "frontend/src/platform/json-response.ts",
+        "sha256": "7efa2141ec812e5c46b2e019d004d881154fdc1623d0dad5182d27663bd94a11",
+        "bytes": 1237
+      },
+      {
+        "path": "frontend/src/platform/model-keys.ts",
+        "sha256": "314ec5d31dfb38d9d22c7a0c612ef7b5e2ea0d9d2bde1dac2e4a3dfb606cca25",
+        "bytes": 2526
+      },
+      {
+        "path": "frontend/src/platform/official-download-sources.ts",
+        "sha256": "d23e5aad9617da9c44d0aab8bd70330bfabe439366108dc659fa543f084db258",
+        "bytes": 2064
+      },
+      {
+        "path": "frontend/src/platform/overlay-history.ts",
+        "sha256": "38104d90d4987a8effdf41ee6def90bb684bb4da4b55c236462dd61ba4e90def",
+        "bytes": 1561
+      },
+      {
+        "path": "frontend/src/platform/question-bank-limits.ts",
+        "sha256": "c3a8e8f67bdcfdba67f73b1c47e46473bb56157a0e50ca842611de48764c9029",
+        "bytes": 405
+      },
+      {
+        "path": "frontend/src/platform/runtime.ts",
+        "sha256": "a533b790a3fc0929a0f71658e5d1a3dd7be79c8c79e2d545453a7ff386aa95d8",
+        "bytes": 540
+      },
+      {
+        "path": "frontend/src/platform/secure-store.ts",
+        "sha256": "a8e1ba1f1369c6bf07c1ff6859627f975fe8fbf50fa822ee7247038600923b73",
+        "bytes": 1167
+      },
+      {
+        "path": "frontend/src/platform/types.ts",
+        "sha256": "ec387ca95032fa9a957cc2af561e4d6fd4515fcc7441ac743986463378f77ab3",
+        "bytes": 1026
+      },
+      {
+        "path": "frontend/src/platform/updates.ts",
+        "sha256": "35dd6fbc3fcd97cefed2826e6953f997312a4753f6ca8fa07768c06359567089",
+        "bytes": 9857
+      },
+      {
+        "path": "frontend/src/practice-swipe.ts",
+        "sha256": "a1110ff33810c9ac69a4403595885018b5025bbca155dd56436f8e73ea691df5",
+        "bytes": 400
+      },
+      {
+        "path": "frontend/src/resume-title.ts",
+        "sha256": "aa04b53eaa765c1558d940b59282a53c5fc62e882fc40af792d638e368d01cca",
+        "bytes": 846
+      },
+      {
+        "path": "frontend/src/router.ts",
+        "sha256": "39bf7f5c1ad7fac8483d35121ec1452e4424bab63a08ac614a15613cc171525a",
+        "bytes": 2727
+      },
+      {
+        "path": "frontend/src/services/assistantSession.ts",
+        "sha256": "d0a864419a051e4efae381114fa23c9aca7daf8cb1b8cd048a1f1dd7c20fa0c5",
+        "bytes": 1047
+      },
+      {
+        "path": "frontend/src/services/configAutosave.ts",
+        "sha256": "3efc9c8c7a75505b705b236c3ff2e11b3765eb5574bda33b986846b60996b04f",
+        "bytes": 1660
+      },
+      {
+        "path": "frontend/src/services/dailyStudy.ts",
+        "sha256": "e0f89c86a1c397b1532390731e617753db78c6cc2c1bbeab36b9e19a337fbb03",
+        "bytes": 9619
+      },
+      {
+        "path": "frontend/src/services/dailyStudyContent.ts",
+        "sha256": "15b6e4132a743841cef3d6f42e40fd5da37216ab1cfe8cb62d02699a98e573ca",
+        "bytes": 1217
+      },
+      {
+        "path": "frontend/src/services/documentAgent.ts",
+        "sha256": "be83b6f0fa27b1e78c3892c7b153e641377d53a23bf642ebf6a5bca10ef87dcf",
+        "bytes": 7567
+      },
+      {
+        "path": "frontend/src/services/keyDrafts.ts",
+        "sha256": "381cf28c2fd76d8dc95268944ec586ee3d5b3666ea55d4d8f7d49b4be265eaf6",
+        "bytes": 491
+      },
+      {
+        "path": "frontend/src/services/practiceTimer.ts",
+        "sha256": "e1e2681083607fd4dd5aee7c7b7b1784fc7fd2375b153a2ec1b0b7c40efd6f09",
+        "bytes": 4037
+      },
+      {
+        "path": "frontend/src/services/profileDrafts.ts",
+        "sha256": "968f1bf9f41b3b98e3a0f66645b58e169b7fe8a4f1a5a7c1a662958829883e39",
+        "bytes": 4143
+      },
+      {
+        "path": "frontend/src/services/pronunciation.ts",
+        "sha256": "4f140ac3783345c1a98122d153b7040adb5d1fbf70eb2a052981ca6e66d77d90",
+        "bytes": 3417
+      },
+      {
+        "path": "frontend/src/services/questionBankProfiles.ts",
+        "sha256": "c0bffd98fcedb0ddd71abfc0d4940c815db89608cbf07051fb929c07d78afaa8",
+        "bytes": 1240
+      },
+      {
+        "path": "frontend/src/services/questionLabeling.ts",
+        "sha256": "1e661de097d2f382e116cbdbc9f4019b748d1f1306323f39a43d20d3d6fef77b",
+        "bytes": 4531
+      },
+      {
+        "path": "frontend/src/services/saveAssistantDocument.ts",
+        "sha256": "49774f9e83accef218bf21b7dae28ed1927182d1b4a2c820e17a894260f0ca98",
+        "bytes": 866
+      },
+      {
+        "path": "frontend/src/services/vocabularyDisplayConfig.ts",
+        "sha256": "19ea5318f9f3d5ba0d23c365d7cea3212a2be21cb2a5c4d7684753969fec9568",
+        "bytes": 3028
+      },
+      {
+        "path": "frontend/src/services/vocabularyQueueStatus.ts",
+        "sha256": "90f0a89ff48a3e307b3edcf77490d5ae956b59821a360ef6a266a46f1e0a2c18",
+        "bytes": 2124
+      },
+      {
+        "path": "frontend/src/services/vocabularySnapshots.ts",
+        "sha256": "9a9f1f655bb41376f31e4906e69d1f6573141527d394ba478325a5a58d021ac4",
+        "bytes": 2801
+      },
+      {
+        "path": "frontend/src/services/vocabularyTranslationConfig.ts",
+        "sha256": "0a50169453e05be15d309521a375b3c1f2240ed757d6a8e968528eb519d21ee6",
+        "bytes": 308
+      },
+      {
+        "path": "frontend/src/services/wrongAnalysisSessions.ts",
+        "sha256": "dc3614ce90a6c70cbcb80ff25068a8b984f7481795beafdf4a1e9a8e10d04a69",
+        "bytes": 385
+      },
+      {
+        "path": "frontend/src/services/wrongListReturn.ts",
+        "sha256": "6992c07f6a517544422bcaa1908961eb92ee149cf4e28a870ebc9f5ac127bf36",
+        "bytes": 161
+      },
+      {
+        "path": "frontend/src/settings-hub.css",
+        "sha256": "10964cb5a86f5eefd7c150a674d88ead3ce68ed22dcd896fa71a2225b9e1dcc2",
+        "bytes": 3332
+      },
+      {
+        "path": "frontend/src/study-theme.css",
+        "sha256": "d68922fd01c21070a7f2ade095086e0b515c3ab6802e9cbd2b5c7c22115fbcf5",
+        "bytes": 8328
+      },
+      {
+        "path": "frontend/src/styles.css",
+        "sha256": "077577b3a025138369f05d16672cc29fb57f552ed4b17aec48a5662a252c9067",
+        "bytes": 282854
+      },
+      {
+        "path": "frontend/src/views/AndroidAppearanceView.vue",
+        "sha256": "7b8d20605e4d9be4332ca62b8c1a5749ba94b67127848adc97bf149d7234c2d1",
+        "bytes": 1169
+      },
+      {
+        "path": "frontend/src/views/AndroidDiagnosticsView.vue",
+        "sha256": "3d127c59e6d5a0e4f90ab4c157c1e12443b3f2ea4ff79b4bd5ba06f28d729999",
+        "bytes": 9918
+      },
+      {
+        "path": "frontend/src/views/AndroidSyncView.vue",
+        "sha256": "ce83a06f6d2cfeb2accdad2af6adcd91fbb6968ce98a3e94a762f2419e76b0c2",
+        "bytes": 12448
+      },
+      {
+        "path": "frontend/src/views/AndroidUpdatesView.vue",
+        "sha256": "ebeb55de06cc62b62e01a4a86dc98db7dcf1ea9696450813cf4df2e17baa8535",
+        "bytes": 24147
+      },
+      {
+        "path": "frontend/src/views/AndroidVocabularyDisplayView.vue",
+        "sha256": "1a717e90ad3f94647eeee76ca62e743940585dcb67c7e646bbd85bc17adf0fe4",
+        "bytes": 7032
+      },
+      {
+        "path": "frontend/src/views/DailyStudyView.vue",
+        "sha256": "de379c62ad276ffb167ca35f92edaa03612a2006695e653e5018d7e4a61c7143",
+        "bytes": 21728
+      },
+      {
+        "path": "frontend/src/views/DashboardView.vue",
+        "sha256": "d53b241b7be6477ed369e185f67b039bdc8a01d91debc26a9caf583ae5b1bada",
+        "bytes": 16447
+      },
+      {
+        "path": "frontend/src/views/HelpView.vue",
+        "sha256": "27c1b724e5c3fe8c695e535a6e3411b54df76747a8b5d1088c5cdc70dff7b2cc",
+        "bytes": 4411
+      },
+      {
+        "path": "frontend/src/views/ImportView.vue",
+        "sha256": "31c5889fa25f9e316523c675f88baa28030cdee9bb569d41a8396fe956a81b86",
+        "bytes": 52894
+      },
+      {
+        "path": "frontend/src/views/LibraryView.vue",
+        "sha256": "aa5b624dfc47bcb0a8c649093ccc1b83aad3143bca0ae6e605b5896aae918fc7",
+        "bytes": 8058
+      },
+      {
+        "path": "frontend/src/views/MobileSettingsView.vue",
+        "sha256": "c1f43196f9cdc6a006734f1d384f92fd454041cf1791caa577000b2acd86dc49",
+        "bytes": 4915
+      },
+      {
+        "path": "frontend/src/views/NotesHubView.vue",
+        "sha256": "8f8a039de4449788d90ed533dad74b11ee0a9c82f18f968628bb9f9819005c78",
+        "bytes": 1833
+      },
+      {
+        "path": "frontend/src/views/PracticeView.vue",
+        "sha256": "71afbda06776c8e7407557dada2716b99f4d435ab8e7120ffccd57027ab78b9a",
+        "bytes": 78206
+      },
+      {
+        "path": "frontend/src/views/SettingsView.vue",
+        "sha256": "31e0093a887bd07e66da3ee2629792b51a274758378d61854736c5b0604bc4a6",
+        "bytes": 35659
+      },
+      {
+        "path": "frontend/src/views/TrashView.vue",
+        "sha256": "ad4a275f991d69323e2107b620e2d717b2ca6c3acc633ea0659cca0f2410b1a2",
+        "bytes": 2640
+      },
+      {
+        "path": "frontend/src/views/VocabularyView.vue",
+        "sha256": "c24506d596619a2c9eeac3a37bfc0c43b402312b16e4c28c5c440b74e2caa955",
+        "bytes": 79680
+      },
+      {
+        "path": "frontend/src/views/WrongAnalysisView.vue",
+        "sha256": "50af8ace34c521b31cda6c0e123291ec8f6c43606c408f48710f25d012590789",
+        "bytes": 4897
+      },
+      {
+        "path": "frontend/src/views/WrongView.vue",
+        "sha256": "59bac57fd75879d1f37fdc490a2c864e9255f028c2d54bdd2af131124469be00",
+        "bytes": 23033
+      },
+      {
+        "path": "frontend/src/vocabulary-context.ts",
+        "sha256": "590ce38ee46323a44e9b83024f31b73eec9ff3ead7c7e1b6b791dba99bf93372",
+        "bytes": 8820
+      },
+      {
+        "path": "frontend/src/vocabulary-due-queue.ts",
+        "sha256": "241473fc602510758b0feabd203d92bffebcdad69f3159d392733e7e1eaf549a",
+        "bytes": 2802
+      },
+      {
+        "path": "frontend/src/vocabulary-review-groups.ts",
+        "sha256": "fffd885c28a99e34b1755c8a3e1ef96ace5e4471c6a28d51763b1a95399977d6",
+        "bytes": 4495
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/AppUpdaterPlugin.java",
+        "sha256": "4a0d8c06970d787832a41c0270fc2ff0fc7a6f4c2a5a3b83a64f1d40de907696",
+        "bytes": 18942
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/DatabaseExportPlugin.java",
+        "sha256": "3e44f7bbc39c8d0a1ff24ab323d77e5949ea7e44fde1a2dae5baed148c6830e6",
+        "bytes": 16882
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/DiagnosticLogPlugin.java",
+        "sha256": "25553a9887e00cbcd148941de944d7a9f61e9b1e5b763c1edcee62e66b9313fb",
+        "bytes": 2590
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/DocumentExtractorPlugin.java",
+        "sha256": "0ee6e86302bc2727e0be271cb248ed2f11d0722558fc4474cb1b4a72c1e2ec8c",
+        "bytes": 10432
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/DocumentNumbering.java",
+        "sha256": "d815fc343b2bb681c3ec1d4df14dc5ff87d0dee162c0e29de854d73082cd2b22",
+        "bytes": 3259
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/EsqArchive.java",
+        "sha256": "ac0fef52dc0263988987f8ae5a6a8ceee06db5640ee5d8e7d03ae58f3d265274",
+        "bytes": 15600
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/EsqImportPlugin.java",
+        "sha256": "8c69afb6f375b39b6e780f27362ac554d088cb52184258c0a71e433938a36bff",
+        "bytes": 5280
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/EsqStage.java",
+        "sha256": "5f8b821fbe802af35f2372fae3e4713561bbc51472d88c07f26d5dde2ae9bee4",
+        "bytes": 21020
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/LanDiscovery.java",
+        "sha256": "4296ab0e9985b5a6bcc32675ee1c68cf5ffa961d7e16447674056a7a3f04a0b9",
+        "bytes": 4162
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/LanNetworkExecutor.java",
+        "sha256": "919c85f1712f143b55d75e5c88dc393c7e87855e53f1e371a4a30ea55ff8c803",
+        "bytes": 786
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/LanQuestionBankDownload.java",
+        "sha256": "a1868d9136bcf522bd87c78d15fbdcc08fd143a94e412ba543fab53880afb7e3",
+        "bytes": 3069
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/LanSyncPlugin.java",
+        "sha256": "511811467c8e53acd00b2207a2676902d9e06420e5983c382e224efd5217aa13",
+        "bytes": 4319
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/LanSyncTransport.java",
+        "sha256": "417fa56d8d0ce406ed0f93548cdee2859e3ca77eef16822e34e0d8f9c6918a52",
+        "bytes": 6506
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/LanTlsTrust.java",
+        "sha256": "3134b041040d1deb234bb231b647c79d0e7806ab66efbac19ef9b0c9b2fc16b7",
+        "bytes": 5260
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/LocalizedWebChromeClient.java",
+        "sha256": "45ab6b8f6565674e48ea84139f1d8b746ed0b0b063a3625256e692100172fcf1",
+        "bytes": 1504
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/MainActivity.java",
+        "sha256": "2f6e9213ec1c75cd3f4d5d35d1e3ec493bf9a94389f89431205f89214b902eb6",
+        "bytes": 1000
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/MotionPreferencesPlugin.java",
+        "sha256": "d32e5dc5d7a79f6544f8db69f1092df963a434a9b3ec9d7cd88451094605f95e",
+        "bytes": 1691
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/SecureStorePlugin.java",
+        "sha256": "3d0a8e164551c622930d2dc8a784db0ee73b02fb46b4657691c773d703663b35",
+        "bytes": 5863
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/TtsPlugin.java",
+        "sha256": "d8db0fc811add5472aa154b964ad062aa69a92a45426e28383ae435bf1016d40",
+        "bytes": 15938
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/VocabularyHttpPlugin.java",
+        "sha256": "f143722434e4a5239aad7f028d05d67f39bba2cff0ce45852b44628922629200",
+        "bytes": 3122
+      },
+      {
+        "path": "frontend/android/app/src/main/java/com/wssfk/englishpracticemachine/VocabularyHttpTransport.java",
+        "sha256": "8c63c82617c454218aa00c5f8359065f5836f70652d539b5a74b55047ccec80c",
+        "bytes": 4600
+      },
+      {
+        "path": "frontend/package.json",
+        "sha256": "990e75fbcbb5c1ce95df1850ed7bdaf8e3d3a8f2e7e097ba4c41ae6e7bdfbf5d",
+        "bytes": 7990
+      }
+    ],
+    "dev": [
+      {
+        "path": "frontend/src/api.ts",
+        "sha256": "ed90e02e37bfaaa39951bed337388efda5b358198f1d1f3073012edf9af8e4e1",
+        "bytes": 2599
+      },
+      {
+        "path": "frontend/src/App.vue",
+        "sha256": "b524c90175ba55ce61bfbfacdcc203836d4bc3ef65c8958fb0c3a478fb12c5d2",
+        "bytes": 2640
+      },
+      {
+        "path": "frontend/src/components/AiAssistant.vue",
+        "sha256": "c80764b45ec73e66a4a643a9ac77e8e5ea6e784df8b2b112a9b26ef38a044401",
+        "bytes": 24654
+      },
+      {
+        "path": "frontend/src/components/AppDialogHost.vue",
+        "sha256": "b21a6be8891d19ab9074304518bbda85fae60873c25feff6a08ec86f55808ea1",
+        "bytes": 3338
+      },
+      {
+        "path": "frontend/src/components/ContentBlocks.vue",
+        "sha256": "55bf08d8754d7b4f8ea393e2b41639de65fe18bcd28ad8752f9ced163d94e771",
+        "bytes": 2684
+      },
+      {
+        "path": "frontend/src/components/DailyStudyContent.vue",
+        "sha256": "0e717fe0c1bd681b65047522405f5aeda3cc852c0dcd63d1752d3007150946b2",
+        "bytes": 4244
+      },
+      {
+        "path": "frontend/src/components/LanPairedDevices.vue",
+        "sha256": "26f51a8ee63af7cbea4fadd0f6a843fb1ae2470cf47ddd3c0873a4fb58ebe948",
+        "bytes": 5885
+      },
+      {
+        "path": "frontend/src/components/LanQuestionBankSharing.vue",
+        "sha256": "5c3fa62c13cfe77919ea4ee906b8504552c0b6dd5aefce9c36a33166a8c8238b",
+        "bytes": 2584
+      },
+      {
+        "path": "frontend/src/components/ListeningPlayer.vue",
+        "sha256": "1de482f93a7315d30a3f188f52da348cff9f44b38fb5f956c56a8db965d61b95",
+        "bytes": 15721
+      },
+      {
+        "path": "frontend/src/components/NamedModelKeys.vue",
+        "sha256": "4862370843fd01a618b690bd70d42c01daf2f660d83d32d2c6c5b9c04bb36070",
+        "bytes": 5978
+      },
+      {
+        "path": "frontend/src/components/OptionSheet.vue",
+        "sha256": "ac122e089ced2a44700f26c3974cf92e8f06843aa5cae20b428152c258c9b27c",
+        "bytes": 4128
+      },
+      {
+        "path": "frontend/src/components/PassageBlank.vue",
+        "sha256": "3d5b3c624598dea50a97f0cb0673be9b1be8c611071005986243c8c1cfe84887",
+        "bytes": 212
+      },
+      {
+        "path": "frontend/src/components/PracticeContentChoice.vue",
+        "sha256": "c0e42dfb4e2262f7eab72dd4453c35de6ca199f0f9c8a2d25c841905b727f314",
+        "bytes": 1463
+      },
+      {
+        "path": "frontend/src/components/QuestionBankSwitcher.vue",
+        "sha256": "d7bb732e3bd2816e291f97549c945190d1b20464515ba71578b56443838b0fbc",
+        "bytes": 4339
+      },
+      {
+        "path": "frontend/src/components/StudyTodos.vue",
+        "sha256": "bd2e4f2b2089515dbe1a18c44875f71a445289e9a99ebe4b73a900040fbbeef4",
+        "bytes": 4102
+      },
+      {
+        "path": "frontend/src/components/VocabularyDisplaySettings.vue",
+        "sha256": "bbac9e8dd36c962a193b9d85a72b36abed58d0ef547b0b0525fd05fb7676d876",
+        "bytes": 1879
+      },
+      {
+        "path": "frontend/src/components/VocabularyEnrichment.vue",
+        "sha256": "02e4ff3729327f5f4ab621b7baf4c6ac0c1cb5ee63467e5f356f7f40aaf474e5",
+        "bytes": 1418
+      },
+      {
+        "path": "frontend/src/components/VocabularyMaintenance.vue",
+        "sha256": "b0fb5af3b8e3ad6d2c75e0aa4aa71b79d27c02b5273c0cd3042cb78bc72d3a68",
+        "bytes": 3965
+      },
+      {
+        "path": "frontend/src/components/VocabularyMemoryContent.vue",
+        "sha256": "9dc28b26a0def51e4277c22601e4a26c1c1b9bd94e10d6a72c1262c6fdb651bc",
+        "bytes": 4028
+      },
+      {
+        "path": "frontend/src/components/VocabularyTerm.vue",
+        "sha256": "68a354b668dbe78e9d7a9392bf02473f9d39bfe8e9d334eeb1abce6666ec462a",
+        "bytes": 1718
+      },
+      {
+        "path": "frontend/src/composables/useDailyStudySwipe.ts",
+        "sha256": "04b4b32dbd0ebe4a5669dac4b820de3e8a4d5dadc5a55ce5d34ebfee2811b465",
+        "bytes": 3680
+      },
+      {
+        "path": "frontend/src/composables/useReducedMotion.ts",
+        "sha256": "e9599adf63868915ccaa3585d094241728f2d3aceaf2193d02afcad85b57fe4e",
+        "bytes": 372
+      },
+      {
+        "path": "frontend/src/composables/useThemeState.ts",
+        "sha256": "8dd7b189a340a87aba86e212e22832181850ea0883c993fe539ca733188d2460",
+        "bytes": 452
+      },
+      {
+        "path": "frontend/src/dashboard-glass.css",
+        "sha256": "6e250f78eef402d3e27e8af2dc96dfbcc1fd41bc984625d369a81f090f48a54e",
+        "bytes": 7383
+      },
+      {
+        "path": "frontend/src/desktop-settings.css",
+        "sha256": "0f58efc14bbb64ae7e75e26f0665cfefea8e0b932eca9ff422d91012d415fe83",
+        "bytes": 1445
+      },
+      {
+        "path": "frontend/src/env.d.ts",
+        "sha256": "bf144e3cdae616e27b064c8c2b94b14525e220fb3facc4cb4884d21b65eb5aa5",
+        "bytes": 39
+      },
+      {
+        "path": "frontend/src/main.ts",
+        "sha256": "c8c80af0d0358d03fa185f0fb5984ed2425571b7b792ce4b32e17eeb30c5f09a",
+        "bytes": 314
+      },
+      {
+        "path": "frontend/src/passage-blanks.ts",
+        "sha256": "a70658f0d733dad24339fa0f6673c1d72d8d965b74996021f22be2da3577fd43",
+        "bytes": 1098
+      },
+      {
+        "path": "frontend/src/platform/dialogs.ts",
+        "sha256": "f44ad4338b5b65e85004e6e5d48fe3296eeb90343bbf60de09d9f30da20abe34",
+        "bytes": 3067
+      },
+      {
+        "path": "frontend/src/platform/overlay-history.ts",
+        "sha256": "38104d90d4987a8effdf41ee6def90bb684bb4da4b55c236462dd61ba4e90def",
+        "bytes": 1561
+      },
+      {
+        "path": "frontend/src/router.ts",
+        "sha256": "704e8925dc03547b6bdc1b48e15fba33650781d41639dc72a784fb4c2db3614d",
+        "bytes": 2048
+      },
+      {
+        "path": "frontend/src/services/adaptiveZoom.ts",
+        "sha256": "ac627e28be97f62672dd7da29a780e18ff0273ec844c0d66d149289e71d90561",
+        "bytes": 810
+      },
+      {
+        "path": "frontend/src/services/assistantSession.ts",
+        "sha256": "c893cc714e636186313ae2bd86569c0c7b9d3f89b483d1f6f0d6e0ba388099bd",
+        "bytes": 1046
+      },
+      {
+        "path": "frontend/src/services/configAutosave.ts",
+        "sha256": "c54822e78ad413138132a7a72596c45c2aa9b5e0bf19a3e1a44d126cc561d156",
+        "bytes": 1662
+      },
+      {
+        "path": "frontend/src/services/dailyStudy.ts",
+        "sha256": "181c908f644796790c92f1547c30655d56d44fbe50356bd2873ee74f929fd6fe",
+        "bytes": 9619
+      },
+      {
+        "path": "frontend/src/services/dailyStudyContent.ts",
+        "sha256": "615242a39d0fc53b61c2bf46f526237a5c24f31e9fc21b45edcaf20294901b60",
+        "bytes": 1278
+      },
+      {
+        "path": "frontend/src/services/documentAgent.ts",
+        "sha256": "be83b6f0fa27b1e78c3892c7b153e641377d53a23bf642ebf6a5bca10ef87dcf",
+        "bytes": 7567
+      },
+      {
+        "path": "frontend/src/services/keyDrafts.ts",
+        "sha256": "6303d6f6fe9c40e5a9a44e5845d634db6e3041bfe0b078b417a2eeb6c4599a5d",
+        "bytes": 493
+      },
+      {
+        "path": "frontend/src/services/practiceTimer.ts",
+        "sha256": "e1e2681083607fd4dd5aee7c7b7b1784fc7fd2375b153a2ec1b0b7c40efd6f09",
+        "bytes": 4037
+      },
+      {
+        "path": "frontend/src/services/profileDrafts.ts",
+        "sha256": "24c8e9fadfae246e1b7bc6b22c9dcbba92c6961f66f73cf77c4a3ddc8ffba231",
+        "bytes": 4318
+      },
+      {
+        "path": "frontend/src/services/questionBankProfiles.ts",
+        "sha256": "29ac0834a452cc31b2a382627f03fb7c8cbbc7784098d5e67b52a38f2c683f13",
+        "bytes": 1334
+      },
+      {
+        "path": "frontend/src/services/questionLabeling.ts",
+        "sha256": "20c0d4c106a726574b263ef5612c40635752bc0fb0dd5c2b300884ea1cdcc3a5",
+        "bytes": 4890
+      },
+      {
+        "path": "frontend/src/services/saveAssistantDocument.ts",
+        "sha256": "474ade570e53f60835713fbc0575633ccb10ea959f4981effcc9f51a708d6c1d",
+        "bytes": 374
+      },
+      {
+        "path": "frontend/src/services/vocabularyDisplayConfig.ts",
+        "sha256": "53542005cb4a9087b7086c7b8e541e34d76e6df8ea8a986369cc7a5e9a510f9a",
+        "bytes": 3031
+      },
+      {
+        "path": "frontend/src/services/vocabularySnapshots.ts",
+        "sha256": "084928b59d7a61f1f34177964f1486cfe1aaffc40028d503aaa2f27c565c360e",
+        "bytes": 2694
+      },
+      {
+        "path": "frontend/src/services/wrongAnalysisSessions.ts",
+        "sha256": "dc3614ce90a6c70cbcb80ff25068a8b984f7481795beafdf4a1e9a8e10d04a69",
+        "bytes": 385
+      },
+      {
+        "path": "frontend/src/services/wrongListReturn.ts",
+        "sha256": "dbe8cc6958067b6c0b18a6e146aab2e055461ca510c484b09a13e202d492a5a9",
+        "bytes": 160
+      },
+      {
+        "path": "frontend/src/settings-hub.css",
+        "sha256": "cfbcc3169d677616aaf66a21348e69ee2ab874d6e71065549fa8b07f18fa44ce",
+        "bytes": 3330
+      },
+      {
+        "path": "frontend/src/study-theme.css",
+        "sha256": "6d8748daab9afacbcd8807bd08f48d0be938df8d29153bd9b46c19f63564d791",
+        "bytes": 2335
+      },
+      {
+        "path": "frontend/src/styles.css",
+        "sha256": "04a5f82b1a8b4967f3d06b9122ff2ca85d29f8e21565829b7e6dd5e6de3fafb1",
+        "bytes": 101073
+      },
+      {
+        "path": "frontend/src/views/DailyStudyView.vue",
+        "sha256": "380effa195ca07de049acdc8864416626ab2b1fb89d2b1f8726db53cde8b7191",
+        "bytes": 19486
+      },
+      {
+        "path": "frontend/src/views/DashboardView.vue",
+        "sha256": "476b848561290e2ecba182cfc841b6eeef0dd9e299bf14e1e679fc6617beebc0",
+        "bytes": 9529
+      },
+      {
+        "path": "frontend/src/views/DiagnosticsSettingsView.vue",
+        "sha256": "9ada3a4e26d57dff1bee67cf62cafe30a2dd07e6998a09080b1eb655af80248b",
+        "bytes": 3989
+      },
+      {
+        "path": "frontend/src/views/HelpView.vue",
+        "sha256": "fe2bc230f2f91daf4d07994e1cd5d00d302ac98937cd7ebb6db7865e580849af",
+        "bytes": 3973
+      },
+      {
+        "path": "frontend/src/views/ImportView.vue",
+        "sha256": "06aa67f3ec3a594cabcb47ce11888c97030039ee71ecca1a50062ec5bc5acf7e",
+        "bytes": 70200
+      },
+      {
+        "path": "frontend/src/views/LibraryView.vue",
+        "sha256": "4da3f030aee39e788429d71daabac1a20287a50122e4db8b376972292ca24f61",
+        "bytes": 7692
+      },
+      {
+        "path": "frontend/src/views/PracticeView.vue",
+        "sha256": "5dcc57fa42707fc1f80359500819b87f4fb23d0d8b7de88623a9b3573052d241",
+        "bytes": 59092
+      },
+      {
+        "path": "frontend/src/views/SettingsHubView.vue",
+        "sha256": "3fa29e27c926d47d2a78bf9bc5f8c247ef724710e4d1e5a76a4dc946b133ad8e",
+        "bytes": 3798
+      },
+      {
+        "path": "frontend/src/views/SettingsView.vue",
+        "sha256": "8ea784066e072e8793dc387e4d07f9c777344b033f766ba38a42e3ac2c768d33",
+        "bytes": 19918
+      },
+      {
+        "path": "frontend/src/views/SyncSettingsView.vue",
+        "sha256": "4d607ce0a9d077db1204b7c97783a0d2b65de38dc209b3a945ab8b78c10cc722",
+        "bytes": 8742
+      },
+      {
+        "path": "frontend/src/views/TrashView.vue",
+        "sha256": "ab5f88937f7a2f35811ef624d8a2d8d5456209c3499d0bf1a02b3f14dc445d3d",
+        "bytes": 2580
+      },
+      {
+        "path": "frontend/src/views/UpdatesSettingsView.vue",
+        "sha256": "ac807a919980c0691072fdac7f71e1996eb6eed73756842eaab0a8e13dc83cfe",
+        "bytes": 14585
+      },
+      {
+        "path": "frontend/src/views/VocabularyView.vue",
+        "sha256": "8006faabf6d5ee80d3725113df5a1d3f630a917973fc718b7cd63a7146453646",
+        "bytes": 66900
+      },
+      {
+        "path": "frontend/src/views/WrongAnalysisView.vue",
+        "sha256": "aaac825c8f1691ba0f469fa5c63587129192b4af2208f38e3920d30543765e5b",
+        "bytes": 5909
+      },
+      {
+        "path": "frontend/src/views/WrongView.vue",
+        "sha256": "4143fc7ab30cc3d98391b196524e4f4f67fe535ad9b85e76b4bbe3a11f8c59d9",
+        "bytes": 15937
+      },
+      {
+        "path": "frontend/src/vocabulary-context.ts",
+        "sha256": "fbfd43626bfb2db3f9923a5f3699cd5f908ba908a1c0c4365123cc9e3d5d84b1",
+        "bytes": 5340
+      },
+      {
+        "path": "frontend/src/vocabulary-due-queue.ts",
+        "sha256": "241473fc602510758b0feabd203d92bffebcdad69f3159d392733e7e1eaf549a",
+        "bytes": 2802
+      },
+      {
+        "path": "backend/app/config.py",
+        "sha256": "5192ddde3fee7c53b06dfea11de997b58f2c98c50f1b3df36a14f1285dd2ee02",
+        "bytes": 3430
+      },
+      {
+        "path": "backend/app/database.py",
+        "sha256": "5d1ad0db2fb371ec5d250c8531177d2e2a31c04d8123161da4041e6fc27c05b1",
+        "bytes": 37613
+      },
+      {
+        "path": "backend/app/lan_addresses.py",
+        "sha256": "9724ca97d55cca85e033cbc50c9f3ee108e3f32051fb27e591e42e0ce95f41e3",
+        "bytes": 1416
+      },
+      {
+        "path": "backend/app/lan_discovery.py",
+        "sha256": "d9257521acc7d29dde85b2a957f9098d9a31c154986d642d71530b4644c9dbd2",
+        "bytes": 2597
+      },
+      {
+        "path": "backend/app/lan_sync_host.py",
+        "sha256": "0a158a9d84150ed8d912c35c4c42c01601bdf4408c4bfd157fe98a0d147c7025",
+        "bytes": 2853
+      },
+      {
+        "path": "backend/app/lan_tls.py",
+        "sha256": "b726588578f64373b0b189a86d53fffa65c7fc97b0ad9d961e07820e4e8a281a",
+        "bytes": 6846
+      },
+      {
+        "path": "backend/app/lan_tls_host.py",
+        "sha256": "461be12c3a23cb221bd44d5bfbffc939eb7ba08d80202adf69ae29dbb2364d05",
+        "bytes": 3221
+      },
+      {
+        "path": "backend/app/main.py",
+        "sha256": "6eabaec7276c8d26ccea928a6bf569023a92e65dc69ab1dd24a00fdf0ef8f12e",
+        "bytes": 4182
+      },
+      {
+        "path": "backend/app/routers/ai.py",
+        "sha256": "171aa402a24f56e84c669fea4b7d922c247f2461e02e08577158dcababb0f774",
+        "bytes": 48012
+      },
+      {
+        "path": "backend/app/routers/dashboard.py",
+        "sha256": "0b6b15abafd7526cbd8dc767b867d6c71ad63a8fb1bb25addd0fe845279cc606",
+        "bytes": 5031
+      },
+      {
+        "path": "backend/app/routers/imports.py",
+        "sha256": "a70f2b6e753032c849bd157c2234da48d6193449acc27f96e03ec6492435b14e",
+        "bytes": 33327
+      },
+      {
+        "path": "backend/app/routers/papers.py",
+        "sha256": "95148fe8167a874113068bfb5823afe3ee0b94cec77623268e0b3c116e5e1560",
+        "bytes": 5049
+      },
+      {
+        "path": "backend/app/routers/practice.py",
+        "sha256": "c015ed344b4653cea18bc6965a9bc3022b921c4262c9ba89a67940db4941a945",
+        "bytes": 3488
+      },
+      {
+        "path": "backend/app/routers/question_banks.py",
+        "sha256": "d07f3c1e22bd43e3fea320cf3e0d947dc4346b032c1001364d6802230a4fac15",
+        "bytes": 11665
+      },
+      {
+        "path": "backend/app/routers/question_bank_profiles.py",
+        "sha256": "900caa5d1a1bab0d47c1c34f9560b6ac353c125f20ca9a513e1ae53b57af6e92",
+        "bytes": 8416
+      },
+      {
+        "path": "backend/app/routers/sync.py",
+        "sha256": "d6b0066cee3db03b69180c41f1ace92b2e55c6f5850e3c807da7a14eefcbe1d3",
+        "bytes": 14223
+      },
+      {
+        "path": "backend/app/routers/updates.py",
+        "sha256": "71b22676925ea92149870c13c9b3d0b93349ad668e66f3a5c460a7c633672ef4",
+        "bytes": 8170
+      },
+      {
+        "path": "backend/app/routers/vocabulary.py",
+        "sha256": "c14f68ab89c984c55edb986707a47ea0bf44bd270386134dbf82d16b5a3278cd",
+        "bytes": 15674
+      },
+      {
+        "path": "backend/app/routers/wrong.py",
+        "sha256": "9644e1f8865dd2fd0e1c4b0f1416f87d2392e7956ffc32ad48b6c1bb699a2a7b",
+        "bytes": 5095
+      },
+      {
+        "path": "backend/app/routers/__init__.py",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "bytes": 1
+      },
+      {
+        "path": "backend/app/schemas.py",
+        "sha256": "ddef926bea3068be3c8ecb296cc193f1aa4433202deef656d5d488b091febfaa",
+        "bytes": 9009
+      },
+      {
+        "path": "backend/app/security.py",
+        "sha256": "035df59980aad566ea0cfe56123003d6c315d3a46af5d980d31c19e4fe69b503",
+        "bytes": 1710
+      },
+      {
+        "path": "backend/app/services/ai_adapters.py",
+        "sha256": "1d6a36d01c13cdb2f8a15d42ca85fb7ebe27968967255ef9816e8f99fbfb65e2",
+        "bytes": 16905
+      },
+      {
+        "path": "backend/app/services/ai_client.py",
+        "sha256": "5ea30436c8d074499b54c6f08c16fe56ba6e0d8ffc2e5e26a112260802249fd6",
+        "bytes": 15942
+      },
+      {
+        "path": "backend/app/services/attempt_stats.py",
+        "sha256": "7c25524a5340898a8e0087e2137e88b250096d163080b8911c1b047cd2fa4907",
+        "bytes": 3941
+      },
+      {
+        "path": "backend/app/services/content_remediation.py",
+        "sha256": "d04c9dfc1a8a5af456fd08455addb8377e83f3ebdb3d297aa82fdef928e01eb1",
+        "bytes": 15147
+      },
+      {
+        "path": "backend/app/services/daily_study.py",
+        "sha256": "24e186b7a54c14fa7ecc4cbaa0184f070dc4bec1a29f88bc714b97760db8602f",
+        "bytes": 3031
+      },
+      {
+        "path": "backend/app/services/diagnostics.py",
+        "sha256": "bb592e7600506b97baa0084e4e25db5c93a02203e4c279569ab154f5aba0de5f",
+        "bytes": 4937
+      },
+      {
+        "path": "backend/app/services/docx_numbering.py",
+        "sha256": "96de683048263accbcbd55a825966aebfb6cf2a4f8d42e1d50368df75dd1dbcb",
+        "bytes": 3535
+      },
+      {
+        "path": "backend/app/services/docx_parser.py",
+        "sha256": "61fb3892f427dd0534d3cac63aba00aa5afe294958f2d014b455b3499af33d2b",
+        "bytes": 86699
+      },
+      {
+        "path": "backend/app/services/esq.py",
+        "sha256": "ce585a1eb11f52376cdf86980bf07379f4e010034d908026d5db832f85503533",
+        "bytes": 67917
+      },
+      {
+        "path": "backend/app/services/exam_templates.py",
+        "sha256": "50f59b43e659e7043637bb08c3bc9f3b7d87f5749ba5eb17ce0bb87a91faab9d",
+        "bytes": 5805
+      },
+      {
+        "path": "backend/app/services/import_assist.py",
+        "sha256": "ec8f10e3aaa0116055afed955cf21931cbac5d8138db3d9b9ff1a0d9f73e110f",
+        "bytes": 30871
+      },
+      {
+        "path": "backend/app/services/lan_question_banks.py",
+        "sha256": "89baa8dc96ae0cfb27aa50cd681a56b9ae84220946d68461fed6de893295fcc4",
+        "bytes": 6765
+      },
+      {
+        "path": "backend/app/services/listening.py",
+        "sha256": "0bcee8fb98038966de94be62fde2459bb667e3c6fd56a04e362458997e7a1e5b",
+        "bytes": 11554
+      },
+      {
+        "path": "backend/app/services/model_keys.py",
+        "sha256": "23246d29996e9a816c9592c99aea7561bba153b990eb4a99dc29f934bcf5e512",
+        "bytes": 8018
+      },
+      {
+        "path": "backend/app/services/model_key_sync.py",
+        "sha256": "d1c4ce10c5b140f7d1c17e3cb0a6f19f6570b8bac82fd2733d8b47f270eb7b0d",
+        "bytes": 5828
+      },
+      {
+        "path": "backend/app/services/model_key_transaction.py",
+        "sha256": "455b3177e9bb5a87306ae19840112b5696d0b5f8af18e549a7e00ffcc586dec9",
+        "bytes": 3313
+      },
+      {
+        "path": "backend/app/services/model_snapshot.py",
+        "sha256": "c3bb5fbdf668ebdd2fa4294e1d08533ef7c68597b8a9ddab00153c96fe8e7f38",
+        "bytes": 4813
+      },
+      {
+        "path": "backend/app/services/official_download_sources.py",
+        "sha256": "04797ce0325ea47fa6c27f161e85f63517c248bcee0aa7f3f794cc57c4189278",
+        "bytes": 630
+      },
+      {
+        "path": "backend/app/services/passage_cleanup.py",
+        "sha256": "82adddd70efcaf0e4aeeb351db736bda1ee353ab24065796d746875b9bcc6551",
+        "bytes": 579
+      },
+      {
+        "path": "backend/app/services/practice.py",
+        "sha256": "fc8ecacbf57309f44483fe54d7b7b1d9aa1ee69668fd2d704f7c762880a9aca7",
+        "bytes": 32738
+      },
+      {
+        "path": "backend/app/services/practice_snapshots.py",
+        "sha256": "fed4b183a898c6f0c1ab880f3a6315fcebd9f8908276fec1d6b73596cb1022ba",
+        "bytes": 17047
+      },
+      {
+        "path": "backend/app/services/questions.py",
+        "sha256": "b3e680808406ad039e44796e956742f88abae57361e0e94cc94df67dcaebc3e6",
+        "bytes": 7123
+      },
+      {
+        "path": "backend/app/services/question_bank_catalog.py",
+        "sha256": "2d5834dfcbcf4257eded130347f9cf7ccc77260cb0f2b5a0201e9ff7a25cda8c",
+        "bytes": 8509
+      },
+      {
+        "path": "backend/app/services/question_labeling.py",
+        "sha256": "bdf4de3bce2757f9b801e8a9622653909bf5ec036e440e477bd9c7652ab074cf",
+        "bytes": 23897
+      },
+      {
+        "path": "backend/app/services/resume_title.py",
+        "sha256": "bf3c4bdf917a14c5ddb4288b02729e0e04ceebed0629738e61e68c0bc74cabfa",
+        "bytes": 716
+      },
+      {
+        "path": "backend/app/services/study_todos.py",
+        "sha256": "6480502087656c84f6a45d6789afe2ef4b444a1d9d0f4546c1caf58df0a508e0",
+        "bytes": 3597
+      },
+      {
+        "path": "backend/app/services/sync.py",
+        "sha256": "b25080f3025f1ad768f1ccf1b88c5b185b9518122a19cb225d350c7693740dbc",
+        "bytes": 55093
+      },
+      {
+        "path": "backend/app/services/sync_permissions.py",
+        "sha256": "bff579f9c14d0e79c1f4245e932931cc8b9c4186360bb17c2a65dc79907708b9",
+        "bytes": 6176
+      },
+      {
+        "path": "backend/app/services/sync_versions.py",
+        "sha256": "0fe028512d2a9f9e15c9984ad273f89cfbeab8df4cedabd86ae2b975c1d9fc14",
+        "bytes": 3011
+      },
+      {
+        "path": "backend/app/services/trash.py",
+        "sha256": "a7ee0231f91e6b9c646946778e2dfb1a476a2843de23d7107d2feec8ae0cb372",
+        "bytes": 23060
+      },
+      {
+        "path": "backend/app/services/updates.py",
+        "sha256": "ac292e9d695fcad0f316fc8e9a7a24edb79700a8ae480d61e470c59fd9b22a45",
+        "bytes": 10133
+      },
+      {
+        "path": "backend/app/services/vocabulary.py",
+        "sha256": "9294577961e365de5cf78a679cbc72af7d69a2fda7ff2e4f7f7603b2af2ce93e",
+        "bytes": 38843
+      },
+      {
+        "path": "backend/app/services/vocabulary_context.py",
+        "sha256": "0fc862cb946f41bac84584f953a0f4aebe6b453182ef1c9c11ed803bacc893be",
+        "bytes": 4057
+      },
+      {
+        "path": "backend/app/services/vocabulary_maintenance.py",
+        "sha256": "e7dd827a6207d0e1d073951e67be306b99fef6cc540e2a0e921361b14d7a50b2",
+        "bytes": 2759
+      },
+      {
+        "path": "backend/app/services/vocabulary_tasks.py",
+        "sha256": "0d35df7bee17239dae03121f2394332ff273524059cb933ded6953458faa1e7a",
+        "bytes": 3863
+      },
+      {
+        "path": "backend/app/services/wrong_analysis.py",
+        "sha256": "d3d625b4c7911eaf473aac6a06b53669d272c146179a4b137c8e0bc0474e679a",
+        "bytes": 14522
+      },
+      {
+        "path": "backend/app/services/wrong_analysis_history.py",
+        "sha256": "96eca3be5ac20b1994fa070df8e9e7a1778c6b9e077484e2d61b95103a9bf23c",
+        "bytes": 3005
+      },
+      {
+        "path": "backend/app/services/__init__.py",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "bytes": 1
+      },
+      {
+        "path": "backend/app/version.py",
+        "sha256": "2f13c4622396c267ca1f6b4e5ddfec20424cd1b3c065fc8c7c9cf1d249c949ee",
+        "bytes": 40
+      },
+      {
+        "path": "backend/app/__init__.py",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "bytes": 1
+      },
+      {
+        "path": "frontend/package.json",
+        "sha256": "3e66a8200dbf04699ab81be4c32c4985dc48605df3823322297293554991090f",
+        "bytes": 999
+      }
+    ],
+    "pub": [
+      {
+        "path": "frontend/src/api.ts",
+        "sha256": "bc5fb4e4ada91f29d4b7cfd0befbe7de99ebd51fdc165f0dece66bb0df43e3e4",
+        "bytes": 3388
+      },
+      {
+        "path": "frontend/src/App.vue",
+        "sha256": "6d9099bc2bf7e04ea406229ed54d207ce8dc804ab341782ff6fa77b503f1d8c8",
+        "bytes": 2884
+      },
+      {
+        "path": "frontend/src/components/AiAssistant.vue",
+        "sha256": "c80764b45ec73e66a4a643a9ac77e8e5ea6e784df8b2b112a9b26ef38a044401",
+        "bytes": 24654
+      },
+      {
+        "path": "frontend/src/components/AppDialogHost.vue",
+        "sha256": "b21a6be8891d19ab9074304518bbda85fae60873c25feff6a08ec86f55808ea1",
+        "bytes": 3338
+      },
+      {
+        "path": "frontend/src/components/ContentBlocks.vue",
+        "sha256": "55bf08d8754d7b4f8ea393e2b41639de65fe18bcd28ad8752f9ced163d94e771",
+        "bytes": 2684
+      },
+      {
+        "path": "frontend/src/components/DailyStudyContent.vue",
+        "sha256": "0e717fe0c1bd681b65047522405f5aeda3cc852c0dcd63d1752d3007150946b2",
+        "bytes": 4244
+      },
+      {
+        "path": "frontend/src/components/LanPairedDevices.vue",
+        "sha256": "351b16da2ff2897e77952f9f6133d0c1e1fafb84dd7b9d89d72586ec5b9e73f8",
+        "bytes": 5999
+      },
+      {
+        "path": "frontend/src/components/LanQuestionBankSharing.vue",
+        "sha256": "34554705d456651553e7a7ac59ab45ca0c30a712d633cb36e89127912d416348",
+        "bytes": 2645
+      },
+      {
+        "path": "frontend/src/components/ListeningPlayer.vue",
+        "sha256": "7a179f56b32e717595ffde6319bddf8ea6b4df23d05d80af829e2fcabc82818a",
+        "bytes": 15503
+      },
+      {
+        "path": "frontend/src/components/NamedModelKeys.vue",
+        "sha256": "a654a37236dcbf0f86aef25037bdf111e87401347086afabe67695f058453aaa",
+        "bytes": 6068
+      },
+      {
+        "path": "frontend/src/components/OptionSheet.vue",
+        "sha256": "ac122e089ced2a44700f26c3974cf92e8f06843aa5cae20b428152c258c9b27c",
+        "bytes": 4128
+      },
+      {
+        "path": "frontend/src/components/PassageBlank.vue",
+        "sha256": "570cd51a5ea5236250882e77139dae591d62f36f02944f5fe9422b31ef779bbc",
+        "bytes": 219
+      },
+      {
+        "path": "frontend/src/components/PracticeContentChoice.vue",
+        "sha256": "c0e42dfb4e2262f7eab72dd4453c35de6ca199f0f9c8a2d25c841905b727f314",
+        "bytes": 1463
+      },
+      {
+        "path": "frontend/src/components/QuestionBankSwitcher.vue",
+        "sha256": "d7bb732e3bd2816e291f97549c945190d1b20464515ba71578b56443838b0fbc",
+        "bytes": 4339
+      },
+      {
+        "path": "frontend/src/components/StudyTodos.vue",
+        "sha256": "a1912c24a5b33a3c38e91ad7bb78fb6d70dbaee2228d7a1548cb73a1a9692920",
+        "bytes": 3450
+      },
+      {
+        "path": "frontend/src/components/VocabularyDisplaySettings.vue",
+        "sha256": "bbac9e8dd36c962a193b9d85a72b36abed58d0ef547b0b0525fd05fb7676d876",
+        "bytes": 1879
+      },
+      {
+        "path": "frontend/src/components/VocabularyEnrichment.vue",
+        "sha256": "02e4ff3729327f5f4ab621b7baf4c6ac0c1cb5ee63467e5f356f7f40aaf474e5",
+        "bytes": 1418
+      },
+      {
+        "path": "frontend/src/components/VocabularyMaintenance.vue",
+        "sha256": "757c28a813a1fbdcf44884ae951ab4875ff1865fd01981e9c12c83ecffe83ad2",
+        "bytes": 4025
+      },
+      {
+        "path": "frontend/src/components/VocabularyMemoryContent.vue",
+        "sha256": "9dc28b26a0def51e4277c22601e4a26c1c1b9bd94e10d6a72c1262c6fdb651bc",
+        "bytes": 4028
+      },
+      {
+        "path": "frontend/src/components/VocabularyTerm.vue",
+        "sha256": "68a354b668dbe78e9d7a9392bf02473f9d39bfe8e9d334eeb1abce6666ec462a",
+        "bytes": 1718
+      },
+      {
+        "path": "frontend/src/composables/useDailyStudySwipe.ts",
+        "sha256": "04b4b32dbd0ebe4a5669dac4b820de3e8a4d5dadc5a55ce5d34ebfee2811b465",
+        "bytes": 3680
+      },
+      {
+        "path": "frontend/src/composables/useReducedMotion.ts",
+        "sha256": "e9599adf63868915ccaa3585d094241728f2d3aceaf2193d02afcad85b57fe4e",
+        "bytes": 372
+      },
+      {
+        "path": "frontend/src/composables/useThemeState.ts",
+        "sha256": "8dd7b189a340a87aba86e212e22832181850ea0883c993fe539ca733188d2460",
+        "bytes": 452
+      },
+      {
+        "path": "frontend/src/dailyStudy.ts",
+        "sha256": "a3aca4d838e78d826cb84662e9eb3a014d338838970058c15045f839fa170618",
+        "bytes": 8991
+      },
+      {
+        "path": "frontend/src/dashboard-glass.css",
+        "sha256": "d577bd02eb9dc87c6876579f2c462e9b1c76c1f6c7e777618d3b83f0b0f36641",
+        "bytes": 7485
+      },
+      {
+        "path": "frontend/src/desktop-settings.css",
+        "sha256": "59671ae8bc4b32c113d9dbc2fdbc2d6b0fb28e32c73a7617cb3356ca1fb10d63",
+        "bytes": 1458
+      },
+      {
+        "path": "frontend/src/env.d.ts",
+        "sha256": "f143733555ee727c891ccfa675fe94bd1a49c64aff112ec93e0b5121e9bc15e7",
+        "bytes": 41
+      },
+      {
+        "path": "frontend/src/main.ts",
+        "sha256": "f0744a3a734f5fc8be722a7ef4e57e596206c5635cb79c1856e71a4a0f16ef56",
+        "bytes": 324
+      },
+      {
+        "path": "frontend/src/passage-blanks.ts",
+        "sha256": "3708734f353ff13bf5a42c6a982ed7c09a2e90bea356e51d08bf60d8e37f775e",
+        "bytes": 1118
+      },
+      {
+        "path": "frontend/src/platform/diagnostics.ts",
+        "sha256": "e769c947121dd240509b0e3be65d38d1637344d30d412cddf5c45e0d5dbd6d2b",
+        "bytes": 7418
+      },
+      {
+        "path": "frontend/src/platform/dialogs.ts",
+        "sha256": "f44ad4338b5b65e85004e6e5d48fe3296eeb90343bbf60de09d9f30da20abe34",
+        "bytes": 3067
+      },
+      {
+        "path": "frontend/src/platform/overlay-history.ts",
+        "sha256": "38104d90d4987a8effdf41ee6def90bb684bb4da4b55c236462dd61ba4e90def",
+        "bytes": 1561
+      },
+      {
+        "path": "frontend/src/router.ts",
+        "sha256": "8b021e7d4eac76d3f1e0951a31a25eb731ddf09159bbf2c054ae93bb6d5007c6",
+        "bytes": 2241
+      },
+      {
+        "path": "frontend/src/services/adaptiveZoom.ts",
+        "sha256": "ac627e28be97f62672dd7da29a780e18ff0273ec844c0d66d149289e71d90561",
+        "bytes": 810
+      },
+      {
+        "path": "frontend/src/services/assistantSession.ts",
+        "sha256": "c893cc714e636186313ae2bd86569c0c7b9d3f89b483d1f6f0d6e0ba388099bd",
+        "bytes": 1046
+      },
+      {
+        "path": "frontend/src/services/configAutosave.ts",
+        "sha256": "3c494cb45ae1e7c2a31e150af21b04453cf7e9b41288160b7daded00fd6e63bd",
+        "bytes": 1714
+      },
+      {
+        "path": "frontend/src/services/dailyStudy.ts",
+        "sha256": "181c908f644796790c92f1547c30655d56d44fbe50356bd2873ee74f929fd6fe",
+        "bytes": 9619
+      },
+      {
+        "path": "frontend/src/services/dailyStudyContent.ts",
+        "sha256": "615242a39d0fc53b61c2bf46f526237a5c24f31e9fc21b45edcaf20294901b60",
+        "bytes": 1278
+      },
+      {
+        "path": "frontend/src/services/documentAgent.ts",
+        "sha256": "be83b6f0fa27b1e78c3892c7b153e641377d53a23bf642ebf6a5bca10ef87dcf",
+        "bytes": 7567
+      },
+      {
+        "path": "frontend/src/services/keyDrafts.ts",
+        "sha256": "a6abed6266e7f0d2876f1f796aa8b37c286e7f980bc15b460be803c783380ff6",
+        "bytes": 503
+      },
+      {
+        "path": "frontend/src/services/practiceTimer.ts",
+        "sha256": "e1e2681083607fd4dd5aee7c7b7b1784fc7fd2375b153a2ec1b0b7c40efd6f09",
+        "bytes": 4037
+      },
+      {
+        "path": "frontend/src/services/profileDrafts.ts",
+        "sha256": "f5b3b3562588bd64f026fdfab1f1c78a6919b74b6e04de54a2344f70add19572",
+        "bytes": 4403
+      },
+      {
+        "path": "frontend/src/services/questionBankProfiles.ts",
+        "sha256": "62c157150d8741a217df6b137eb601ff633e82f596b64cc05bc283943dc3cd60",
+        "bytes": 1376
+      },
+      {
+        "path": "frontend/src/services/questionLabeling.ts",
+        "sha256": "19c38826f2cc142a597271025f0c45e93cd60f3cf229046dddfc01d572c72e1d",
+        "bytes": 4978
+      },
+      {
+        "path": "frontend/src/services/saveAssistantDocument.ts",
+        "sha256": "474ade570e53f60835713fbc0575633ccb10ea959f4981effcc9f51a708d6c1d",
+        "bytes": 374
+      },
+      {
+        "path": "frontend/src/services/vocabularyDisplayConfig.ts",
+        "sha256": "53542005cb4a9087b7086c7b8e541e34d76e6df8ea8a986369cc7a5e9a510f9a",
+        "bytes": 3031
+      },
+      {
+        "path": "frontend/src/services/vocabularySnapshots.ts",
+        "sha256": "084928b59d7a61f1f34177964f1486cfe1aaffc40028d503aaa2f27c565c360e",
+        "bytes": 2694
+      },
+      {
+        "path": "frontend/src/services/wrongAnalysisSessions.ts",
+        "sha256": "eac699a13a7d9f7836cfb70fb358d7aad252207a49572130c7eced1656437262",
+        "bytes": 392
+      },
+      {
+        "path": "frontend/src/services/wrongListReturn.ts",
+        "sha256": "522e2ba2b2eff3027c92375fe4f5816cfc9dfde4f181b8fe7c8c1c8037ebc8ef",
+        "bytes": 162
+      },
+      {
+        "path": "frontend/src/settings-hub.css",
+        "sha256": "cfbcc3169d677616aaf66a21348e69ee2ab874d6e71065549fa8b07f18fa44ce",
+        "bytes": 3330
+      },
+      {
+        "path": "frontend/src/study-theme.css",
+        "sha256": "6d8f70c5c84ddf43ddbad71e0c1eadaf2303f851dfdb09dd252a6f8107725b4d",
+        "bytes": 2414
+      },
+      {
+        "path": "frontend/src/styles.css",
+        "sha256": "efb0e4d701178b2ad843e7728879de45a20140d41683ccd55238b5b59e992a5e",
+        "bytes": 90522
+      },
+      {
+        "path": "frontend/src/views/DailyStudyView.vue",
+        "sha256": "380effa195ca07de049acdc8864416626ab2b1fb89d2b1f8726db53cde8b7191",
+        "bytes": 19486
+      },
+      {
+        "path": "frontend/src/views/DashboardView.vue",
+        "sha256": "2b481825a23fabb6f9d3a04d532071058c1d0b26c7e66b63fbec0b8b1b8dc4c1",
+        "bytes": 8770
+      },
+      {
+        "path": "frontend/src/views/DiagnosticsSettingsView.vue",
+        "sha256": "c5bc15853fe87713b7b4462ddfb2e377cf3918851ac9893da94ca08b818e57c3",
+        "bytes": 2798
+      },
+      {
+        "path": "frontend/src/views/HelpView.vue",
+        "sha256": "e4d252da3e1b054c01c380b64d5b349dc96723fb680d82ce9f11e7d66470d940",
+        "bytes": 6120
+      },
+      {
+        "path": "frontend/src/views/ImportView.vue",
+        "sha256": "243d61d92fcde8e4941b08aee51ba6e33407ecd620e369f6997fba324f164bc5",
+        "bytes": 70492
+      },
+      {
+        "path": "frontend/src/views/LibraryView.vue",
+        "sha256": "eac81122d5e443d7805130ea791f5002ca40ab3827d9096fd5618b78ac48f8f5",
+        "bytes": 6838
+      },
+      {
+        "path": "frontend/src/views/PracticeView.vue",
+        "sha256": "59a3c24d011dec68743dcfac0ba4265378e8f4636140575f577e7db09ce908ae",
+        "bytes": 57589
+      },
+      {
+        "path": "frontend/src/views/RemoteQuestionBanksView.vue",
+        "sha256": "6fce89b4c3512d0644c9728bc42316862bf7d36f1bb63d2288aed978dfe7b193",
+        "bytes": 7594
+      },
+      {
+        "path": "frontend/src/views/SettingsHubView.vue",
+        "sha256": "1519fa05beee221cb1c239b952f9c6b2ec2233122f24233e681d70df526f7c2b",
+        "bytes": 3956
+      },
+      {
+        "path": "frontend/src/views/SettingsView.vue",
+        "sha256": "25d3e098dbc2b4788c10a80d6fa3529982650ab51445a266774c9440c1f50acf",
+        "bytes": 20323
+      },
+      {
+        "path": "frontend/src/views/SyncSettingsView.vue",
+        "sha256": "58f1fb210e370b0e119ea02335a39a74fcdf2d7d2fce51ba835b4c847a6d47a4",
+        "bytes": 10343
+      },
+      {
+        "path": "frontend/src/views/TrashView.vue",
+        "sha256": "160fd5412a2b0e56a7c84ac6bdbaeeece46f7e8e8818277558f7af07dc6364a4",
+        "bytes": 2590
+      },
+      {
+        "path": "frontend/src/views/UpdatesSettingsView.vue",
+        "sha256": "ab4ca44f6c35294fd47434633c41250584b3f6b482294f3145d4ebf1793eea5b",
+        "bytes": 8768
+      },
+      {
+        "path": "frontend/src/views/VocabularyView.vue",
+        "sha256": "8006faabf6d5ee80d3725113df5a1d3f630a917973fc718b7cd63a7146453646",
+        "bytes": 66900
+      },
+      {
+        "path": "frontend/src/views/WrongAnalysisView.vue",
+        "sha256": "c60f1fc2a612b196f75de7cbd52c5f86286beafd79dcb79d38f4ef4f3fcc41f1",
+        "bytes": 5995
+      },
+      {
+        "path": "frontend/src/views/WrongView.vue",
+        "sha256": "4143fc7ab30cc3d98391b196524e4f4f67fe535ad9b85e76b4bbe3a11f8c59d9",
+        "bytes": 15937
+      },
+      {
+        "path": "frontend/src/vocabulary-context.ts",
+        "sha256": "fbfd43626bfb2db3f9923a5f3699cd5f908ba908a1c0c4365123cc9e3d5d84b1",
+        "bytes": 5340
+      },
+      {
+        "path": "frontend/src/vocabulary-due-queue.ts",
+        "sha256": "241473fc602510758b0feabd203d92bffebcdad69f3159d392733e7e1eaf549a",
+        "bytes": 2802
+      },
+      {
+        "path": "backend/app/config.py",
+        "sha256": "d80181617f32fc171d5c4798d9e9c7b223ce00eca538843459e117eac7a7f5dd",
+        "bytes": 1302
+      },
+      {
+        "path": "backend/app/database.py",
+        "sha256": "6691211e4177dcc249b11641db4bcee36ffa4e97e099fe40fe4c5d94e27947a5",
+        "bytes": 37762
+      },
+      {
+        "path": "backend/app/lan_addresses.py",
+        "sha256": "97ad75015d9f204d12d58964905d3a2ce408bec796c4b1a41fb9f20ba67ae25e",
+        "bytes": 1452
+      },
+      {
+        "path": "backend/app/lan_discovery.py",
+        "sha256": "d23e84305114b303ef0d863670f12f8072a549f94629ee130d0b66f870ce5a52",
+        "bytes": 2658
+      },
+      {
+        "path": "backend/app/lan_sync_host.py",
+        "sha256": "1863d7fd398b80ac1c9d123fc54edfb4417696ead14497fbe117dfd9f1c9d741",
+        "bytes": 5352
+      },
+      {
+        "path": "backend/app/lan_tls.py",
+        "sha256": "745b04f9e7d02a12d4924ca72e82e31fbe43357cdbda0f9463d6900e8534d03f",
+        "bytes": 6994
+      },
+      {
+        "path": "backend/app/lan_tls_host.py",
+        "sha256": "85f333796e141eb6b7ddd44f5c61f02cd9992a04ed1160fe4404275771e5ccb2",
+        "bytes": 3323
+      },
+      {
+        "path": "backend/app/main.py",
+        "sha256": "ccd8498758cdbd4af9a4152fa2c5b48f8dd76391a34e491e2b950c3913aba4d3",
+        "bytes": 4039
+      },
+      {
+        "path": "backend/app/routers/ai.py",
+        "sha256": "171aa402a24f56e84c669fea4b7d922c247f2461e02e08577158dcababb0f774",
+        "bytes": 48012
+      },
+      {
+        "path": "backend/app/routers/dashboard.py",
+        "sha256": "119a6b6d96b46f01b4ef228d2e84e5a0428f77f4fbd3aba35dc88a5786b8c373",
+        "bytes": 5377
+      },
+      {
+        "path": "backend/app/routers/imports.py",
+        "sha256": "bf0c872083fa5312e2144a56f590060ef41fbaf87e62d19480d6a133069b6823",
+        "bytes": 34204
+      },
+      {
+        "path": "backend/app/routers/papers.py",
+        "sha256": "89f36850e4cc5de4aa0c8a6f1faab0983d26bece881adbcea4191f05ccd9eb84",
+        "bytes": 2925
+      },
+      {
+        "path": "backend/app/routers/practice.py",
+        "sha256": "c475f081a6186daf3fb8586f28c2d9eca1a5964e394edb4abf583883ae8ab527",
+        "bytes": 3597
+      },
+      {
+        "path": "backend/app/routers/question_banks.py",
+        "sha256": "58eb64e3b09741bbf000028aec5ddb745bea06bc3c104a05a8786a29bff9427f",
+        "bytes": 11992
+      },
+      {
+        "path": "backend/app/routers/question_bank_profiles.py",
+        "sha256": "e5152bc5d9e7e9b18b4958efca116db7255a06df8c80aed0eafef087360835f0",
+        "bytes": 8674
+      },
+      {
+        "path": "backend/app/routers/remote_question_banks.py",
+        "sha256": "e57037b1c9b7318b6ec9febe4bf91cfe0e677e4aff1de35cb588871e2c1ef9cf",
+        "bytes": 4160
+      },
+      {
+        "path": "backend/app/routers/sync.py",
+        "sha256": "81226b2310ad99823b536584e9811b7ffd62a8dca5e3797bbd65c32d00afc9cb",
+        "bytes": 14587
+      },
+      {
+        "path": "backend/app/routers/updates.py",
+        "sha256": "4818287d8aa178779f7dfe59432bc2a7526f54d676947210e4be16133f87cc91",
+        "bytes": 1341
+      },
+      {
+        "path": "backend/app/routers/vocabulary.py",
+        "sha256": "035e2689acad8fd4082b76a2dee59778834b4cd68b0654862f5b65de0b9d79ed",
+        "bytes": 16266
+      },
+      {
+        "path": "backend/app/routers/wrong.py",
+        "sha256": "f4549c8fdd4ff3a417daeafa93f7c983904ea9fb12651bfb207cde1f6c00690c",
+        "bytes": 4955
+      },
+      {
+        "path": "backend/app/routers/__init__.py",
+        "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+        "bytes": 2
+      },
+      {
+        "path": "backend/app/schemas.py",
+        "sha256": "303437f63616d718a7bad09744f6d134aa67cafd5252295b3416802239850cff",
+        "bytes": 8759
+      },
+      {
+        "path": "backend/app/security.py",
+        "sha256": "223e102de2bc45703211c3d629f05e4b054ca81b485e1880c18de27b89afe072",
+        "bytes": 1773
+      },
+      {
+        "path": "backend/app/services/ai_adapters.py",
+        "sha256": "1d6a36d01c13cdb2f8a15d42ca85fb7ebe27968967255ef9816e8f99fbfb65e2",
+        "bytes": 16905
+      },
+      {
+        "path": "backend/app/services/ai_client.py",
+        "sha256": "968a6d45042adf7544e59b9c2c1b7ee0b32b3e56d034e5c8d9e56482c66f562f",
+        "bytes": 16313
+      },
+      {
+        "path": "backend/app/services/attempt_stats.py",
+        "sha256": "f22b2e94ef0ac0f281f5a47340e05637c02eca48c9d4801a0f91d28eb7ecaee9",
+        "bytes": 4021
+      },
+      {
+        "path": "backend/app/services/bundled_banks.py",
+        "sha256": "a1c6aff552252247122c55e61dfa80ce05b6c8a37cc8165731cd9e05bcaf0315",
+        "bytes": 4828
+      },
+      {
+        "path": "backend/app/services/content_remediation.py",
+        "sha256": "d04c9dfc1a8a5af456fd08455addb8377e83f3ebdb3d297aa82fdef928e01eb1",
+        "bytes": 15147
+      },
+      {
+        "path": "backend/app/services/daily_study.py",
+        "sha256": "24e186b7a54c14fa7ecc4cbaa0184f070dc4bec1a29f88bc714b97760db8602f",
+        "bytes": 3031
+      },
+      {
+        "path": "backend/app/services/docx_numbering.py",
+        "sha256": "1b9ffc947f3d8f879d0058a436ab7d638198178dee032729fde6044e93f1f4da",
+        "bytes": 3605
+      },
+      {
+        "path": "backend/app/services/docx_parser.py",
+        "sha256": "9c0ff1974cc86e383bfefcb759d1c0e66abce023173fc81f985b358b501a3975",
+        "bytes": 86700
+      },
+      {
+        "path": "backend/app/services/esq.py",
+        "sha256": "4ae07a8bc3dd713f35c73733a1ef78e16e5f5c8ea1b2550bc8d7fdb3b6cb2e9f",
+        "bytes": 65185
+      },
+      {
+        "path": "backend/app/services/exam_templates.py",
+        "sha256": "f7167e4ef37714f15013d3e890fd04fef81dc029f03667602d4bb8a1ecf6e9c8",
+        "bytes": 5907
+      },
+      {
+        "path": "backend/app/services/import_assist.py",
+        "sha256": "7c8bac6a2c00cff4934508da969705ccee5746e9d278fb9d01b407f5d22eda63",
+        "bytes": 31592
+      },
+      {
+        "path": "backend/app/services/lan_question_banks.py",
+        "sha256": "b60c078f0dcb37c6c0d4529b7191929f173697370b5bb9211f8ee40387c421ba",
+        "bytes": 6914
+      },
+      {
+        "path": "backend/app/services/listening.py",
+        "sha256": "2221ddf04e606c2f5b6c91be1531c28d38cac85fab6e583aaacd173d35918eb5",
+        "bytes": 11834
+      },
+      {
+        "path": "backend/app/services/model_keys.py",
+        "sha256": "01bf627c3c2a2388b7eabfa578dce97aa42c94e849f434b4d3df68acf213d718",
+        "bytes": 8228
+      },
+      {
+        "path": "backend/app/services/model_key_sync.py",
+        "sha256": "fc272fcba1ef8f534edfa596345400f6642ac0873f22ae70b3557b68722d4719",
+        "bytes": 5948
+      },
+      {
+        "path": "backend/app/services/model_key_transaction.py",
+        "sha256": "2b6de5b74151ee1611d3e78e955baf81e7b9a00a08323eef0c44c5a32e97f5f6",
+        "bytes": 3390
+      },
+      {
+        "path": "backend/app/services/model_snapshot.py",
+        "sha256": "cb771d4c15c789b5d21ce5e73c752b13a79de954e909efa7a076547e3763f553",
+        "bytes": 4906
+      },
+      {
+        "path": "backend/app/services/official_download_sources.py",
+        "sha256": "9c43e0c62c93a91efd35b99fb1821c55179277b5d8625b8fa22a0c837904554b",
+        "bytes": 646
+      },
+      {
+        "path": "backend/app/services/passage_cleanup.py",
+        "sha256": "26ae24b415178fb4d167511fa115616fa871327b1b879af6163fa96fcdc0653c",
+        "bytes": 600
+      },
+      {
+        "path": "backend/app/services/practice.py",
+        "sha256": "03d3e9f40139ac24fdcbd69599416e90bc0271225ed7eaf58250a126e23e5c4d",
+        "bytes": 31079
+      },
+      {
+        "path": "backend/app/services/practice_snapshots.py",
+        "sha256": "7ba261ee0e4a3391c5b1abf32ccbd48fb317cf3bf74396c125d93db424f74895",
+        "bytes": 16466
+      },
+      {
+        "path": "backend/app/services/questions.py",
+        "sha256": "d3f02d2cfdab371834fc132b71d26419aa4674921e248f2faefa147836762b15",
+        "bytes": 7322
+      },
+      {
+        "path": "backend/app/services/question_bank_catalog.py",
+        "sha256": "d6a2b9c499f5475b16df2b0e5d1cfbb50cbc8fe574d8a839c46162f72fe19a48",
+        "bytes": 10338
+      },
+      {
+        "path": "backend/app/services/question_labeling.py",
+        "sha256": "96928b83ec6f0e8715db416ac4f7cae401e25fa505ddb5ebd2f051faf1132702",
+        "bytes": 24297
+      },
+      {
+        "path": "backend/app/services/resume_title.py",
+        "sha256": "bf3c4bdf917a14c5ddb4288b02729e0e04ceebed0629738e61e68c0bc74cabfa",
+        "bytes": 716
+      },
+      {
+        "path": "backend/app/services/study_todos.py",
+        "sha256": "91a53f375f0e409e4982dda7594374d36ce3da36c217d874b919221b5fa48602",
+        "bytes": 3018
+      },
+      {
+        "path": "backend/app/services/sync.py",
+        "sha256": "34227592aae4f90e1420ad2a8528510db7e551e237a609850b431634a2ac1e80",
+        "bytes": 57378
+      },
+      {
+        "path": "backend/app/services/sync_permissions.py",
+        "sha256": "bff579f9c14d0e79c1f4245e932931cc8b9c4186360bb17c2a65dc79907708b9",
+        "bytes": 6176
+      },
+      {
+        "path": "backend/app/services/sync_versions.py",
+        "sha256": "69a6753081d3363816795be7971b4f6567406c76a21dce7a90040e41e09cf8d3",
+        "bytes": 3064
+      },
+      {
+        "path": "backend/app/services/trash.py",
+        "sha256": "137122674a24f35307f1c1c9bd6a8169b7e4a5ba1a5ffc2657d11afccf692af7",
+        "bytes": 23014
+      },
+      {
+        "path": "backend/app/services/updates.py",
+        "sha256": "d14813c681492e9b64196b5f92e8a226084b6ecd2253b595e4a01ee68e8008e4",
+        "bytes": 11848
+      },
+      {
+        "path": "backend/app/services/vocabulary.py",
+        "sha256": "42f7d4e43c195f95a3468ca2e5c88aba49de197eb2aae10ce7adbc3c23c1642d",
+        "bytes": 40964
+      },
+      {
+        "path": "backend/app/services/vocabulary_context.py",
+        "sha256": "0fc862cb946f41bac84584f953a0f4aebe6b453182ef1c9c11ed803bacc893be",
+        "bytes": 4057
+      },
+      {
+        "path": "backend/app/services/vocabulary_maintenance.py",
+        "sha256": "6492fd30edb73a899419d011a32e308198b39431b23d45fdeace22fa0dba617e",
+        "bytes": 2800
+      },
+      {
+        "path": "backend/app/services/vocabulary_tasks.py",
+        "sha256": "0d35df7bee17239dae03121f2394332ff273524059cb933ded6953458faa1e7a",
+        "bytes": 3863
+      },
+      {
+        "path": "backend/app/services/wrong_analysis.py",
+        "sha256": "d3d625b4c7911eaf473aac6a06b53669d272c146179a4b137c8e0bc0474e679a",
+        "bytes": 14522
+      },
+      {
+        "path": "backend/app/services/wrong_analysis_history.py",
+        "sha256": "c4452120870779283870628a364ed3d6de399453493b1c1ebf4eae953683818e",
+        "bytes": 3059
+      },
+      {
+        "path": "backend/app/services/__init__.py",
+        "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+        "bytes": 2
+      },
+      {
+        "path": "backend/app/__init__.py",
+        "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+        "bytes": 2
+      },
+      {
+        "path": "frontend/package.json",
+        "sha256": "ae3710e6ef2df1a30b4343c07ef6c5ea9d55288feceb4412d1488d32fcb21e83",
+        "bytes": 1135
+      }
+    ]
+  },
+  "android": {
+    "branch": "main",
+    "head": "b695d5b7acb2339de51f7eed030a2b8aea5c7526",
+    "trackedChanges": [
+      "M PROJECT_INDEX.md",
+      " M docs/context/NOW.md",
+      " M frontend/scripts/prepare-tts-assets.ps1",
+      " M frontend/src/composables/useDailyStudySwipe.ts",
+      " M frontend/src/services/dailyStudy.ts",
+      " M frontend/src/study-theme.css",
+      " M frontend/src/views/DailyStudyView.vue",
+      " M frontend/src/views/ImportView.vue",
+      " M frontend/src/views/VocabularyView.vue",
+      " M frontend/tests/daily-study-browser.mjs",
+      " M frontend/tests/daily-study-session.mjs",
+      " M frontend/tests/document-draft-persistence.mjs",
+      " M frontend/tests/vocabulary-layout.mjs"
+    ]
+  },
+  "dev": {
+    "branch": "local-development",
+    "head": "7d32e9636734ba71bc330351bb0fdba607072fbc",
+    "trackedChanges": [
+      "M PROJECT_INDEX.md",
+      " M frontend/package.json",
+      " M frontend/src/components/VocabularyEnrichment.vue",
+      " M frontend/src/components/VocabularyMemoryContent.vue",
+      " M frontend/src/services/adaptiveZoom.ts",
+      " M frontend/src/services/dailyStudy.ts",
+      " M frontend/src/styles.css",
+      " M frontend/src/views/DailyStudyView.vue",
+      " M frontend/src/views/ImportView.vue"
+    ]
+  },
+  "pub": {
+    "branch": "main",
+    "head": "62ebaa0468687732ff4b05cd9b7cebcade3dc073",
+    "trackedChanges": [
+      "M frontend/package.json",
+      " M frontend/src/components/VocabularyEnrichment.vue",
+      " M frontend/src/components/VocabularyMemoryContent.vue",
+      " M frontend/src/services/adaptiveZoom.ts",
+      " M frontend/src/services/dailyStudy.ts",
+      " M frontend/src/styles.css",
+      " M frontend/src/views/DailyStudyView.vue",
+      " M frontend/src/views/ImportView.vue"
+    ]
+  },
+  "voice": {
+    "archiveHash": "f0b2526c9600657141ccbbe412f6159dceedab5bab4ba4e8857d9443acb50de4",
+    "expectedArchiveHash": "f0b2526c9600657141ccbbe412f6159dceedab5bab4ba4e8857d9443acb50de4",
+    "modelPath": "frontend/android/app/src/main/assets/tts/en_GB/model.onnx",
+    "modelHash": "329b2a75bcf870f7321bfe472fe86275b7db1c432b2db0a2a087f06ab49d746a",
+    "modelBytes": 18681752,
+    "sourceHistory": {
+      "threadId": "01a151eb-6f8f-7a00-be72-66982e013a91",
+      "title": "修复每日学习发音与布局",
+      "selectionTurn": "01a15311-70fa-71d0-b818-3f03a14f537e"
+    },
+    "decision": "2026-10-21 decision: W internal keeps Alan en_GB + LJSpeech en_US; P public uses en_US only (public domain); en_GB/Alan excluded until written permission.",
+    "sourceFiles": [
+      {
+        "path": "frontend/scripts/prepare-tts-assets.ps1",
+        "bytes": 3827,
+        "sha256": "8de29db91efb07abbd5c43eeb237d92502ea92e0ab2602f32846b5aa4be497fa"
+      },
+      {
+        "path": "frontend/scripts/tts-licenses/en_GB-alan-LICENSE.txt",
+        "bytes": 46,
+        "sha256": "2fb2b744e6d96a2e3137d58121670b005718c736d5dde1832c99ff9073f64c00"
+      },
+      {
+        "path": "frontend/android/app/src/main/assets/tts/en_GB/MODEL_CARD",
+        "bytes": 320,
+        "sha256": "abcbc3e961124398911436acd9eaaa0ab167cdf221d5a24146aa08732c52630f"
+      },
+      {
+        "path": "frontend/android/app/src/main/assets/tts/en_GB/LICENSE",
+        "bytes": 46,
+        "sha256": "2fb2b744e6d96a2e3137d58121670b005718c736d5dde1832c99ff9073f64c00"
+      }
+    ],
+    "enGB": {
+      "license": "Copyright 2022 Mycroft AI / All Rights Reserved",
+      "publicRedistribution": "not established; upstream root license conflicts with voice license; see alan-source-review"
+    },
+    "enUS": {
+      "modelPath": "frontend/android/app/src/main/assets/tts/en_US/model.onnx",
+      "modelHash": "206a8403baad4df7642156918a6ebe205798290d82f24d0d0119d7afa8a2738e",
+      "modelBytes": 19349795,
+      "resourceBytes": 37347875,
+      "modelCard": {
+        "path": "frontend/android/app/src/main/assets/tts/en_US/MODEL_CARD",
+        "bytes": 517,
+        "sha256": "fbee1529c89d36b3fe76d7e9f3f832dce17f44900a52d76a9bda735654766b4d"
+      },
+      "tokens": {
+        "path": "frontend/android/app/src/main/assets/tts/en_US/tokens.txt",
+        "bytes": 940,
+        "sha256": "ef3a7e4a8d1af0c9d4dc45aaae1a6242ebe24a7ed6f3d025a49eb29682784c6d"
+      },
+      "license": "public domain (LJSpeech)"
+    },
+    "publicRoute": {
+      "decisionDate": "2026-10-21",
+      "internal": "en_US + en_GB (Alan local use)",
+      "public": "en_US only; en_GB/Alan excluded until written permission",
+      "document": "docs/context/2026-10-21-alan-public-route-decision.md",
+      "g0bReceipt": "docs/context/2026-10-21-g0b-public-startup-reproduction.md"
+    }
+  },
+  "functionalPackages": {
+    "new": [
+      "D01",
+      "D02",
+      "D03",
+      "D04",
+      "D05"
+    ],
+    "align": [
+      "D06",
+      "D07",
+      "D08",
+      "D09",
+      "D10",
+      "D11",
+      "D12",
+      "D13",
+      "D14",
+      "D15",
+      "D16",
+      "D17",
+      "D18"
+    ],
+    "protect": [
+      "P01",
+      "P02",
+      "P03",
+      "P04",
+      "P05",
+      "P06",
+      "P07"
+    ],
+    "platform": [
+      "K01",
+      "K02",
+      "K03",
+      "K04",
+      "K05"
+    ]
+  },
+  "contentRemediation": {
+    "manifest": "frontend/public/content-remediation.json",
+    "revision": "2026-09-r3",
+    "originalSha256": "45625023d50705f34bef50ec1911e280696c1e7e0387c1af1737ed936a79fbae",
+    "reviewedSha256": "34e9fa63584938e359fa460462880e9f8ccaba7fbcd01ea32ac0f56b93197881",
+    "originalBytes": 4140323,
+    "reviewedBytes": 4141114,
+    "resolution": "A: accept reviewed actual passages by hash; no passage text added to the public manifest",
+    "acceptedUnits": 7,
+    "updatedUnits": 32,
+    "unchangedUnits": 26,
+    "reviewedHashes": {
+      "local.english-practice.2002.unit1": "ffa3a2384084f3d6b52ad0f2134ff3840bc22bac88b40c0e5d027e1019f25b45",
+      "local.english-practice.2013.unit6": "eb619b4c3a6f91682d8c28fef20eaed12ea42f7f85ffaa48bfc6e0a0a290cc44",
+      "local.english-practice.2015.unit1": "8af852fa6dc53d4675c6d9bcd9a1c39ad586e07c7a23595adf172592e9d3d253",
+      "local.english-practice.2016.unit1": "a7c080b618a2592b3e80892c08672c887c3276175f696ee93867966846b41d65",
+      "local.english-practice.2016.unit6": "cf9ad5c3ede6592c22fe42754d74d8033ce11d6ea543664038285fc37404e126",
+      "local.english-practice.2020.unit6": "6de6c66ad7502af6daf88130490eb9bed1af57dd5fbd0ecbd4483334f01aa9c2",
+      "kaoyan2:2022.unit6": "f8f86b9bb06c148e3f827c33213705d3d3e11e43629686b60e19ef24e348826f"
+    },
+    "g0bReceipt": "docs/context/2026-10-21-g0b-public-startup-reproduction.md"
+  },
+  "changes": [
+    {
+      "tree": "dev",
+      "path": "backend/app/services/content_remediation.py",
+      "oldSha256": "a073db5dfbb59e04991ddbf6148555070131cc8698f244e0bdbf057e4ebfa46a",
+      "newSha256": "d04c9dfc1a8a5af456fd08455addb8377e83f3ebdb3d297aa82fdef928e01eb1",
+      "bytes": 15147,
+      "reason": "G0-B reviewedHashes acceptance keeps reviewed passages without overwrite"
+    },
+    {
+      "tree": "dev",
+      "path": "tests/test_content_remediation.py",
+      "oldSha256": null,
+      "newSha256": "182fb265bc3af7f6bbd6608a03417d444fa6994f0e1abec0b26af13e8a9b2ce9",
+      "bytes": 4589,
+      "reason": "added regression for reviewed-hash acceptance"
+    },
+    {
+      "tree": "pub",
+      "path": "backend/app/services/content_remediation.py",
+      "oldSha256": "a073db5dfbb59e04991ddbf6148555070131cc8698f244e0bdbf057e4ebfa46a",
+      "newSha256": "d04c9dfc1a8a5af456fd08455addb8377e83f3ebdb3d297aa82fdef928e01eb1",
+      "bytes": 15147,
+      "reason": "G0-B reviewedHashes acceptance keeps reviewed passages without overwrite"
+    },
+    {
+      "tree": "pub",
+      "path": "tests/test_content_remediation.py",
+      "oldSha256": null,
+      "newSha256": "182fb265bc3af7f6bbd6608a03417d444fa6994f0e1abec0b26af13e8a9b2ce9",
+      "bytes": 4589,
+      "reason": "added regression for reviewed-hash acceptance"
+    },
+    {
+      "tree": "pub",
+      "path": "frontend/public/content-remediation.json",
+      "oldSha256": "45625023d50705f34bef50ec1911e280696c1e7e0387c1af1737ed936a79fbae",
+      "newSha256": "34e9fa63584938e359fa460462880e9f8ccaba7fbcd01ea32ac0f56b93197881",
+      "bytes": 4141114,
+      "reason": "added 7 reviewedHashes only; no passage text added"
+    }
+  ]
+}
