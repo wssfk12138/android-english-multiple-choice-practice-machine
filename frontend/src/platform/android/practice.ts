@@ -1,5 +1,5 @@
 import { frequentQuestionIds, resumablePracticeSession, studyTodoCountColumns, studyTodoCountValues } from './study-todos'
-import { preservesCandidateOrder } from './candidate-order-policy'
+import { preservesCandidateOrder, usesSharedCandidates } from './candidate-order-policy'
 import { readSnapshot, restoreUnit, historicalRetrySnapshot, snapshotGradeMany, requireSnapshotChoice, snapshotChoiceRequired } from './practice-snapshots'
 import type { SQLiteDBConnection } from '@capacitor-community/sqlite'
 import { Capacitor } from '@capacitor/core'
@@ -91,10 +91,12 @@ async function serializeQuestion(
     stem_blocks: metadata.content_blocks || [],
     options: options.map((option, index) => {
       const optionMetadata = parseJson<JsonRecord>(option.metadata, {})
+      const originalLabel = String(option.original_label || '').trim()
       return {
         stable_key: option.stable_key,
-        label: preserveOptionLabels
-          ? option.original_label
+        // 保留原标签时，缺失标签的旧数据退回位置字母，避免渲染出空按钮。
+        label: preserveOptionLabels && originalLabel
+          ? originalLabel
           : String.fromCharCode(65 + index),
         content: option.content,
         metadata: optionMetadata,
@@ -137,13 +139,15 @@ export async function serializeUnit(
   let sharedCandidateOrder: string[] | undefined
   const sharedData = parseJson<JsonRecord>(unit.shared_data, {})
   const preserveCandidateOrder = preservesCandidateOrder(unit, sharedData)
-  const usesSharedCandidates = ['part_b', 'word_bank', 'paragraph_matching'].includes(
-    String(unit.unit_type || ''),
-  )
-  if (usesSharedCandidates
+  const usesShared = usesSharedCandidates(unit.unit_type)
+  // 策略 v2：共享候选题型整篇保留原始顺序与原始标签，杜绝“原文 A、按钮 A、
+  // 每题 A 各指不同内容”。旧会话（v0/v1）继续走原有逐题/整组打乱展示。
+  const sharedPreserve = (options.candidatePolicyVersion ?? 1) >= 2 && usesShared
+  if (usesShared
     && questions.length
     && options.shuffleOptions
     && !preserveCandidateOrder
+    && !sharedPreserve
     && !options.answerOrders?.size) {
     sharedCandidateOrder = shuffled(
       (await rows<{ stable_key: string }>(
@@ -156,10 +160,10 @@ export async function serializeUnit(
   for (const question of questions) {
     serializedQuestions.push(await serializeQuestion(
       question,
-      options.shuffleOptions && !sharedCandidateOrder && !preserveCandidateOrder,
+      options.shuffleOptions && !sharedCandidateOrder && !preserveCandidateOrder && !sharedPreserve,
       options.answerOrders?.get(question.id) || sharedCandidateOrder,
       Boolean(options.includeAnswers),
-      unit.subtype === 'true_false' || (preserveCandidateOrder && ((options.candidatePolicyVersion ?? 1) >= 1 || !options.answerOrders?.get(question.id)?.length)),
+      sharedPreserve || unit.subtype === 'true_false' || (preserveCandidateOrder && ((options.candidatePolicyVersion ?? 1) >= 1 || !options.answerOrders?.get(question.id)?.length)),
       dbx,
     ))
   }
@@ -455,7 +459,7 @@ export async function createSession(body: JsonRecord): Promise<JsonRecord> {
   await transaction(async db => {
     const created = await db.run(
       `INSERT INTO practice_sessions (mode, paper_id, unit_ids, shuffle_options, sync_id, updated_at, candidate_policy_version)
-       VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP, 1)`,
+       VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP, 2)`,
       [body.mode, paperId, JSON.stringify(unitIds), shuffleOptions ? 1 : 0],
       false,
     )
@@ -470,6 +474,7 @@ export async function createSession(body: JsonRecord): Promise<JsonRecord> {
     for (const unitId of unitIds) {
       const unit = await restoreUnit(inheritedSnapshot, unitId) || await serializeUnit(unitId, {
         shuffleOptions,
+        candidatePolicyVersion: 2,
         onlyQuestionIds: ['wrong', 'wrong_history'].includes(String(body.mode))
           ? onlyByUnit.get(unitId)
           : undefined,
@@ -585,7 +590,12 @@ export async function getSession(sessionId: number, dbx?: SQLiteDBConnection): P
       const answer = answers.get(question.id)
       question.user_answer = answer?.user_answer || ''
       if ((session.status === 'submitted' || unitSubmission) && answer) {
-        question.is_correct = Boolean(answer.is_correct)
+        // 留空提交的题保持无判分状态，不把 NULL 冒充成“回答错误”。
+        if (answer.is_correct != null) {
+          question.is_correct = Boolean(answer.is_correct)
+        } else if (!String(answer.user_answer || '').trim()) {
+          question.unanswered = true
+        }
       }
     }
     const submitted = Boolean(unitSubmission || session.status === 'submitted')
@@ -596,6 +606,8 @@ export async function getSession(sessionId: number, dbx?: SQLiteDBConnection): P
       const score = unitSubmission?.score ?? unitAnswers
         .filter(answer => answer.is_correct === 1)
         .reduce((sum, answer) => sum + Number(unit.questions.find((q: JsonRecord) => q.id === answer.question_id)?.score || 0), 0)
+      const unitAnswered = unitAnswers.filter(answer => String(answer.user_answer || '').trim()).length
+      const unitUnanswered = unitAnswers.length - unitAnswered
       unit.submission = {
         submitted: true,
         submitted_at: unitSubmission?.submitted_at || session.submitted_at,
@@ -604,6 +616,11 @@ export async function getSession(sessionId: number, dbx?: SQLiteDBConnection): P
         wrong_count: unitAnswers.filter(answer => answer.is_correct === 0).length,
         correct_count: unitAnswers.filter(answer => answer.is_correct === 1).length,
         question_count: unitAnswers.length,
+        answered_count: unitAnswered,
+        unanswered_count: unitUnanswered,
+        completion_kind: unitUnanswered === 0
+          ? 'complete'
+          : unitAnswered === 0 ? 'unattempted' : 'partial',
       }
     } else {
       unit.submission = { submitted: false }
@@ -611,6 +628,7 @@ export async function getSession(sessionId: number, dbx?: SQLiteDBConnection): P
     units.push(unit)
   }
   normalizeListeningAudio(units)
+  const answeredCount = answerRows.filter(answer => String(answer.user_answer || '').trim()).length
   const resultSummary = session.status === 'submitted'
     ? {
         score: session.score,
@@ -618,6 +636,11 @@ export async function getSession(sessionId: number, dbx?: SQLiteDBConnection): P
         wrong_count: answerRows.filter(answer => answer.is_correct === 0).length,
         correct_count: answerRows.filter(answer => answer.is_correct === 1).length,
         question_count: answerRows.length,
+        answered_count: answeredCount,
+        unanswered_count: answerRows.length - answeredCount,
+        completion_kind: answeredCount === answerRows.length
+          ? 'complete'
+          : answeredCount === 0 ? 'unattempted' : 'partial',
       }
     : null
   return {
@@ -626,6 +649,7 @@ export async function getSession(sessionId: number, dbx?: SQLiteDBConnection): P
     paper_id: session.paper_id,
     status: session.status,
     shuffle_options: Boolean(session.shuffle_options),
+    candidate_policy_version: Number(session.candidate_policy_version || 0),
     content_revision: snapshot.revision || null,
     content_choice_required: snapshotChoiceRequired(session),
     started_at: session.started_at,
@@ -744,7 +768,10 @@ async function gradeRows(
   // snapshotGrade (including the missing-evidence throw) is preserved by
   // snapshotGradeMany.
   const gradeTable = await snapshotGradeMany(answerRows, <T>(sql: string, values: unknown[]) => transactionRow<T>(db, sql, values), <T>(sql: string, values: unknown[]) => transactionRows<T>(db, sql, values))
-  const wrongRows = answerRows.filter(row => updateStats && row.is_correct == null)
+  // 留空提交：只有真正作答的题参与判分与统计；满分仍覆盖全部题目。
+  const gradedRows = answerRows.filter(row => String(row.user_answer || '').trim())
+  const gradedIds = new Set(gradedRows.map(row => Number(row.id)))
+  const wrongRows = gradedRows.filter(row => updateStats && row.is_correct == null)
   let sessionSyncId: string | null = null
   if (wrongRows.length) {
     let session = await transactionRow<JsonRecord>(db, 'SELECT sync_id FROM practice_sessions WHERE id=?', [wrongRows[0].session_id])
@@ -770,6 +797,7 @@ async function gradeRows(
   for (const answerRow of answerRows) {
     const original = gradeTable.get(Number(answerRow.question_id))!
     maxScore += original.score
+    if (!gradedIds.has(Number(answerRow.id))) continue
     const user = String(answerRow.user_answer || '').trim().toUpperCase().split('').sort().join('')
     const answer = String(original.answer || '').trim().toUpperCase().split('').sort().join('')
     const correct = Boolean(user) && user === answer
@@ -837,10 +865,6 @@ async function recordWrongRetryRound(
       false,
     )
   }
-  const currentRows = (await db.query(
-    'SELECT sync_id FROM wrong_current_questions WHERE unit_id = ?',
-    [unitId],
-  )).values || []
   const profileRow = (await db.query(
     `SELECT p.name FROM question_bank_profiles p
      JOIN papers pa ON pa.profile_id = p.id
@@ -848,30 +872,59 @@ async function recordWrongRetryRound(
      WHERE u.id = ? LIMIT 1`,
     [unitId],
   )).values?.[0]
-  for (const current of currentRows) {
-    const syncId = String(current.sync_id || '')
-    if (!syncId) continue
-    await db.run(
-      `INSERT INTO sync_tombstones(table_name, object_key, profile_name, deleted_at)
-       VALUES ('wrong_current_questions', ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(table_name, object_key, profile_name)
-       DO UPDATE SET deleted_at = CURRENT_TIMESTAMP`,
-      [syncId, String(profileRow?.name || '')],
-      false,
-    )
-  }
-  await db.run('DELETE FROM wrong_current_questions WHERE unit_id = ?', [unitId], false)
-  for (const result of results.filter(item => !item.is_correct)) {
-    await db.run(
-      `INSERT INTO wrong_current_questions (unit_id, question_id, since_round_id, sync_id, updated_at)
-       VALUES (?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
-      [unitId, result.question_id, roundId],
-      false,
-    )
+  // 只更新本次实际作答的题：答对的移出当前错题（含同步 tombstone），
+  // 答错的刷新轮次；本轮未练习的其它当前错题保持原状。
+  for (const result of results) {
+    const existing = (await db.query(
+      'SELECT sync_id FROM wrong_current_questions WHERE unit_id = ? AND question_id = ?',
+      [unitId, result.question_id],
+    )).values?.[0] || null
+    if (result.is_correct) {
+      const syncId = String(existing?.sync_id || '')
+      if (syncId) {
+        await db.run(
+          `INSERT INTO sync_tombstones(table_name, object_key, profile_name, deleted_at)
+           VALUES ('wrong_current_questions', ?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(table_name, object_key, profile_name)
+           DO UPDATE SET deleted_at = CURRENT_TIMESTAMP`,
+          [syncId, String(profileRow?.name || '')],
+          false,
+        )
+      }
+      await db.run(
+        'DELETE FROM wrong_current_questions WHERE unit_id = ? AND question_id = ?',
+        [unitId, result.question_id],
+        false,
+      )
+    } else if (existing) {
+      await db.run(
+        `UPDATE wrong_current_questions
+         SET since_round_id = ?, deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
+         WHERE unit_id = ? AND question_id = ?`,
+        [roundId, unitId, result.question_id],
+        false,
+      )
+    } else {
+      await db.run(
+        `INSERT INTO wrong_current_questions (unit_id, question_id, since_round_id, sync_id, updated_at)
+         VALUES (?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
+        [unitId, result.question_id, roundId],
+        false,
+      )
+    }
   }
 }
 
-export async function submitUnit(sessionId: number, unitId: number): Promise<JsonRecord> {
+export type SubmitOptions = {
+  /** 省略时保持旧的严格未答拦截行为。 */
+  allowUnanswered?: boolean
+  /** 重试去重：同一逻辑提交的重复请求返回已保存结果。 */
+  submissionRequestId?: string
+}
+
+class ConcurrentSubmitError extends Error {}
+
+export async function submitUnit(sessionId: number, unitId: number, options: SubmitOptions = {}): Promise<JsonRecord> {
   const session = await row<JsonRecord>('SELECT * FROM practice_sessions WHERE id = ?', [sessionId])
   if (!session) throw new LocalApiError(404, '练习记录不存在')
   requireSnapshotChoice(session)
@@ -893,18 +946,21 @@ export async function submitUnit(sessionId: number, unitId: number): Promise<Jso
   )
   if (!answerRows.length) throw new LocalApiError(400, '篇目中没有题目')
   const missing = answerRows.find(item => !String(item.user_answer || '').trim())
-  if (missing) incompleteSubmission(
+  if (missing && !options.allowUnanswered) incompleteSubmission(
     { id: unitId, title: missing.unit_title },
     { id: missing.question_id, number: missing.number },
   )
   await transaction(async db => {
     const historicalContent = Boolean(readSnapshot(session.content_snapshot).revision)
     const graded = await gradeRows(answerRows, db, !historicalContent)
-    if (!historicalContent) await addCurrentWrongQuestions(unitId, graded.results, db)
+    if (!historicalContent && graded.results.length) {
+      await addCurrentWrongQuestions(unitId, graded.results, db)
+    }
     await db.run(
       `INSERT INTO practice_unit_submissions
         (session_id, unit_id, score, max_score, sync_id, updated_at)
-       VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)`,
+       VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)
+       ON CONFLICT(session_id, unit_id) DO NOTHING`,
       [sessionId, unitId, graded.score, graded.maxScore],
       false,
     )
@@ -912,11 +968,14 @@ export async function submitUnit(sessionId: number, unitId: number): Promise<Jso
   return getSession(sessionId)
 }
 
-export async function submitSession(sessionId: number): Promise<JsonRecord> {
+export async function submitSession(sessionId: number, options: SubmitOptions = {}): Promise<JsonRecord> {
   const session = await row<JsonRecord>('SELECT * FROM practice_sessions WHERE id = ?', [sessionId])
   if (!session) throw new LocalApiError(404, '练习记录不存在')
   requireSnapshotChoice(session)
-  if (session.status === 'submitted') return getSession(sessionId)
+  if (session.status === 'submitted') {
+    // 重复点击/响应丢失后的重试都返回已保存结果，不产生第二轮判分。
+    return getSession(sessionId)
+  }
   if (session.status !== 'active') throw new LocalApiError(400, '练习已结束，请重新打开练习')
   const answerRows = await rows<JsonRecord>(
     `SELECT a.*, q.answer, q.score, q.unit_id, q.number, u.title AS unit_title
@@ -929,7 +988,7 @@ export async function submitSession(sessionId: number): Promise<JsonRecord> {
   )
   if (!answerRows.length) throw new LocalApiError(400, '练习中没有题目')
   const missing = answerRows.find(item => !String(item.user_answer || '').trim())
-  if (missing) incompleteSubmission(
+  if (missing && !options.allowUnanswered) incompleteSubmission(
     { id: missing.unit_id, title: missing.unit_title },
     { id: missing.question_id, number: missing.number },
   )
@@ -939,38 +998,86 @@ export async function submitSession(sessionId: number): Promise<JsonRecord> {
     unitAnswers.push(answer)
     byUnit.set(answer.unit_id, unitAnswers)
   }
-  await transaction(async db => {
-    let score = 0
-    let maxScore = 0
-    for (const [unitId, unitAnswers] of byUnit) {
-      const historyOnly = session.mode === 'wrong_history' || Boolean(readSnapshot(session.content_snapshot).revision)
-      const graded = await gradeRows(unitAnswers, db, !historyOnly)
-      if (session.mode === 'wrong' && !historyOnly) {
-        await recordWrongRetryRound(unitId, sessionId, graded.results, db)
-      } else if (!historyOnly) {
-        await addCurrentWrongQuestions(unitId, graded.results, db)
+  // 已单篇提交的篇目只汇总结论：不重新判分、不再统计、不再投影当前错题，
+  // 否则后来已掌握的旧错题会在整卷提交时复活。
+  const existingSubmissions = new Map(
+    (await rows<JsonRecord>(
+      'SELECT unit_id, score, max_score FROM practice_unit_submissions WHERE session_id = ?',
+      [sessionId],
+    )).map(item => [Number(item.unit_id), item]),
+  )
+  try {
+    await transaction(async db => {
+      let score = 0
+      let maxScore = 0
+      for (const [unitId, unitAnswers] of byUnit) {
+        const existing = existingSubmissions.get(Number(unitId))
+        const historyOnly = session.mode === 'wrong_history' || Boolean(readSnapshot(session.content_snapshot).revision)
+        // 快照重开转移的已提交篇目：整卷结算按当前口径重算分数，
+        // 但错题投影只作用于判定发生翻转的题，已掌握旧错题不得原样复活。
+        const previousCorrectness = existing
+          ? new Map(unitAnswers
+              .filter(row => row.is_correct != null)
+              .map(row => [Number(row.question_id), row.is_correct]))
+          : null
+        const graded = await gradeRows(unitAnswers, db, !historyOnly)
+        let projected = graded.results
+        if (previousCorrectness) {
+          projected = projected.filter(item => {
+            const key = Number(item.question_id)
+            if (!previousCorrectness.has(key)) return false
+            return Boolean(previousCorrectness.get(key)) !== Boolean(item.is_correct)
+          })
+        }
+        if (historyOnly) {
+          // 历史内容复习不改当前错题投影。
+        } else if (session.mode === 'wrong') {
+          if (projected.length) await recordWrongRetryRound(unitId, sessionId, projected, db)
+        } else if (projected.length) {
+          await addCurrentWrongQuestions(unitId, projected, db)
+        }
+        score += graded.score
+        maxScore += graded.maxScore
+        const hasAnswered = unitAnswers.some(item => String(item.user_answer || '').trim())
+        if (hasAnswered || existing) {
+          await db.run(
+            `INSERT INTO practice_unit_submissions
+              (session_id, unit_id, score, max_score, sync_id, updated_at)
+             VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)
+             ON CONFLICT(session_id, unit_id) DO UPDATE SET
+               score = excluded.score, max_score = excluded.max_score, updated_at = CURRENT_TIMESTAMP`,
+            [sessionId, unitId, graded.score, graded.maxScore],
+            false,
+          )
+        }
       }
-      score += graded.score
-      maxScore += graded.maxScore
-      await db.run(
-        `INSERT INTO practice_unit_submissions
-          (session_id, unit_id, score, max_score, sync_id, updated_at)
-         VALUES (?, ?, ?, ?, lower(hex(randomblob(16))), CURRENT_TIMESTAMP)
-         ON CONFLICT(session_id, unit_id) DO UPDATE SET
-           score = excluded.score, max_score = excluded.max_score, updated_at = CURRENT_TIMESTAMP`,
-        [sessionId, unitId, graded.score, graded.maxScore],
+      const updated = await db.run(
+        `UPDATE practice_sessions SET
+           status = 'submitted', submitted_at = CURRENT_TIMESTAMP,
+           score = ?, max_score = ?, submission_request_id = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND status = 'active'`,
+        [
+          score,
+          maxScore,
+          String(options.submissionRequestId || session.submission_request_id || ''),
+          sessionId,
+        ],
         false,
       )
-    }
-    await db.run(
-      `UPDATE practice_sessions SET
-         status = 'submitted', submitted_at = CURRENT_TIMESTAMP,
-         score = ?, max_score = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [score, maxScore, sessionId],
-      false,
-    )
-  })
+      // Capacitor 返回 { changes: { changes } }，node:sqlite 返回 { changes: 数值 }。
+      const updatedChanges = (updated as { changes?: number | { changes?: number } })?.changes
+      const changed = typeof updatedChanges === 'number'
+        ? updatedChanges
+        : Number(updatedChanges?.changes ?? 0)
+      if (!changed) {
+        // 并发重复提交：另一方已完成提交，放弃本次判分并返回已保存结果。
+        throw new ConcurrentSubmitError()
+      }
+    })
+  } catch (error) {
+    if (error instanceof ConcurrentSubmitError) return await getSession(sessionId)
+    throw error
+  }
   return getSession(sessionId)
 }
 

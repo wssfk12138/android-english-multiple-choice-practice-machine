@@ -1527,6 +1527,10 @@ async function rawAndroidDatabase(): Promise<SQLiteDBConnection> {
         await db.execute('ALTER TABLE practice_sessions ADD COLUMN candidate_policy_version INTEGER NOT NULL DEFAULT 0')
         sessionColumns.add('candidate_policy_version')
       }
+      if (!sessionColumns.has('submission_request_id')) {
+        await db.execute("ALTER TABLE practice_sessions ADD COLUMN submission_request_id TEXT NOT NULL DEFAULT ''")
+        sessionColumns.add('submission_request_id')
+      }
       if (!sessionColumns.has('content_snapshot')) {
         await db.execute("ALTER TABLE practice_sessions ADD COLUMN content_snapshot TEXT NOT NULL DEFAULT '{}'")
         sessionColumns.add('content_snapshot')

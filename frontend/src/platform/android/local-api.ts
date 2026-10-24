@@ -166,7 +166,10 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   }
   params = match(pathname, /^\/practice\/sessions\/(\d+)\/units\/(\d+)\/submit$/)
   if (params && method === 'POST') {
-    const result = await submitUnit(Number(params[1]), Number(params[2]))
+    const result = await submitUnit(Number(params[1]), Number(params[2]), {
+      allowUnanswered: Boolean(body?.allow_unanswered),
+      submissionRequestId: String(body?.submission_request_id || ''),
+    })
     notifyLocalChange()
     return result as T
   }
@@ -174,7 +177,10 @@ export async function androidLocalApi<T>(path: string, options: RequestInit = {}
   if (params && method === 'POST') return await abandonIfEmpty(Number(params[1])) as T
   params = match(pathname, /^\/practice\/sessions\/(\d+)\/submit$/)
   if (params && method === 'POST') {
-    const result = await submitSession(Number(params[1]))
+    const result = await submitSession(Number(params[1]), {
+      allowUnanswered: Boolean(body?.allow_unanswered),
+      submissionRequestId: String(body?.submission_request_id || ''),
+    })
     notifyLocalChange()
     return result as T
   }

@@ -18,6 +18,7 @@ import { get, post } from '../api'
 import { confirmDialog } from '../platform/dialogs'
 import { useAndroidLandscape } from '../composables/useAndroidLandscape'
 import { wrongListReturn } from '../services/wrongListReturn'
+import SafeMarkdown from '../components/SafeMarkdown.vue'
 
 type RetryRound = {
   id: number
@@ -321,7 +322,7 @@ async function archive(unitIds: number[]) {
         <strong>{{ analysisAggregate.question_count }} 道错题参与本次匿名诊断</strong>
         <div v-for="category in analysisAggregate.categories" :key="category.code" class="wrong-analysis-category"><span>{{ category.label }}</span><span>{{ category.count }} 道 · {{ category.percentage }}%</span></div>
       </div>
-      <div class="wrong-analysis-copy">{{ analysis }}</div>
+      <div class="wrong-analysis-copy"><SafeMarkdown :text="analysis" /></div>
       <p v-if="analysisNote" class="wrong-analysis-cache-note">{{ analysisNote }}</p>
     </section>
 

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, RefreshCw } from 'lucide-vue-next'
 import { get, post } from '../api'
 import { wrongAnalysisSession } from '../services/wrongAnalysisSessions'
+import SafeMarkdown from '../components/SafeMarkdown.vue'
 const route = useRoute(), router = useRouter()
 const unitId = Number(route.params.unitId)
 const reports = ref<any[]>([]), selected = ref(0), unit = ref<any>(null)
@@ -54,7 +55,7 @@ onMounted(async () => {
       <p v-if="!report && !error">尚无分析记录。点击“开始分析”生成并保存报告。</p>
       <p class="muted" v-if="locked">完成这篇错题的下一次正式重做后，才能重新分析。历史记录可随时查看。</p>
     </section>
-    <section v-if="report" class="card analysis-record analysis-report"><h2>{{ report.scope_title || '完整分析报告' }}</h2><small>{{ time(report.created_at) }} · {{ report.model_name }}</small><div v-if="report.aggregate?.categories?.length" class="analysis-categories"><div v-for="category in report.aggregate.categories" :key="category.code"><span>{{ category.label }}</span><strong>{{ category.count }} 道 · {{ category.percentage }}%</strong></div></div><div class="analysis-full-report">{{ report.report }}</div></section>
+    <section v-if="report" class="card analysis-record analysis-report"><h2>{{ report.scope_title || '完整分析报告' }}</h2><small>{{ time(report.created_at) }} · {{ report.model_name }}</small><div v-if="report.aggregate?.categories?.length" class="analysis-categories"><div v-for="category in report.aggregate.categories" :key="category.code"><span>{{ category.label }}</span><strong>{{ category.count }} 道 · {{ category.percentage }}%</strong></div></div><div class="analysis-full-report"><SafeMarkdown :text="report.report" /></div></section>
   </div>
 </template>
 <style scoped>
