@@ -686,7 +686,11 @@ onBeforeRouteLeave(async () => {
     }
   }
 })
-onBeforeRouteUpdate(async () => {
+onBeforeRouteUpdate(async (to) => {
+  // 弹层历史返回（overlay-history 的 dispose 会 history.back() 到同 URL）以及
+  // 其它同会话路由更新都不是离开练习；此时暂停计时/标记离开会误伤后续交卷。
+  // 只有切换到不同会话才执行离开清理。
+  if (String(to?.params?.id ?? '') === String(route.params.id ?? '')) return
   pageLeaving.value = true
   pausePracticeAutomatically()
   await flushVocabularyOnPracticeExit()
