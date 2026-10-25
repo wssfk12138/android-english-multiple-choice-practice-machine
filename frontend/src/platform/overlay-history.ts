@@ -30,9 +30,10 @@ export function pushOverlayHistory(onClose: () => void): OverlayHistoryHandle {
       if (closed) return
       closed = true
       window.removeEventListener('popstate', onPop)
-      // 只在栈顶仍是本弹层记录时回退，避免吞掉用户自己的导航。
+      // 界面按钮关闭时只撤掉标记，不触发历史回退：回退会取消仍在进行中的
+      // 路由导航（例如确认退出后前往题库），导致页面停在原处并再次弹框。
       if (window.history.state && window.history.state.linjianOverlay === marker.linjianOverlay) {
-        window.history.back()
+        window.history.replaceState(null, '')
       }
     },
   }

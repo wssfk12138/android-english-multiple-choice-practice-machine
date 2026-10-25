@@ -519,7 +519,8 @@ function pauseTimer() {
   state.startedAt = null
   state.mode = 'paused'
   timerNow.value = now
-  listeningPlayer.value?.pause()
+  // 播放器可能因单元切换/卸载暂不可用；计时暂停不能中断退出导航。
+  try { listeningPlayer.value?.pause?.() } catch { /* 退出不因音频异常被阻断 */ }
   persistTimer()
 }
 
