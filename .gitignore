@@ -33,6 +33,10 @@ outputs/
 *.jks
 *.keystore
 signing.properties
+*.apk
+release-check/
+release-notes.txt
+android-update.json
 work/internal-channel/
 outputs/internal-channel/
 
