@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import NamedModelKeys from '../components/NamedModelKeys.vue'
+import FeedbackButton from '../components/FeedbackButton.vue'
 import { saveModelVisibility, retryModelVisibility, visibilitySaveStates, intendedModelVisibility } from '../services/profileDrafts'
 import { useAndroidLandscape } from '../composables/useAndroidLandscape'
 import { preferDefaultProfile, profileDrafts, profileSaveStates, saveProfileDraft, flushProfileDraft, forgetProfileDraft, profileHasDraft, serializeProfileOperation } from '../services/profileDrafts'
@@ -12,7 +13,6 @@ import {
   CirclePlus,
   Eye,
   EyeOff,
-  ExternalLink,
   LoaderCircle,
   MoreHorizontal,
   RefreshCw,
@@ -556,7 +556,7 @@ onMounted(() => {
       </div>
       <div class="settings-about-actions">
         <RouterLink class="button secondary" to="/help"><BookOpen :size="16" />使用帮助</RouterLink>
-        <a class="button ghost" href="https://xiaoheihe.cn/creator/content_management/detail/187311918" target="_blank" rel="noopener noreferrer"><ExternalLink :size="16" />问题反馈</a>
+        <FeedbackButton />
       </div>
     </section>
   </div>
