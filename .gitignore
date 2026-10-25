@@ -56,3 +56,4 @@ docs/workflow.md
 docs/20??-??-??-*.md
 docs/vocabulary-layout.md
 __pycache__/
+release-out/
