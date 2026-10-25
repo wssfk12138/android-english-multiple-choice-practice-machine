@@ -1,7 +1,7 @@
 {
   "name": "english-multiple-choice-practice-machine-android",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Android 本地英语选择题训练、错题复习、单词记忆与 AI 学习辅助应用",
   "author": "往事随风k",
   "license": "GPL-3.0-only",
