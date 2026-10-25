@@ -14,68 +14,82 @@
     <a href="docs/update-manifest.md">更新清单格式</a> ·
     <a href="LICENSE">GPL-3.0-only</a>
   </p>
+
+  <p>
+    <a href="https://linux.do/" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/badge/LINUX-DO-FFB003.svg?logo=data:image/svg%2bxml;base64,DQo8c3ZnIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiPjxwYXRoIGQ9Ik00Ni44Mi0uMDU1aDYuMjVxMjMuOTY5IDIuMDYyIDM4IDIxLjQyNmM1LjI1OCA3LjY3NiA4LjIxNSAxNi4xNTYgOC44NzUgMjUuNDV2Ni4yNXEtMi4wNjQgMjMuOTY4LTIxLjQzIDM4LTExLjUxMiA3Ljg4NS0yNS40NDUgOC44NzRoLTYuMjVxLTIzLjk3LTIuMDY0LTM4LjAwNC0yMS40M1EuOTcxIDY3LjA1Ni0uMDU0IDUzLjE4di02LjQ3M0MxLjM2MiAzMC43ODEgOC41MDMgMTguMTQ4IDIxLjM3IDguODE3IDI5LjA0NyAzLjU2MiAzNy41MjcuNjA0IDQ2LjgyMS0uMDU2IiBzdHlsZT0ic3Ryb2tlOm5vbmU7ZmlsbC1ydWxlOmV2ZW5vZGQ7ZmlsbDojZWNlY2VjO2ZpbGwtb3BhY2l0eToxIi8+PHBhdGggZD0iTTQ3LjI2NiAyLjk1N3EyMi41My0uNjUgMzcuNzc3IDE1LjczOGE0OS43IDQ5LjcgMCAwIDEgNi44NjcgMTAuMTU3cS00MS45NjQuMjIyLTgzLjkzIDAgOS43NS0xOC42MTYgMzAuMDI0LTI0LjM4N2E2MSA2MSAwIDAgMSA5LjI2Mi0xLjUwOCIgc3R5bGU9InN0cm9rZTpub25lO2ZpbGwtcnVsZTpldmVub2RkO2ZpbGw6IzE5MTkxOTtmaWxsLW9wYWNpdHk6MSIvPjxwYXRoIGQ9Ik03Ljk4IDcwLjkyNmMyNy45NzctLjAzNSA1NS45NTQgMCA4My45My4xMTNRODMuNDI2IDg3LjQ3MyA2Ni4xMyA5NC4wODZxLTE4LjgxIDYuNTQ0LTM2LjgzMi0xLjg5OC0xNC4yMDMtNy4wOS0yMS4zMTctMjEuMjYyIiBzdHlsZT0ic3Ryb2tlOm5vbmU7ZmlsbC1ydWxlOmV2ZW5vZGQ7ZmlsbDojZjlhZjAwO2ZpbGwtb3BhY2l0eToxIi8+PC9zdmc+" alt="LINUX DO 社区"></a>
+    <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android 8.0+">
+    <img src="https://img.shields.io/badge/version-1.0.1-2563EB?style=flat-square" alt="1.0.1">
+    <img src="https://img.shields.io/badge/privacy-local--first-16A34A?style=flat-square" alt="Local first">
+    <img src="https://img.shields.io/badge/license-GPL--3.0--only-7C3AED?style=flat-square" alt="GPL-3.0-only">
+  </p>
+
+  <p>
+    <a href="#sponsor"><img src="docs/assets/fastai-sponsor.svg" alt="FastAI 模型赞助商"></a>
+    <a href="#support"><img src="https://img.shields.io/badge/%E8%B5%9E%E5%8A%A9%E6%9C%AC%E9%A1%B9%E7%9B%AE-%E5%BE%AE%E4%BF%A1-07C160.svg?logo=wechat&logoColor=white" alt="微信赞助本项目"></a>
+  </p>
 </div>
 
-> 如果你正在寻找稳定、实惠的 AI 模型中转服务，可以试试 [FastAiToken](https://www.fastaitoken.com/register?aff=BF9KNKFHX725)，也可以先阅读[中转站新手帮助文档](https://github.com/wssfk12138/fastaitoken-beginner-guide)了解中转站、倍率、计费和使用方式。你在 FastAiToken 中的每一笔消费都会让作者获得一定数量的返利，我会把它转化为 Token，继续开发更多新项目并上传至 GitHub。当前所有项目均使用了 FastAiToken 提供的 5.6 Sol 模型参与开发。**注册后点击右上角用户头像前往QQ客服群@群主可领3刀试用金（需提供用户id，暗号：GitHub来的）。** <a href="https://www.fastaitoken.com/register?aff=BF9KNKFHX725" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/badge/FastAI-%E7%82%B9%E5%87%BB%E6%B3%A8%E5%86%8C-4F7CFF.svg?logo=data%3Aimage%2Fpng%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAABYlAAAWJQFJUiTwAAABmUlEQVRYw%2B2Vv0tbURTHP%2BfmvcS8lx%2BYKrZ16modFbQiKrgWuujQpZtgqV3s0rGT4N9Q6NJBM0nWUoe6uSj4BxQKUnBSSPISk3tPB1%2BhS42JFqHcD1wuXM79fs89HM4Fj8fjuWdk4Jubl9PEUiEC4nSV0r0cQATkgBIHjEvzbzLBIN7mrd11JVkBoJgeZgSMghGw%2Bjv0kHEzc61W3%2B7r3Zcuk5oDNP8oogKamlvp0O6u95LrrwKvtYDRbQRoiSWrX7DawoniABVQFVTbtOwn5rJHd5uA7c6SMd8QA44aH8zO%2FTThG30sea1qzCMKQCFtwBJIkZ8ayxJT0rmJ1EBNSKAf1fCMDCAComn5QRP7noWgc2OpnhFrGrKM45in1NsJJtxgSBYIFIQGqidYFIslcXs8D6p9vaVnxESjwlk8ghAR5baARbKaJycK3Re8C7%2FepgeuT6CaPMENhZzbScZkngszSaB5ALLuM5u3M%2B89B1bz36%2FMkn0i84BRflDGMkyN0Gz8%2B1FcrT%2Fkst3EVoq8klP%2Fc3k8Hs9%2FyS8IrHi9DaVvuAAAAABJRU5ErkJggg%3D%3D" alt="fastai 点击注册"></a>
+英语刷题机 Android 是 Windows 版的独立发行项目。它把题库、模型和练习记录留在本机，让你导入自己的题库、接入自己选择的模型，再用完整篇目、打乱选项和错题重做，把有限的真题反复练出新鲜感。
 
-英语刷题机 Android 是 Windows 版英语刷题机的独立发行项目。它的核心卖点是：用户可以导入和分享自己的题库，接入自己选择的大模型，并通过打乱选项、整篇练习和错题重做，让有限的真题保持“自由刷题”的新鲜感，而不是反复背答案。
+## 下载 1.0.1
 
-## Android 版的重点：为竖屏和大屏重新设计
+| 平台 | 版本 | 获取方式 |
+| --- | --- | --- |
+| Android 手机 / 平板 | 1.0.1 | [下载 APK](https://github.com/wssfk12138/android-english-multiple-choice-practice-machine/releases/download/v1.0.1/english-practice-machine-android-1.0.1.apk) · [Release 说明](https://github.com/wssfk12138/android-english-multiple-choice-practice-machine/releases/tag/v1.0.1) |
+| Windows 10 / 11 | 1.0.1 | [安装包](https://github.com/wssfk12138/english-multiple-choice-practice-machine/releases/download/v1.0.1/EnglishPracticeMachinePublic-1.0.1-Setup.exe) · [免安装 ZIP](https://github.com/wssfk12138/english-multiple-choice-practice-machine/releases/download/v1.0.1/english-practice-machine-windows.zip) |
 
-Android 版不是把桌面页面缩小到手机上，而是根据窗口宽度切换交互密度。平板大屏采用横屏双栏；手机或窄窗口采用竖屏信息架构，也支持平板分屏。
+> **1.0.1 修复**：在计时模式、听力单元且尚未作答时退出练习，确认“继续退出”后页面会停留在原处、无法离开。现在可以正常返回题库，Windows 与 Android 两端均已修复。
 
-- **四项底部导航**：首页、笔记、AI、设置。错题本与单词本集中在笔记入口，导入、回收站、更新、帮助和模型配置集中在设置。
-- **首页按当前题库动态显示**：顶部切换题库，下面只显示当前题库实际存在的听力、完形、阅读、Part B 入口；没有听力时不会显示听力入口。试卷列表只显示试卷名称，词汇回顾以五秒一组上下翻页。
-- **竖屏练习上下分区**：上方文章或听力控制区、下方题目与选项区，两个区域独立滚动；中间分隔条可以拖动，按阅读需要调整上下占比。
-- **横屏练习双栏**：左侧文章/材料，右侧题目和选项；听力使用完整音轨和紧凑播放器。计时模式锁定音频进度，非计时模式允许拖动。
-- **横竖屏统一主题**：亮色模式使用米白宣纸纤维纹理，暗色模式使用蓝紫油画星空；手机与平板共用同一组 4K 背景并按窗口居中裁切，文章、选项、弹窗和 AI 消息继续使用高不透明度表面保证可读性。详见 [背景资源说明](docs/ui-background-assets.md)。
-- **紧凑工具栏**：退出、计时/暂停、答题卡和更多操作使用图标按钮，答题卡从顶部打开抽屉，底部集中显示单篇提交和整卷提交，避免挤压选项区域。
-- **笔记界面**：错题本按题库配置 → 年份 → 篇目组织，单词本跨题库共享；设置页收纳显示偏好和回收站。
-- **AI 对话**：竖屏时对话填充导航栏与系统状态栏之间的区域，顶部只保留当前对话名称和历史入口，模型选择器靠近发送按钮，长消息不会撑宽页面。
+Android 安装包要求 Android 8.0 或更高版本。覆盖安装会保留本地题库与学习记录；首次从其他签名版本切换时，可能需要先卸载旧包。应用内“检查更新”会校验文件大小和 SHA-256，再交给系统安装器确认。
+
+## 横屏与竖屏，各用各的布局
+
+Android 版没有把桌面页面直接缩小。它会根据窗口宽度和屏幕方向切换信息密度：平板横屏使用侧栏与双栏练习，手机和窄窗口使用竖屏信息架构，也支持平板分屏。
+
+- **四项底部导航**：首页、笔记、AI、设置。错题本和单词本集中在笔记，导入、回收站、更新和模型配置集中在设置。
+- **首页跟着题库变化**：只显示当前题库真实存在的听力、完形、阅读和 Part B 入口；试卷列表只显示名称，词汇回顾每五秒翻一组。
+- **竖屏练习上下分区**：上方文章或听力控制，下方题目与选项，两区独立滚动；中间分隔条可以拖动。
+- **横屏练习双栏**：左侧文章或材料，右侧题目和选项；听力使用完整音轨和紧凑播放器。
+- **统一主题**：亮色为米白宣纸纹理，暗色为蓝紫油画星空；手机与平板共用 4K 背景并按窗口居中裁切。
+- **紧凑工具栏**：退出、计时、答题卡和更多操作使用图标按钮；答题卡从顶部打开，提交按钮集中在底部。
+- **问题反馈就在手边**：设置里的“帮助与关于”和“更新与远程题库”都提供问题反馈按钮，更新页同时保留 GitHub 项目入口。
 
 ## 界面预览
 
-下面的截图来自当前 Android 竖屏版，展示从开始练习到复习、AI 对话和设置的主要使用路径。
+横屏图取自电脑端实机运行画面，与 Android 平板横屏共用侧栏和双栏布局；竖屏图来自 Android 1.0.1 实机，已裁去系统状态栏与系统导航栏。画面只展示界面与数量概览，不含题目内容、API Key、同步口令或数据库文件。
 
-### 首页与练习
+### 横屏
 
 <table>
   <tr>
-    <td align="center"><img src="docs/images/readme/home-main.jpg" alt="首页主界面" width="49%"><br>首页主界面</td>
-    <td align="center"><img src="docs/images/readme/home-paper-list.jpg" alt="首页试卷列表" width="49%"><br>首页试卷列表</td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/images/readme/practice-reading.jpg" alt="阅读题答题界面" width="49%"><br>阅读题答题</td>
-    <td align="center"><img src="docs/images/readme/practice-part-b-ordering.jpg" alt="Part B 段落排序练习" width="49%"><br>Part B 段落排序</td>
+    <td align="center"><img src="docs/images/readme/landscape-home.webp" alt="横屏首页" width="100%"><br><sub>首页 · 侧栏与学习概览</sub></td>
+    <td align="center"><img src="docs/images/readme/landscape-imports.webp" alt="横屏导入题库" width="100%"><br><sub>导入题库 · 文档、ESQ 与题库导出</sub></td>
   </tr>
 </table>
 
-### 笔记与词汇
+### 竖屏
 
 <table>
   <tr>
-    <td align="center"><img src="docs/images/readme/notes-overview.jpg" alt="笔记入口" width="31%"><br>笔记入口</td>
-    <td align="center"><img src="docs/images/readme/wrong-answers.jpg" alt="错题本" width="31%"><br>错题本</td>
-    <td align="center"><img src="docs/images/readme/vocabulary-main.jpg" alt="单词本主界面" width="31%"><br>单词本</td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/images/readme/vocabulary-meaning.jpg" alt="单词释义" width="31%"><br>单词释义</td>
-    <td align="center"><img src="docs/images/readme/vocabulary-relations.jpg" alt="同义词反义词与形近词辨析" width="31%"><br>词汇辨析</td>
-    <td></td>
-  </tr>
-</table>
-
-### AI 与设置
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/images/readme/ai-chat.jpg" alt="AI 助手对话" width="31%"><br>AI 助手对话</td>
-    <td align="center"><img src="docs/images/readme/ai-history.jpg" alt="AI 历史对话" width="31%"><br>历史对话</td>
-    <td align="center"><img src="docs/images/readme/settings.jpg" alt="设置界面" width="31%"><br>设置</td>
+    <td align="center"><img src="docs/images/readme/portrait-home.webp" alt="竖屏首页" width="100%"><br><sub>首页</sub></td>
+    <td align="center"><img src="docs/images/readme/portrait-notes.webp" alt="竖屏笔记" width="100%"><br><sub>笔记</sub></td>
+    <td align="center"><img src="docs/images/readme/portrait-settings.webp" alt="竖屏设置与问题反馈" width="100%"><br><sub>设置与问题反馈</sub></td>
+    <td align="center"><img src="docs/images/readme/portrait-updates.webp" alt="竖屏更新与远程题库" width="100%"><br><sub>更新与 GitHub 入口</sub></td>
   </tr>
 </table>
 
 ## 功能
+
+| 模块 | 你能做什么 |
+| --- | --- |
+| 题库与导入 | 导入 ESQ 1.0/1.1、DOC、DOCX、文本型 PDF 和听力音频；模型只改结构化草稿，逐字段校对后才入库 |
+| 练习与判分 | 按年份或随机整篇练习；完形、阅读、Part B、四六级选词填空和段落匹配；选项可打乱，判分使用稳定键 |
+| 计时与断点 | 可选计时与暂停；未答题会定位到第一道空缺；未完成会话可在下次继续，断点按题库、篇目和题目集合匹配 |
+| 错题本 | 按题库、年份、篇目组织；保留选择历史、高频错题和重做记录；分析结果本地缓存，重做后才允许更新 |
+| 单词本 | 文章、题干、选项中长按取词；普通释义与语境释义分开展示；支持复习、编辑、重试翻译和同义/反义/形近词辨析 |
+| AI 助手 | 多 API 配置、模型拉取与切换、学习问答、单词翻译、错题建议、导入校正和题目标注；支持四张图片附件 |
+| 本地数据 | 题库、练习、错题、单词、聊天和配置保存在本机；API Key 由 Android Keystore/AES-GCM 保护 |
+| 更新与隐私 | 检查 GitHub Release，校验大小与 SHA-256 后交给系统安装；诊断日志只在本机保留，支持脱敏导出 |
 
 ### 题库与导入
 
@@ -123,13 +137,13 @@ Android 版不是把桌面页面缩小到手机上，而是根据窗口宽度切
 - 可与同一局域网中的 Windows 版同步练习、错题和单词本等学习记录；题库内容仍通过 ESQ 单独交换。
 - Windows 同步主机默认关闭。用户在 Windows 端启用并生成口令后，Android 才能配对；每次握手都必须提交当前口令，口令轮换会立即作废旧令牌，设备也可显式撤销后重新配对。
 - 同步按所选题库配置隔离，使用增量游标、删除墓碑和整批事务合并；网络中断可在恢复后继续，同一对象冲突按最后更新时间裁决。
-- 地址、口令和设备令牌只保存在用户本机，不写入应用默认配置或题库分享包。当前候选联调使用临时 SQLite、随机回环端口和 Windows 真实 HTTP 接口，已覆盖双端新增、冲突、删除、断网恢复、配置隔离、增量游标、失败批次回滚、口令轮换、撤销与重新配对。
+- 地址、口令和设备令牌只保存在用户本机，不写入应用默认配置或题库分享包。
 
 ### 更新与隐私
 
 - 点击检查更新后，系统使用 GitHub Release 官方清单；受控 HTTPS 镜像只可由发布构建显式配置，并按顺序自动回退，源码默认镜像列表为空。
 - 下载包必须通过文件大小和 SHA-256 校验，再交给 Android 系统安装确认；应用不会静默安装。
-- 程序更新、官方题库链和用户填写的第三方题库目录彼此隔离；第三方目录不会成为官方回退源。当前尚无可发布的官方远程题库目录或受控镜像，应用不会伪造地址，用户填写项默认留空。
+- 程序更新、官方题库链和用户填写的第三方题库目录彼此隔离；第三方目录不会成为官方回退源。
 - 诊断日志最多保留 50 条且只在本机保存，支持脱敏查看、复制、导出和系统分享；学习历史诊断只输出数量与完整性类别，不包含题库名、题目、答案、词汇或同步标识，也没有自动上传接收端。
 - ESQ 包不含 API 配置、API Key、聊天记录、练习记录、错题本或单词本。
 
@@ -140,7 +154,7 @@ Android 版不是把桌面页面缩小到手机上，而是根据窗口宽度切
 | 考研英语（一）2002、2010–2026（v1.1.0） | `frontend/public/internal-question-bank.esq` | `faebfd9c415d889054b530598f4184f44c17981eaf52bdd0238068b6111d59ba` |
 | 考研英语（二）2010–2025（v1.1.2） | `frontend/public/internal-question-bank-english-two.esq` | `9fbf271a5243c8dd0042f9c501dd74e6865ce6639f458460982fe30c326e34c8` |
 
-两份题库均为考生回忆整理/本地导出内容，不代表官方试题发布。题库内容、答案和 AI 标签不自动继承程序代码的 GPL 许可，来源和传播权限以包内 `manifest.json` 为准，详情见 [默认题库清单](docs/bundled-question-banks.md)。
+更多四六级与考研题库可通过[独立题库仓库](https://github.com/wssfk12138/english-question-banks)获取。两份内置题库均为考生回忆整理/本地导出内容，不代表官方试题发布；题库内容、答案和 AI 标签不自动继承程序代码的 GPL 许可，来源和传播权限以包内 `manifest.json` 为准，详情见 [默认题库清单](docs/bundled-question-banks.md)。
 
 ## 从源码构建
 
@@ -159,8 +173,24 @@ Debug APK 输出在 `frontend/android/app/build/outputs/apk/debug/app-debug.apk`
 
 ## 项目边界
 
-Android 与 Windows 使用独立数据库、版本号、签名、提交历史和发布节奏；ESQ 是题库内容的兼容交换边界，可选局域网同步只传递允许的学习记录。Android 的文件导入与模型标注在设备端执行，具体能力受设备性能和用户配置的模型服务影响。当前生产构建、Capacitor 同步和 Debug APK 构建已通过；实体设备的完整兼容性仍需在正式发布前继续验收。
+Android 与 Windows 使用独立数据库、版本号、签名、提交历史和发布节奏；ESQ 是题库内容的兼容交换边界，可选局域网同步只传递允许的学习记录。Android 的文件导入与模型标注在设备端执行，具体能力受设备性能和用户配置的模型服务影响。
+
+<a id="sponsor"></a>
+<h2><img src="docs/assets/fastai-icon.png" alt="FastAI 图标" height="40" valign="middle"> FastAI 模型赞助商<br><sub><sup>免费不意味着开发没有成本。感谢 FastAI 的赞助，让功能对所有用户开放。</sup></sub></h2>
+
+如果你正在寻找稳定、实惠的 AI 模型中转服务，可以试试 [FastAI](https://www.fastaitoken.com/register?aff=BF9KNKFHX725&promo=WSSFK)。它提供 DeepSeek、GLM、Kimi、GPT、Claude、Grok 等模型厂商的旗舰模型，也提供图片和视频生成模型；国模分组采用大厂自部署模型，低延迟、高缓存，注册即送 3$ 体验金。
+
+本项目使用 FastAI 提供的模型参与开发。通过下方链接注册或充值，作者会获得返利，用于继续维护项目。 <a href="https://www.fastaitoken.com/register?aff=BF9KNKFHX725&amp;promo=WSSFK"><img src="docs/assets/fastai-register.svg" alt="FastAI 点击注册" height="18"></a>
+
+<a id="support"></a>
+<h2>赞助本项目<br><sub><sup>如果它帮你省下了一点整理题库的时间，欢迎请作者喝杯咖啡。</sup></sub></h2>
+
+<p align="center">
+  <img src="docs/assets/wechat-sponsor.png" alt="微信赞赏码" width="360">
+</p>
 
 ## 许可证与作者
 
 程序代码采用 GNU General Public License v3.0 only（`GPL-3.0-only`）。作者：往事随风k。
+
+题库、题目文本、答案、AI 标签和 ESQ 包可以有独立的来源与授权条件；使用或分享前，请确认自己拥有相应权利。
