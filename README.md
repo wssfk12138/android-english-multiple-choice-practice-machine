@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="frontend/public/assets/icons/brand-mark.png" alt="英语刷题机 Logo" width="96">
+  <img src="docs/images/cover.webp" alt="英语刷题机 Android封面" width="100%">
 
   # 英语刷题机 Android
 

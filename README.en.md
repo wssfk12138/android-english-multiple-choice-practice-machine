@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="frontend/public/assets/icons/brand-mark.png" alt="English Practice Machine logo" width="96">
+  <img src="docs/images/cover.webp" alt="English Practice Machine Android cover" width="100%">
 
   # English Practice Machine Android
 
