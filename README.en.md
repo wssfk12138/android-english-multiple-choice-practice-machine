@@ -178,9 +178,9 @@ Android and Windows have separate databases, version numbers, signing keys, hist
 <a id="sponsor"></a>
 <h2><img src="docs/assets/fastai-icon.png" alt="FastAI icon" height="40" valign="middle"> FastAI model sponsor<br><sub><sup>Free access does not mean development is free. Thanks to FastAI for keeping the features open to every user.</sup></sub></h2>
 
-If you are looking for a stable, affordable AI model relay, try [FastAI](https://www.fastaitoken.com/register?aff=BF9KNKFHX725&promo=WSSFK). It offers flagship models from DeepSeek, GLM, Kimi, GPT, Claude, Grok, and others, plus image and video generation models. Its domestic-model groups run on large-provider self-hosted deployments with low latency and high cache hit rates, and new accounts receive $3 in trial credit.
+If you are looking for a stable, affordable AI model relay, try [FastAI](https://www.fastaitoken.com/register?aff=BF9KNKFHX725&promo=WSSFK&utm=android-english-multiple-choice-practice-machine). It offers flagship models from DeepSeek, GLM, Kimi, GPT, Claude, Grok, and others, plus image and video generation models. Its domestic-model groups run on large-provider self-hosted deployments with low latency and high cache hit rates, and new accounts receive $3 in trial credit.
 
-This project uses models provided by FastAI during development. Registering or topping up through the link below earns the author a referral credit that supports continued maintenance. <a href="https://www.fastaitoken.com/register?aff=BF9KNKFHX725&amp;promo=WSSFK"><img src="docs/assets/fastai-register.svg" alt="FastAI sign up" height="18"></a>
+This project uses models provided by FastAI during development. Registering or topping up through the link below earns the author a referral credit that supports continued maintenance. <a href="https://www.fastaitoken.com/register?aff=BF9KNKFHX725&amp;promo=WSSFK&amp;utm=android-english-multiple-choice-practice-machine"><img src="docs/assets/fastai-register.svg" alt="FastAI sign up" height="18"></a>
 
 <a id="support"></a>
 <h2>Support this project<br><sub><sup>If it saved you some time organising question banks, you can buy the author a coffee.</sup></sub></h2>

@@ -178,9 +178,9 @@ Android 与 Windows 使用独立数据库、版本号、签名、提交历史和
 <a id="sponsor"></a>
 <h2><img src="docs/assets/fastai-icon.png" alt="FastAI 图标" height="40" valign="middle"> FastAI 模型赞助商<br><sub><sup>免费不意味着开发没有成本。感谢 FastAI 的赞助，让功能对所有用户开放。</sup></sub></h2>
 
-如果你正在寻找稳定、实惠的 AI 模型中转服务，可以试试 [FastAI](https://www.fastaitoken.com/register?aff=BF9KNKFHX725&promo=WSSFK)。它提供 DeepSeek、GLM、Kimi、GPT、Claude、Grok 等模型厂商的旗舰模型，也提供图片和视频生成模型；国模分组采用大厂自部署模型，低延迟、高缓存，注册即送 3$ 体验金。
+如果你正在寻找稳定、实惠的 AI 模型中转服务，可以试试 [FastAI](https://www.fastaitoken.com/register?aff=BF9KNKFHX725&promo=WSSFK&utm=android-english-multiple-choice-practice-machine)。它提供 DeepSeek、GLM、Kimi、GPT、Claude、Grok 等模型厂商的旗舰模型，也提供图片和视频生成模型；国模分组采用大厂自部署模型，低延迟、高缓存，注册即送 3$ 体验金。
 
-本项目使用 FastAI 提供的模型参与开发。通过下方链接注册或充值，作者会获得返利，用于继续维护项目。 <a href="https://www.fastaitoken.com/register?aff=BF9KNKFHX725&amp;promo=WSSFK"><img src="docs/assets/fastai-register.svg" alt="FastAI 点击注册" height="18"></a>
+本项目使用 FastAI 提供的模型参与开发。通过下方链接注册或充值，作者会获得返利，用于继续维护项目。 <a href="https://www.fastaitoken.com/register?aff=BF9KNKFHX725&amp;promo=WSSFK&amp;utm=android-english-multiple-choice-practice-machine"><img src="docs/assets/fastai-register.svg" alt="FastAI 点击注册" height="18"></a>
 
 <a id="support"></a>
 <h2>赞助本项目<br><sub><sup>如果它帮你省下了一点整理题库的时间，欢迎请作者喝杯咖啡。</sup></sub></h2>
