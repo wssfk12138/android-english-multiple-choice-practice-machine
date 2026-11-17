@@ -837,7 +837,9 @@ h2, h3 { margin: 0; }
 }
 
 @media (min-width: 600px) and (max-width: 1199px) {
-  html[data-platform="android"] .app-shell {
+  /* Practice pages hide the navigation rail, so they must not inherit its
+     76px first column; otherwise the main content is squeezed into it. */
+  html[data-platform="android"] .app-shell:not(.practice-shell) {
     display:grid;
     grid-template-columns:76px minmax(0,1fr);
     padding-bottom:0;
