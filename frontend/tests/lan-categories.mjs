@@ -34,7 +34,7 @@ const calls = []
 const lookup = {}
 const context = { exports: {}, ...rules,
   loadSerializationLookup: () => lookup,
-  handshake: async () => ({ token: 'test', base: 'https://test', tls: {}, modelKeys: true, profileFingerprint: profile, categories: enabled }),
+  handshake: async () => ({ token: 'test', base: 'https://test', tls: {}, modelKeys: true, partialSubmissions: true, profileFingerprint: profile, categories: enabled }),
   syncModelKeys: async () => { if (failure === 'models-only') throw Error('models rejected') },
   categoryScope: async () => `scope:${host}:`, syncSetting: async key => settings.get(key) || '',
   setSyncSetting: async (key, value) => { if (failure === 'persist') throw Error('persist'); settings.set(key, value) },

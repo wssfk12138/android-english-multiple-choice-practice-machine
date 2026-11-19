@@ -130,6 +130,18 @@ def handle(connection: sqlite3.Connection, action: str, args: dict) -> object:
         )
         connection.commit()
         return True
+    if action == "seed_blank_compat_bank":
+        unit = connection.execute("SELECT id, paper_id FROM units WHERE external_key='unit-1'").fetchone()
+        other_unit = connection.execute(
+            "INSERT INTO units(paper_id, unit_type, title, external_key, sequence) VALUES (?, 'reading', 'Open unit', 'unit-1b', 2)",
+            (unit["paper_id"],),
+        ).lastrowid
+        connection.executemany(
+            "INSERT INTO questions(unit_id, number, answer, score, external_key, sequence) VALUES (?, ?, 'A', 2, ?, ?)",
+            [(unit["id"], 1, "q-1", 1), (unit["id"], 2, "q-2", 2), (other_unit, 3, "q-3", 3)],
+        )
+        connection.commit()
+        return True
     if action == "query_session":
         row = connection.execute(
             "SELECT sync_id, updated_at FROM practice_sessions WHERE sync_id = ?",

@@ -12,6 +12,11 @@ import { classifyLanSyncError, LanSyncError } from './lan-sync-errors'
 import { secureStore } from '../secure-store'
 import { unreferencedRemoteSessionIds } from './lan-sync-compat'
 import {
+  PARTIAL_SUBMISSION_SYNC_MESSAGE,
+  legacyPartialSubmissionSessionsSql,
+  peerSupportsPartialSubmissions,
+} from './lan-sync-blank-compat'
+import {
   validateLanSyncHandshakeResponse,
   validateLanSyncPullResponse,
   validateLanSyncPushResponse,
@@ -70,6 +75,7 @@ type QueryDb = {
   query: (statement: string, values?: unknown[]) => Promise<{ values?: any[] }>
   run: (statement: string, values?: unknown[], transaction?: boolean) => Promise<any>
 }
+type ReadRows = <T>(statement: string, values?: unknown[]) => Promise<T[]>
 
 export const LAN_SYNC_TABLES = [
   'practice_sessions',
@@ -232,14 +238,14 @@ async function savePairingToken(host: string, token: string | null): Promise<voi
   else await secureStore.remove(pairingStorageKey(host))
 }
 
-export async function localProfileNames(): Promise<string[]> {
-  const items = await rows<{ name: string }>(
+export async function localProfileNames(read: ReadRows = rows): Promise<string[]> {
+  const items = await read<{ name: string }>(
     'SELECT name FROM question_bank_profiles WHERE deleted_at IS NULL ORDER BY id',
   )
   return items.map(item => String(item.name)).filter(name => name)
 }
 
-async function handshake(): Promise<{ token: string; base: string; profileFingerprint: string; categories: LanCategory[]; tls?: LanTlsIdentity; modelKeys?: boolean; modelSnapshot?: boolean }> {
+async function handshake(): Promise<{ token: string; base: string; profileFingerprint: string; categories: LanCategory[]; tls?: LanTlsIdentity; modelKeys?: boolean; modelSnapshot?: boolean; partialSubmissions: boolean }> {
   const categories = await selectedCategories()
   const host = await syncSetting('lan_sync_host')
   const passcode = await syncSetting('lan_sync_passcode')
@@ -279,6 +285,7 @@ async function handshake(): Promise<{ token: string; base: string; profileFinger
     const effective = categoryAgreement(data, categories)
     await setSyncSetting(await categoryScope() + 'effective', JSON.stringify(effective))
     return { token, base, tls: trusted.tls, categories: effective, modelKeys: data.model_keys_version === 1, modelSnapshot: data.model_snapshot_version === 1,
+      partialSubmissions: peerSupportsPartialSubmissions(data.partial_submission_version),
       profileFingerprint: JSON.stringify([hostId, [...profiles].sort()]) }
   }
   const storedPairingToken = await loadPairingToken(base)
@@ -312,7 +319,9 @@ async function handshake(): Promise<{ token: string; base: string; profileFinger
   await setSyncSetting('lan_sync_passcode', '')
   const effective = categoryAgreement(response.data, categories)
   await setSyncSetting(await categoryScope() + 'effective', JSON.stringify(effective))
-  return { token, base, categories: effective, profileFingerprint: JSON.stringify([...profiles].sort()) }
+  return { token, base, categories: effective,
+    partialSubmissions: peerSupportsPartialSubmissions((response.data as JsonRecord)?.partial_submission_version),
+    profileFingerprint: JSON.stringify([...profiles].sort()) }
 }
 
 function parseUnitIds(value: unknown): number[] {
@@ -793,6 +802,7 @@ const LOOKUP_REFERENCE_QUERIES: Record<SyncReferenceKind, (placeholders: string)
 // to the previous full-table prefetch, without holding every bank row in
 // memory while the database grows.
 class IncrementalSerializationLookup {
+  constructor(private readonly read: ReadRows = rows) {}
   private readonly stableKeys: Record<SyncReferenceKind, Map<number, string>> = {
     paper: new Map(),
     unit: new Map(),
@@ -818,7 +828,7 @@ class IncrementalSerializationLookup {
     for (let offset = 0; offset < wanted.length; offset += 400) {
       const part = wanted.slice(offset, offset + 400)
       const placeholders = part.map(() => '?').join(', ')
-      for (const reference of await rows<SerializationReferenceRow>(LOOKUP_REFERENCE_QUERIES[kind](placeholders), part)) {
+      for (const reference of await this.read<SerializationReferenceRow>(LOOKUP_REFERENCE_QUERIES[kind](placeholders), part)) {
         this.stableKeys[kind].set(Number(reference.id), String(reference.stable_key || ''))
         if (kind === 'paper' || kind === 'unit' || kind === 'question') {
           this.profiles[kind].set(Number(reference.id), String(reference.profile_name || ''))
@@ -913,26 +923,31 @@ function parseTombstoneCursor(raw: string): { deleted_at?: string, rowid?: numbe
   }
 }
 
-async function collectLocalChanges(cursor: SyncCursor, tables: readonly string[] = LAN_SYNC_TABLES, lookupLoader: IncrementalSerializationLookup = loadSerializationLookup()): Promise<{
+async function collectLocalChanges(cursor: SyncCursor, tables: readonly string[] = LAN_SYNC_TABLES,
+  lookupLoader: IncrementalSerializationLookup = loadSerializationLookup(),
+  read: ReadRows = rows, excludedSessions?: ReadonlySet<number>): Promise<{
   changes: Record<string, JsonRecord[]>
   cursor: SyncCursor
 }> {
   const changes: Record<string, JsonRecord[]> = {}
   const nextCursor: SyncCursor = { ...cursor }
-  const profileNames = await localProfileNames()
+  const profileNames = await localProfileNames(read)
   const profiles = new Set(profileNames)
   for (const table of tables) {
     const watermark = cursor[table] || { updated_at: '', rowid: 0 }
-    const items = await rows<JsonRecord>(
+    const items = await read<JsonRecord>(
       `SELECT rowid AS _sync_rowid, * FROM ${table}
        WHERE _sync_seq > ? ORDER BY _sync_seq`,
       [syncSequence(watermark)],
     )
-    const needed = tableReferenceIds(table, items)
+    const included = !excludedSessions?.size ? items : items.filter(item => !excludedSessions.has(
+      Number(table === 'practice_sessions' ? item.id : item.session_id),
+    ))
+    const needed = tableReferenceIds(table, included)
     for (const kind of TABLE_REFERENCE_KINDS[table] || []) await lookupLoader.ensure(kind, needed[kind])
     const lookup = lookupLoader.snapshot()
     const serialized: JsonRecord[] = []
-    for (const item of items) {
+    for (const item of included) {
       if (table === 'practice_sessions' && item.updated_at === DEPENDENCY_TIMESTAMP) continue
       const payload = await serializeLocalRow(table, item, lookup)
       const profile = String(payload.profile_name || '')
@@ -948,6 +963,18 @@ async function collectLocalChanges(cursor: SyncCursor, tables: readonly string[]
     changes[table] = serialized
   }
   return { changes, cursor: nextCursor }
+}
+
+async function collectLegacyPracticeChanges(cursor: SyncCursor, tables: readonly string[]) {
+  // Determine which sessions to keep local and read the outgoing rows from
+  // the same snapshot, even if the user submits while sync is running.
+  return transaction(async db => {
+    const read: ReadRows = async <T>(sql: string, values?: unknown[]) =>
+      ((await db.query(sql, values)).values || []) as T[]
+    const excluded = new Set((await read<{ id: number }>(legacyPartialSubmissionSessionsSql)).map(item => Number(item.id)))
+    const batch = await collectLocalChanges(cursor, tables, new IncrementalSerializationLookup(read), read, excluded)
+    return { ...batch, withheld: excluded.size > 0 }
+  }, { exclusive: true })
 }
 
 async function recoverPaperSessionUnitIds(
@@ -1256,13 +1283,14 @@ function refKind(table: string, column: string): string | null {
 }
 
 async function runLanSyncInternal(): Promise<JsonRecord> {
-  const { token, base, profileFingerprint, tls, categories, modelKeys } = await handshake()
+  const { token, base, profileFingerprint, tls, categories, modelKeys, partialSubmissions } = await handshake()
   const active = categories.filter(category => category !== 'question_bank')
     .sort((a, b) => Number(b === 'wrong') - Number(a === 'wrong'))
   if (!active.length) throw new LanSyncError('INVALID_CONFIGURATION', '双方没有启用可同步的学习类别；题库分发尚未开放', { retryable: false, pauseAuto: true })
   const scope = await categoryScope()
   const totals: JsonRecord = { pulled: {}, pushed: {}, pulled_tombstones: 0, pushed_tombstones: 0 }
   const failures: unknown[] = []
+  let warning = ''
   // One incremental lookup per sync run: batched prefetches memoize across
   // categories instead of re-reading every reference table each round.
   const lookupLoader = loadSerializationLookup()
@@ -1288,7 +1316,13 @@ async function runLanSyncInternal(): Promise<JsonRecord> {
       if (Object.keys(pulled.cursor).some(table => !tables.includes(table))) throw new Error('分类游标包含无关表')
       const ordered = Object.fromEntries(responseTables.filter(table => table in pulled.changes).map(table => [table, pulled.changes[table]]))
       await applyRemoteChanges(ordered, pulled.tombstones, category)
-      const localBatch = await collectLocalChanges(previous.local || {}, tables, lookupLoader)
+      const legacyPractice = category === 'practice' && !partialSubmissions
+      // A compatible host can accept previously withheld rows, including rows
+      // older than the last safe push. Replaying by stable ID is idempotent.
+      const replay = category === 'practice' && partialSubmissions && previous.withheldPartialSubmissions === true
+      const localBatch = legacyPractice
+        ? await collectLegacyPracticeChanges(previous.local || {}, tables)
+        : { ...await collectLocalChanges(replay ? {} : previous.local || {}, tables, lookupLoader), withheld: false }
       const deleted = await collectLocalTombstones(previous.localTombstone || {}, tables)
       if (category === 'wrong') {
         const dependencies = new Map<string, JsonRecord>()
@@ -1316,7 +1350,10 @@ async function runLanSyncInternal(): Promise<JsonRecord> {
       const applied = validateLanSyncPushResponse(pushResponse.data, responseTables)
       // One durable record advances both directions only after the category succeeds.
       await setSyncSetting(cursorKey, JSON.stringify({ profileFingerprint, remote: pulled.cursor,
-        remoteTombstone: pulled.tombstone_cursor, local: localBatch.cursor, localTombstone: deleted.cursor }))
+        remoteTombstone: pulled.tombstone_cursor, local: localBatch.cursor, localTombstone: deleted.cursor,
+        ...(legacyPractice && (localBatch.withheld || previous.withheldPartialSubmissions === true)
+          ? { withheldPartialSubmissions: true } : {}) }))
+      if (localBatch.withheld) warning = PARTIAL_SUBMISSION_SYNC_MESSAGE
       for (const [table, items] of Object.entries(pulled.changes)) totals.pulled[table] = (totals.pulled[table] || 0) + items.length
       for (const [table, count] of Object.entries(applied)) totals.pushed[table] = (totals.pushed[table] || 0) + count
       totals.pulled_tombstones += pulled.tombstones.length
@@ -1331,7 +1368,7 @@ async function runLanSyncInternal(): Promise<JsonRecord> {
   if (failures.length) throw failures[0]
   const last_sync_at = new Date().toISOString()
   await setSyncSetting('lan_sync_last_at', last_sync_at)
-  return { ...totals, last_sync_at }
+  return { ...totals, last_sync_at, ...(warning ? { warning } : {}) }
 }
 
 

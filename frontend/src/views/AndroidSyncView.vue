@@ -19,7 +19,7 @@ const lanSync = reactive({
   passcode: '',
   auto: false,
   configured: false,
-  runtime: { running: false, online: true, lastSyncAt: '', lastError: '', errorCode: '', autoPaused: false, nextRetryAt: '' },
+  runtime: { running: false, online: true, lastSyncAt: '', lastError: '', warning: '', errorCode: '', autoPaused: false, nextRetryAt: '' },
 })
 const scannerOpen = ref(false)
 const scannedPairing = ref<LanSyncQrPayload['pairing']>()
@@ -64,7 +64,7 @@ async function saveLanSync() {
       const syncResult: any = await post('/android/lan-sync/run')
       lanSync.runtime.lastSyncAt = String(syncResult.last_sync_at || '')
       lanSync.runtime.lastError = ''
-      notice.value = '已保存并连接到电脑，学习记录同步完成'
+      notice.value = syncResult.warning ? '已保存并连接到电脑，其他记录同步完成' : '已保存并连接到电脑，学习记录同步完成'
       await refreshLanSync()
     } catch (cause) {
       error.value = '设置已保存，但连接测试失败：' + String(cause)
@@ -104,7 +104,7 @@ async function runLanSyncNow() {
     const result: any = await post('/android/lan-sync/run')
     lanSync.runtime.lastSyncAt = String(result.last_sync_at || '')
     lanSync.runtime.lastError = ''
-    notice.value = '双方已启用的类别同步完成'
+    notice.value = result.warning ? '其他记录同步完成' : '双方已启用的类别同步完成'
     await refreshLanSync()
   } catch (cause) {
     error.value = `局域网同步失败：${String(cause)}`
@@ -219,6 +219,7 @@ async function saveAutoSync() {
       <p v-else-if="lanSync.runtime.autoPaused" class="warning">自动同步已暂停，请处理上述问题后手动同步</p>
       <p v-else-if="lanSync.runtime.nextRetryAt" class="sync-retry-hint">连接异常，{{ formatSyncTime(lanSync.runtime.nextRetryAt) }} 自动重试</p>
       <p v-if="lanSync.runtime.lastError" class="warning">上次错误：{{ lanSync.runtime.lastError }}</p>
+       <p v-if="lanSync.runtime.warning" class="warning">{{ lanSync.runtime.warning }}</p>
       </div></div>
     </section>
 

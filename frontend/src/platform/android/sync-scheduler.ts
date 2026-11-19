@@ -13,6 +13,7 @@ export type SyncState = {
   online: boolean
   lastSyncAt: string
   lastError: string
+  warning: string
   errorCode: LanSyncErrorCode | ''
   autoPaused: boolean
   nextRetryAt: string
@@ -25,6 +26,7 @@ let state: SyncState = {
   online: true,
   lastSyncAt: '',
   lastError: '',
+  warning: '',
   errorCode: '',
   autoPaused: false,
   nextRetryAt: '',
@@ -87,7 +89,7 @@ async function performSync(): Promise<any> {
     if (!online) throw new Error('设备当前离线，恢复网络后再同步')
     const result = await runLanSync()
     const at = String(result?.last_sync_at || new Date().toISOString())
-    setState({ lastSyncAt: at, lastError: '', errorCode: '', autoPaused: false, nextRetryAt: '' })
+    setState({ lastSyncAt: at, lastError: '', warning: String(result?.warning || ''), errorCode: '', autoPaused: false, nextRetryAt: '' })
     retryAttempt = 0
     if (retryTimer) clearTimeout(retryTimer)
     retryTimer = null

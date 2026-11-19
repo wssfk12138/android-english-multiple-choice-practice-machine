@@ -17,6 +17,7 @@ import {
   lookupStableKey,
 } from '../src/platform/android/lan-sync-serialization.ts'
 import { createSyncCoordinator } from '../src/platform/android/sync-coordinator.ts'
+import { openAndroidSyncFixture, seedAndroidSyncBank } from './fixtures/lan-sync-android-runtime.mjs'
 
 const TABLES = ['practice_sessions', 'vocabulary_entries']
 const testDir = path.dirname(fileURLToPath(import.meta.url))
@@ -281,6 +282,63 @@ try {
   assert.equal((await post(baseUrl, 'pull', { token, tables: [] })).status, 401)
   token = await handshake(baseUrl, newPasscode, ['Profile B'])
   assert.equal((await post(baseUrl, 'pull', { token, tables: [] })).status, 200, 'revoked device may pair again with the current passcode')
+
+  // The real Windows host is also the relay for older Android clients.
+  // Drive the Android production sync path and check what a second device can pull.
+  await host.rpc('seed_blank_compat_bank')
+  const categories = ['practice', 'vocabulary', 'wrong']
+  const android = await openAndroidSyncFixture({
+    settings: {
+      lan_sync_host: baseUrl, lan_sync_passcode: newPasscode, lan_sync_pairing_requested: '1',
+      lan_sync_device_id: 'blank-compat-new-android',
+      ['lan_sync_categories_v1:' + baseUrl + ':selected']: JSON.stringify(categories),
+    },
+    async post({ url, data }) {
+      const result = await post(baseUrl, new URL(url).pathname.split('/').at(-1), data)
+      if (result.status !== 200) throw new Error(JSON.stringify(result))
+      return { status: result.status, data: result.body }
+    },
+  })
+  try {
+    seedAndroidSyncBank(android.sqlite)
+    android.sqlite.exec(`
+      INSERT INTO practice_sessions(id, mode, paper_id, unit_ids, status, sync_id, updated_at) VALUES
+        (1, 'paper', 1, '[10,11]', 'submitted', 'partial-paper', '2031-03-03T00:00:00Z'),
+        (2, 'paper', 1, '[10,11]', 'active', 'partial-unit', '2031-03-03T00:00:00Z'),
+        (3, 'paper', 1, '[10]', 'submitted', 'complete-practice', '2031-03-03T00:00:00Z');
+      INSERT INTO practice_answers(session_id, question_id, user_answer, is_correct, sync_id, updated_at) VALUES
+        (1, 110, 'A', 1, 'paper-answered', '2031-03-03T00:00:00Z'),
+        (1, 111, '', NULL, 'paper-unanswered', '2031-03-03T00:00:00Z'),
+        (2, 110, 'A', 1, 'unit-answered', '2031-03-03T00:00:00Z'),
+        (2, 111, '', NULL, 'unit-unanswered', '2031-03-03T00:00:00Z'),
+        (3, 110, 'A', 1, 'complete-first', '2031-03-03T00:00:00Z'),
+        (3, 111, 'B', 0, 'complete-second', '2031-03-03T00:00:00Z');
+      INSERT INTO practice_unit_submissions(session_id, unit_id, score, max_score, sync_id, updated_at)
+        VALUES(2, 10, 2, 4, 'partial-unit-result', '2031-03-03T00:00:00Z');
+      INSERT INTO vocabulary_entries(term, normalized_term, updated_at)
+        VALUES('compat-sample', 'compat-sample', '2031-03-03T00:00:00Z');
+    `)
+    assert.match((await android.load('./lan-sync').runLanSync()).warning, /留空交卷.*升级/)
+    assert.equal(await host.rpc('query_session', { sync_id: 'partial-paper' }), null)
+    assert.equal(await host.rpc('query_session', { sync_id: 'partial-unit' }), null)
+    assert.ok(await host.rpc('query_session', { sync_id: 'complete-practice' }))
+    assert.ok(await host.rpc('query_vocab', { term: 'compat-sample' }))
+
+    const oldHandshake = await post(baseUrl, 'handshake', {
+      passcode: newPasscode, device_id: 'blank-compat-old-android', profile_names: ['Profile A'], categories: ['practice'],
+    })
+    assert.equal(oldHandshake.status, 200, JSON.stringify(oldHandshake.body))
+    const oldAndroid = oldHandshake.body.token
+    const practiceTables = ['practice_sessions', 'practice_answers', 'practice_unit_submissions']
+    const relayed = await post(baseUrl, 'pull', { token: oldAndroid, category: 'practice', tables: practiceTables, cursor: {} })
+    assert.equal(relayed.status, 200, JSON.stringify(relayed.body))
+    const relayedAnswers = validateLanSyncPullResponse(relayed.body, practiceTables).changes.practice_answers
+    assert.deepEqual(relayedAnswers.map(item => [item.sync_id, item.user_answer, Number(item.is_correct)]).sort(),
+      [['complete-first', 'A', 1], ['complete-second', 'B', 0]])
+    assert.equal(android.sqlite.prepare("SELECT COUNT(*) n FROM practice_answers WHERE user_answer = '' AND is_correct IS NULL").get().n, 2)
+  } finally {
+    android.sqlite.close()
+  }
 
   console.log('Android/Windows public candidate LAN sync integration: OK')
 } finally {

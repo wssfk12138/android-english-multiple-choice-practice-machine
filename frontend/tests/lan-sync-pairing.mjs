@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { webcrypto } from 'node:crypto'
 import vm from 'node:vm'
 import ts from 'typescript'
+import { peerSupportsPartialSubmissions } from '../src/platform/android/lan-sync-blank-compat.ts'
 
 const source = readFileSync(new URL('../src/platform/android/lan-sync.ts', import.meta.url), 'utf8')
 const code = ts.transpileModule(source + '\nexport { handshake };', {
@@ -55,6 +56,7 @@ function fixture() {
   }
   const modules = {
     './lan-categories': categories.exports,
+    './lan-sync-blank-compat': { peerSupportsPartialSubmissions },
     './lan-pairing': pairingContext.exports,
     './lan-recovery': recoveryContext.exports,
     './database': database,
