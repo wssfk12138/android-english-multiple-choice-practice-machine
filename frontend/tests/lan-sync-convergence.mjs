@@ -21,7 +21,7 @@ assert.ok(schema && transactionSource)
 async function fixture(legacy = false) {
   const sqlite = new DatabaseSync(':memory:')
   sqlite.exec(schema)
-  sqlite.exec("ALTER TABLE practice_sessions ADD COLUMN content_revisions TEXT NOT NULL DEFAULT '{}'; ALTER TABLE practice_sessions ADD COLUMN content_snapshot TEXT NOT NULL DEFAULT '{}'; ALTER TABLE practice_sessions ADD COLUMN snapshot_accepted_revision TEXT NOT NULL DEFAULT ''; ALTER TABLE practice_sessions ADD COLUMN candidate_policy_version INTEGER NOT NULL DEFAULT 0")
+  sqlite.exec("ALTER TABLE practice_sessions ADD COLUMN content_revisions TEXT NOT NULL DEFAULT '{}'; ALTER TABLE practice_sessions ADD COLUMN content_snapshot TEXT NOT NULL DEFAULT '{}'; ALTER TABLE practice_sessions ADD COLUMN snapshot_accepted_revision TEXT NOT NULL DEFAULT ''; ALTER TABLE practice_sessions ADD COLUMN candidate_policy_version INTEGER NOT NULL DEFAULT 0; ALTER TABLE practice_sessions ADD COLUMN submission_request_id TEXT NOT NULL DEFAULT ''")
   sqlite.exec('PRAGMA foreign_keys=ON')
   for (const table of ['practice_sessions', 'practice_answers', 'practice_answer_events', 'practice_unit_submissions', 'wrong_retry_rounds', 'wrong_retry_round_questions', 'wrong_current_questions']) {
     sqlite.exec('ALTER TABLE ' + table + ' ADD COLUMN sync_id TEXT')

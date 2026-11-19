@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 const practice = await readFile(new URL('../src/views/PracticeView.vue', import.meta.url), 'utf8')
 const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
 const practiceApi = await readFile(new URL('../src/platform/android/practice.ts', import.meta.url), 'utf8')
+const policyApi = await readFile(new URL('../src/platform/android/candidate-order-policy.ts', import.meta.url), 'utf8')
 
 assert.ok(practice.includes("|| unit?.unit_type === 'word_bank'"))
 assert.ok(practice.includes('function wordBankAnswerForBlank(number?: number)'))
@@ -18,7 +19,7 @@ assert.ok(styles.includes('html[data-platform="android"] .word-bank-passage-blan
 assert.ok(styles.includes('html[data-platform="android"] .word-bank-current'))
 assert.match(styles.replace(/\s+/g, ''), /grid-template-columns:repeat\(auto-fit,minmax\(120px,1fr\)\)/)
 assert.ok(styles.includes('min-height: 44px'))
-assert.ok(practiceApi.includes("['part_b', 'word_bank', 'paragraph_matching']"))
+assert.ok(policyApi.includes("['part_b', 'word_bank', 'paragraph_matching']"))
 assert.ok(practiceApi.includes('options.answerOrders?.get(question.id) || sharedCandidateOrder'))
 
 console.log('PASS word-bank passage interaction contract')

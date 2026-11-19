@@ -37,6 +37,8 @@ const unansweredNotice = ref('')
 const highlightedQuestionId = ref<number | null>(null)
 const resultPanelVisible = ref(false)
 const pendingSubmission = ref<'unit' | 'session' | null>(null)
+const pendingBlank = ref(false)
+const submissionRequestId = ref('')
 const answerCardVisible = ref(false)
 const portraitMoreVisible = ref(false)
 const resultPanelMode = ref<'unit' | 'session'>('unit')
@@ -752,6 +754,97 @@ function resultClass(question: any, option: any) {
   }
 }
 
+async function waitForPendingSaves() {
+  // 交卷前等当前答案保存落地，避免“保存中交卷”丢最后一题。
+  for (let attempt = 0; attempt < 50 && saving.value !== null; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+}
+
+function nextSubmissionRequestId() {
+  if (!submissionRequestId.value) {
+    submissionRequestId.value = `sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  }
+  return submissionRequestId.value
+}
+
+function questionResultText(question: any) {
+  const unitSubmitted = Boolean(activeUnit.value?.submission?.submitted || session.value?.status === 'submitted')
+  if (unitSubmitted && !String(question.user_answer || '').trim()) return '未作答'
+  return question.is_correct ? '回答正确' : '回答错误'
+}
+
+function questionResultStyle(question: any) {
+  const unitSubmitted = Boolean(activeUnit.value?.submission?.submitted || session.value?.status === 'submitted')
+  if (unitSubmitted && !String(question.user_answer || '').trim()) return {}
+  return { color: question.is_correct ? 'var(--success)' : 'var(--danger)' }
+}
+
+function allBlank(questions: any[]) {
+  return questions.every((question: any) => !String(question.user_answer || '').trim())
+}
+
+const pendingBlankStats = computed(() => {
+  const empty = { total: 0, answered: 0, unanswered: 0, affectedUnits: 0, allBlank: true }
+  if (!session.value || !pendingSubmission.value) return empty
+  if (pendingSubmission.value === 'unit') {
+    const questions = session.value.units[activeUnitIndex.value]?.questions || []
+    const unanswered = questions.filter((question: any) => !String(question.user_answer || '').trim()).length
+    return {
+      total: questions.length,
+      answered: questions.length - unanswered,
+      unanswered,
+      affectedUnits: 1,
+      allBlank: allBlank(questions),
+    }
+  }
+  const questions = session.value.units.flatMap((unit: any) => unit.questions || [])
+  const unanswered = questions.filter((question: any) => !String(question.user_answer || '').trim()).length
+  const affectedUnits = session.value.units.filter((unit: any) =>
+    (unit.questions || []).some((question: any) => !String(question.user_answer || '').trim()),
+  ).length
+  return {
+    total: questions.length,
+    answered: questions.length - unanswered,
+    unanswered,
+    affectedUnits,
+    allBlank: allBlank(questions),
+  }
+})
+
+const pendingSubmissionHeading = computed(() => {
+  if (!pendingSubmission.value) return ''
+  if (pendingBlank.value) {
+    if (pendingSubmission.value === 'unit') return '本篇还有未作答的题目'
+    return pendingBlankStats.value.allBlank ? '本次练习还没有作答' : '还有未作答的题目'
+  }
+  if (pendingSubmission.value === 'unit') return '确认提交本篇'
+  return session.value?.mode === 'paper' ? '确认提交整卷' : '确认提交练习'
+})
+
+const pendingSubmissionMessage = computed(() => {
+  if (!pendingSubmission.value) return ''
+  if (pendingBlank.value) {
+    const stats = pendingBlankStats.value
+    if (pendingSubmission.value === 'unit') {
+      return `“${activeUnit.value?.title || ''}”已答 ${stats.answered} 题，还有 ${stats.unanswered} 题未作答。留空提交后本篇不能继续修改：未作答按 0 分计，不加入错题本。`
+    }
+    if (stats.allBlank) {
+      return `共 ${stats.total} 题未作答，涉及 ${stats.affectedUnits} 篇。结束后不会产生对错与能力分析，练习将按未作答结束。`
+    }
+    return `已答 ${stats.answered} / 共 ${stats.total} 题，未作答分布在 ${stats.affectedUnits} 篇。留空提交后不能继续修改：未作答按 0 分计，不加入错题本。`
+  }
+  return pendingSubmission.value === 'unit'
+    ? `提交“${activeUnit.value?.title}”后会显示本篇对错，且本篇不能继续修改。`
+    : '提交后才会显示对错，且不能继续修改。'
+})
+
+const pendingSubmissionConfirmLabel = computed(() => {
+  if (!pendingBlank.value) return '确认提交'
+  if (pendingSubmission.value === 'session' && pendingBlankStats.value.allBlank) return '结束本次练习'
+  return '留空提交'
+})
+
 function firstUnanswered(unitIndexes: number[]) {
   for (const unitIndex of unitIndexes) {
     const unit = session.value.units[unitIndex]
@@ -791,20 +884,20 @@ async function handleIncompleteSubmission(errorValue: any) {
 }
 
 async function submitCurrentUnit() {
+  await waitForPendingSaves()
   const missing = firstUnanswered([activeUnitIndex.value])
-  if (missing) {
-    await focusUnanswered(missing.unitIndex, missing.question)
-    return
-  }
+  pendingBlank.value = Boolean(missing)
   pendingSubmission.value = 'unit'
 }
 
-async function confirmCurrentUnitSubmission() {
+async function confirmCurrentUnitSubmission(allowUnanswered: boolean) {
   const submittedUnitId = activeUnit.value.id
   try {
     session.value = await post(
       `/practice/sessions/${session.value.id}/units/${submittedUnitId}/submit`,
+      { allow_unanswered: allowUnanswered, submission_request_id: nextSubmissionRequestId() },
     )
+    submissionRequestId.value = ''
     unansweredNotice.value = ''
     showUnitResult(submittedUnitId)
   } catch (e) {
@@ -814,17 +907,19 @@ async function confirmCurrentUnitSubmission() {
 }
 
 async function submitSession() {
+  await waitForPendingSaves()
   const missing = firstUnanswered(session.value.units.map((_: any, index: number) => index))
-  if (missing) {
-    await focusUnanswered(missing.unitIndex, missing.question)
-    return
-  }
+  pendingBlank.value = Boolean(missing)
   pendingSubmission.value = 'session'
 }
 
-async function confirmSessionSubmission() {
+async function confirmSessionSubmission(allowUnanswered: boolean) {
   try {
-    session.value = await post(`/practice/sessions/${session.value.id}/submit`)
+    session.value = await post(`/practice/sessions/${session.value.id}/submit`, {
+      allow_unanswered: allowUnanswered,
+      submission_request_id: nextSubmissionRequestId(),
+    })
+    submissionRequestId.value = ''
     finishTimer()
     showSessionResult()
   }
@@ -905,9 +1000,25 @@ function questionCardState(unit: any, question: any, unitIndex: number) {
 
 async function confirmPendingSubmission() {
   const action = pendingSubmission.value
+  const allowUnanswered = pendingBlank.value
   pendingSubmission.value = null
-  if (action === 'unit') await confirmCurrentUnitSubmission()
-  if (action === 'session') await confirmSessionSubmission()
+  pendingBlank.value = false
+  if (action === 'unit') await confirmCurrentUnitSubmission(allowUnanswered)
+  if (action === 'session') await confirmSessionSubmission(allowUnanswered)
+}
+
+function cancelPendingSubmission() {
+  const action = pendingSubmission.value
+  const wasBlank = pendingBlank.value
+  pendingSubmission.value = null
+  pendingBlank.value = false
+  if (!wasBlank || !session.value) return
+  // 返回继续答题：定位回第一个未作答的题。
+  const indexes = action === 'unit'
+    ? [activeUnitIndex.value]
+    : session.value.units.map((_: any, index: number) => index)
+  const missing = firstUnanswered(indexes)
+  if (missing) void focusUnanswered(missing.unitIndex, missing.question)
 }
 
 function showUnitResult(unitId = activeUnit.value?.id) {
@@ -1222,7 +1333,7 @@ async function copySelectedTerm() {
                   @click="selectOrdering(question, option.stable_key)"
                 >{{ option.label }}</button>
               </div>
-              <span v-if="activeUnitSubmitted" class="order-result" :class="{correct: question.is_correct}">{{ question.is_correct ? '正确' : '回答错误' }}</span>
+              <span v-if="activeUnitSubmitted" class="order-result" :class="{correct: question.is_correct}">{{ question.is_correct ? '正确' : (String(question.user_answer || '').trim() ? '回答错误' : '未作答') }}</span>
             </div>
           </div>
         </div>
@@ -1237,8 +1348,8 @@ async function copySelectedTerm() {
             <div class="match-buttons">
               <button v-for="option in question.options" :key="option.stable_key" class="match-chip" :class="resultClass(question, option)" :disabled="activeUnitSubmitted" @click="selectMatching(question, option.stable_key)">{{ option.label }}</button>
             </div>
-            <div v-if="activeUnitSubmitted" class="match-result" :style="{color:question.is_correct?'var(--success)':'var(--danger)'}">
-              {{ question.is_correct ? '回答正确' : '回答错误' }}
+            <div v-if="activeUnitSubmitted" class="match-result" :style="questionResultStyle(question)">
+              {{ questionResultText(question) }}
             </div>
           </div>
         </div>
@@ -1289,8 +1400,8 @@ async function copySelectedTerm() {
                 @click="selectWordBank(question, option.stable_key)"
               >{{ option.label }}</button>
             </div>
-            <div v-if="activeUnitSubmitted" class="match-result" :style="{color:question.is_correct?'var(--success)':'var(--danger)'}">
-              {{ question.is_correct ? '回答正确' : '回答错误' }}
+            <div v-if="activeUnitSubmitted" class="match-result" :style="questionResultStyle(question)">
+              {{ questionResultText(question) }}
             </div>
           </div>
         </div>
@@ -1310,8 +1421,8 @@ async function copySelectedTerm() {
             <div class="match-buttons">
               <button v-for="option in question.options" :key="option.stable_key" class="match-chip" :class="resultClass(question, option)" :disabled="activeUnitSubmitted" @click="selectMatching(question, option.stable_key)">{{ option.label }}</button>
             </div>
-            <div v-if="activeUnitSubmitted" class="match-result" :style="{color:question.is_correct?'var(--success)':'var(--danger)'}">
-              {{ question.is_correct ? '回答正确' : '回答错误' }}
+            <div v-if="activeUnitSubmitted" class="match-result" :style="questionResultStyle(question)">
+              {{ questionResultText(question) }}
             </div>
           </div>
         </div>
@@ -1330,8 +1441,8 @@ async function copySelectedTerm() {
             <span class="option-letter">{{ option.label }}</span>
             <span class="option-content" data-vocab-text><ContentBlocks v-if="option.content_blocks?.length" :blocks="option.content_blocks" :package-id="activeContentPackage.packageId" :content-version="activeContentPackage.contentVersion" /><template v-else>{{ option.content }}</template></span>
           </button>
-          <div v-if="activeUnitSubmitted" style="margin-top:10px;font-size:13px" :style="{color:question.is_correct?'var(--success)':'var(--danger)'}">
-            <CheckCircle2 :size="15" style="vertical-align:-2px" /> {{ question.is_correct ? '回答正确' : '回答错误' }}
+          <div v-if="activeUnitSubmitted" style="margin-top:10px;font-size:13px" :style="questionResultStyle(question)">
+            <CheckCircle2 :size="15" style="vertical-align:-2px" /> {{ questionResultText(question) }}
           </div>
         </div>
       </section>
@@ -1402,18 +1513,18 @@ async function copySelectedTerm() {
         </footer>
       </div>
     </section>
-    <section v-if="pendingSubmission" class="result-overlay" role="dialog" aria-modal="true" aria-labelledby="submission-confirm-title" @click.self="pendingSubmission=null">
+    <section v-if="pendingSubmission" class="result-overlay" role="dialog" aria-modal="true" aria-labelledby="submission-confirm-title" @click.self="cancelPendingSubmission">
       <div class="result-dialog submission-confirm-dialog card">
         <div class="result-dialog-heading">
           <span class="result-icon"><AlertCircle :size="27" /></span>
           <div>
-            <h2 id="submission-confirm-title">{{ pendingSubmission === 'unit' ? '确认提交本篇' : (session?.mode === 'paper' ? '确认提交整卷' : '确认提交练习') }}</h2>
-            <p>{{ pendingSubmission === 'unit' ? `提交“${activeUnit?.title}”后会显示本篇对错，且本篇不能继续修改。` : '提交后才会显示对错，且不能继续修改。' }}</p>
+            <h2 id="submission-confirm-title">{{ pendingSubmissionHeading }}</h2>
+            <p>{{ pendingSubmissionMessage }}</p>
           </div>
         </div>
         <div class="result-dialog-actions">
-          <button class="button secondary" type="button" @click="pendingSubmission=null">取消</button>
-          <button class="button" type="button" @click="confirmPendingSubmission">确认提交</button>
+          <button class="button secondary" type="button" @click="cancelPendingSubmission">{{ pendingBlank ? '返回继续答题' : '取消' }}</button>
+          <button class="button" type="button" @click="confirmPendingSubmission">{{ pendingSubmissionConfirmLabel }}</button>
         </div>
       </div>
     </section>
